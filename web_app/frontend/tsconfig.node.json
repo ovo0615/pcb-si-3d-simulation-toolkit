@@ -1,0 +1,13 @@
+{
+  "//": "composite 被參照專案不能 noEmit，故用 outDir 把 tsc -b 的產物導到暫存，避免 vite.config.js 生在原始碼旁蓋掉 vite.config.ts。",
+  "compilerOptions": {
+    "composite": true,
+    "skipLibCheck": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "outDir": "./node_modules/.tmp/tsconfig-node"
+  },
+  "include": ["vite.config.ts"]
+}

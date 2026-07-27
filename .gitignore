@@ -1,0 +1,40 @@
+# 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Node / Vite
+node_modules/
+dist/
+!web_app/frontend/dist/
+!web_app/frontend/dist/**
+.vite/
+*.tsbuildinfo
+
+# Claude Code 本機設定（不共用）
+.claude/settings.local.json
+
+# 測試用 EDB 專案（大型二進位、可重新產生，不進版控）
+*.aedb/
+*.aedt
+*.aedt.lock
+*.aedtresults/
+
+# 除錯用臨時腳本與 AEDT 匯出的參考 schema（不進版控）
+test_*.py
+!web_app/backend/tests/test_segment_geometry.py
+!web_app/backend/tests/
+!web_app/backend/tests/test_*.py
+aedt_setup*.json
+
+# 執行產物與本機工具目錄（可重新產生，不進版控）
+*.log
+.codex/
+Example_SYZ_Cutout_segments/
+
+# OS
+Thumbs.db
+.DS_Store
