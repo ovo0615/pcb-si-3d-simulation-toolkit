@@ -33,7 +33,11 @@ aedt_setup*.json
 # 執行產物與本機工具目錄（可重新產生，不進版控）
 *.log
 .codex/
+.codex_tmp/
 Example_SYZ_Cutout_segments/
+
+# 模擬輸出（含客戶板資料，絕不進版控）
+Result/
 
 # OS
 Thumbs.db
