@@ -19,6 +19,20 @@ PCB signal-integrity analysis often involves repetitive layout inspection, net s
 - S-parameter analysis interface
 - Engineering-oriented dark UI
 
+## Workflow preview
+
+### Segmenting a high-speed channel
+
+![N-segment channel visualization](graph/N段分割示意_20260730.png)
+
+### Automated cascade connection
+
+![Automated cascade schematic](graph/自動串接電路_20260730.png)
+
+### SIwave fidelity verification
+
+![SIwave fidelity verification controls](graph/可信度驗證_20260730.png)
+
 ## Technology
 
 - React / TypeScript / Vite
