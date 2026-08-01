@@ -33,6 +33,14 @@ PCB signal-integrity analysis often involves repetitive layout inspection, net s
 
 ![SIwave fidelity verification controls](graph/可信度驗證_20260730.png)
 
+### Eye Diagram result
+
+![Eye Diagram result](graph/eye-result-public.png)
+
+### Fidelity report
+
+![SIwave fidelity report](graph/fidelity-report-public.png)
+
 ## Technology
 
 - React / TypeScript / Vite

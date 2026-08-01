@@ -7,6 +7,8 @@ This document tracks the public visual assets used by the project README.
 - `graph/N段分割示意_20260730.png` — channel segmentation overview
 - `graph/自動串接電路_20260730.png` — automated cascade schematic
 - `graph/可信度驗證_20260730.png` — SIwave fidelity verification controls
+- `graph/eye-result-public.png` — local filesystem path redacted from Eye Diagram result
+- `graph/fidelity-report-public.png` — local filesystem paths redacted from fidelity report
 
 These images do not show local filesystem paths or customer identifiers. Review Ansys/CADMEN branding separately before using any image that contains a vendor or company logo.
 

@@ -33,6 +33,14 @@ PCB 訊號完整性分析通常包含大量重複工作，例如 Layout 檢查�
 
 ![SIwave 可信度驗證設定](graph/可信度驗證_20260730.png)
 
+### Eye Diagram 結果
+
+![Eye Diagram 結果](graph/eye-result-public.png)
+
+### 可信度驗證報告
+
+![SIwave 可信度驗證報告](graph/fidelity-report-public.png)
+
 ## 使用技術
 
 - React / TypeScript / Vite
