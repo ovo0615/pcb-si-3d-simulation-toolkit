@@ -1,7 +1,7 @@
 # Public showcase repository guidelines
 
 This repository contains the public demonstration edition of the PCB SI 3D Simulation Toolkit.
-There is a separate, private repository (`private-source` branch of the private remote) that
+The complete implementation is maintained separately in a restricted-access repository that
 holds the full front-end + back-end + test suite + launcher scripts.
 
 ## Scope
