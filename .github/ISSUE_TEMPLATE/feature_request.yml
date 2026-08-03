@@ -1,0 +1,27 @@
+name: Feature Request｜功能建議
+description: Suggest an idea for the toolkit or the public showcase.｜對工具或公開展示版提出功能建議。
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?｜這能解決什麼問題？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution｜建議做法
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area｜相關範圍
+      options:
+        - Frontend UI／前端介面
+        - Workflow (cutout/segment/cascade/eye)／工作流程
+        - Documentation／文件
+        - Other／其他
+    validations:
+      required: false
