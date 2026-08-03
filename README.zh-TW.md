@@ -10,7 +10,7 @@
 CAE, Senior Technical Engineer｜CAE 技術部資深技術工程師
 Taiwan Auto-Design Co. (TADC)｜虎門科技股份有限公司
 
-聯絡信箱：jeff.hong@cadmen.com　官方網站：https://www.cadmen.com/
+聯絡信箱：[jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com)　官方網站：[https://www.cadmen.com/](https://www.cadmen.com/)
 
 核心定位：High-Frequency Electromagnetic Simulation & Engineering Automation｜高頻電磁模擬與工程自動化
 
