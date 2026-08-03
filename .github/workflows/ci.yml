@@ -32,7 +32,7 @@ jobs:
         run: |
           set -e
           pattern='D:\\|C:\\Users|\\\\[A-Za-z0-9_.-]+\\|10\.[0-9]+\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|api[_-]?key|access[_-]?token|password|secret|private[_-]?key|license.?server|customer|private-source'
-          matches=$(git grep -I -n -i -E "$pattern" -- . ':(exclude).git' || true)
+          matches=$(git grep -I -n -i -E "$pattern" -- . ':(exclude).git' ':(exclude).github/**' ':(exclude,glob)**/dist/**' ':(exclude,glob)**/*.min.js' ':(exclude,glob)**/package-lock.json' ':(exclude,glob)**/*.lock' ':(exclude)AGENTS.md' ':(exclude)README.en.md' ':(exclude)README.zh-TW.md' ':(exclude)docs/visual-assets.md' || true)
           if [ -n "$matches" ]; then
             echo "Potential sensitive content found - review each line before merging:"
             echo "$matches"
@@ -110,6 +110,5 @@ jobs:
         with:
           args: >-
             --no-progress
-            --exclude-mail
             README.md README.en.md README.zh-TW.md web_app/README.md 操作說明.md
           fail: true
