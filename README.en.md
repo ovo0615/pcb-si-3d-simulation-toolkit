@@ -1,67 +1,91 @@
 # PCB SI 3D Simulation Toolkit
 
-## High-Frequency PCB Simulation Workflow Automation
+[繁體中文](README.zh-TW.md) ｜ English
 
-PCB SI 3D Simulation Toolkit is a visual engineering showcase for PCB layout inspection, 3D visualization, signal-net selection, port preparation, and S-parameter analysis workflows.
+> This repository is the public showcase of a personal technical portfolio. It is not an official account of Taiwan Auto-Design Co. (TADC) and is not officially affiliated with Ansys, Inc. Ansys is a trademark of Ansys, Inc.
 
-> This public repository is a demonstration edition. Private solver integration and company-specific implementation details are intentionally excluded.
+## 1. Positioning
 
-## Why this project exists
+**Jeff Hong**
+CAE, Senior Technical Engineer
+Taiwan Auto-Design Co. (TADC)
 
-PCB signal-integrity analysis often involves repetitive layout inspection, net selection, geometry preparation, port definition, simulation setup, and result interpretation. This project explores how those steps can be organized into a more visible and repeatable engineering workflow.
+Company: https://www.cadmen.com/　Contact: jeff.hong@cadmen.com
 
-## Highlights
+Focus: High-Frequency Electromagnetic Simulation & Engineering Automation
 
-- 2D PCB layout and layer visualization
-- 3D board preview
-- Signal and reference-net selection
-- Port marker visualization
-- S-parameter analysis interface
-- Engineering-oriented dark UI
+Core technologies: Ansys HFSS 3D Layout, PyEDB, PyAEDT, PCB Signal Integrity, S-parameter Analysis, Eye Diagram Analysis, Engineering GUI Automation.
 
-## Workflow preview
+> Reduce repetitive PCB signal-integrity preparation work and make high-frequency simulation workflows more visible, repeatable, and easier to operate.
 
-### Segmenting a high-speed channel
+## 2. Hero View
 
-![N-segment channel visualization](graph/N段分割示意_20260730.png)
+![PCB SI 3D Simulation Toolkit main interface](./graph/指定裁切區_20260730-public.png)
 
-### Automated cascade connection
+The toolkit uses Ansys HFSS 3D Layout (driven through PyEDB against the EDB) as its solve environment, unifying PCB/package channel import, net selection, cutout, port creation, segmented solving, and S-parameter cascading in a single interface.
 
-![Automated cascade schematic](graph/自動串接電路_20260730.png)
+## 3. Engineering Problem
 
-### SIwave fidelity verification
+High-frequency PCB signal-integrity analysis usually requires engineers to repeat the same manual preparation: selecting the signal channel from a full board, building a cutout region around the selected nets, placing ports by hand at component ends, splitting long channels into segments when a single mesh would be too large to solve in reasonable time, and manually cascading the resulting S-parameters back into a full-channel response. These steps are slow and error-prone, especially for long channels. This toolkit automates that preparation and post-processing pipeline, and adds a confidence check comparing the segmented-and-cascaded result against a full-board baseline so users can judge whether the segmentation strategy is trustworthy.
 
-![SIwave fidelity verification controls](graph/可信度驗證_20260730.png)
+## 4. Feature Showcase
 
-### Eye Diagram result
+| Feature | Description | Status |
+|---|---|---|
+| Cutout & port creation | Auto region selection (ConvexHull / Bounding) by signal net, with Coax/Circuit port creation at component ends | ✅ Done |
+| Layout cleanup | Removes copper, traces, and vias outside the channel's EM-relevant region, with preview before commit | ✅ Done |
+| N-segment splitting | Searches cut planes along the channel's main axis and outputs N independent segment EDBs with stitching info | ✅ Done |
+| Scheduled solving | Solves each segment in a non-graphical SIwave session and exports Touchstone | ✅ Done |
+| Automatic S-parameter cascading | Cascades segments using the stitching info to reconstruct the full-channel S-parameters | ✅ Done |
+| Confidence validation | Compares cascaded result against a full-board baseline (insertion-loss and delay deltas) | ✅ Done |
+| QuickEye diagram | Solves eye height/width directly from the cascaded Touchstone | ✅ Done |
+| External Touchstone cascading | Loads existing `.sNp` files with auto-suggested or manual port stitching | ✅ Done |
 
-![Eye Diagram result](graph/eye-result-public.png)
+Cutout before/after comparison:
 
-### Fidelity report
+![Layout before/after cutout comparison](./graph/裁切後比對_20260730.png)
 
-![SIwave fidelity report](graph/fidelity-report-public.png)
+## 5. Workflow
 
-## Technology
+Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
-- React / TypeScript / Vite
-- FastAPI showcase integration
-- Ansys HFSS 3D Layout concepts
-- PyAEDT / EDB workflow concepts
+![N-segment split overview](./graph/N段分割示意_20260730.png)
 
-## Public demonstration scope
+![Scheduled solving progress across segments](./graph/SIwave排程模擬過程_20260730-public.png)
 
-The public edition focuses on the front-end experience, workflow visualization, and documentation. Company-specific back-end implementations, private solver orchestration, customer data, internal file paths, and licensed Ansys execution environments are not included.
+![Automatic S-parameter cascade circuit](./graph/自動串接電路_20260730.png)
 
-## Getting started
+![Segment confidence report](./graph/可信度驗證結果_20260730-public.png)
 
-See [操作說明.md](操作說明.md) for the current demonstration workflow and supported capabilities.
+![QuickEye diagram with eye height/width](./graph/眼圖結果_20260730-public.png)
 
-## Collaboration and services
+## 6. Technical Architecture
 
-For custom PCB signal-integrity or HFSS/SIwave automation projects, contact Jeff Hong through [Taiwan Auto-Design Co. (TADC)](https://www.cadmen.com/) at [jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com).
+- Frontend: React, TypeScript, Vite — 2D PCB layout viewer with zoom/pan, layer toggles, and port markers
+- Backend: FastAPI + WebSocket for live system logs
+- Geometry/data layer: PyEDB (EDB read/write, cutout, ports, cleanup, segmentation)
+- Solve layer: PyAEDT driving Ansys HFSS 3D Layout / SIwave for meshing and EM solving
+- Post-processing: scikit-rf for Touchstone I/O, cascading, and S-parameter math
 
-## Ownership and trademarks
+## 7. Windows Usage
 
-Source code and visual assets are provided for demonstration purposes only. Commercial use, redistribution, and derivative works require permission.
+This public repository contains only the frontend source and the prebuilt `web_app/frontend/dist`, so you can inspect the interface and the workflow screenshots directly. The **full runnable version** (FastAPI backend, PyEDB/PyAEDT integration, and a one-click `start.bat` launcher) is maintained in a private repository, made available through TADC technical engagements. The public repo exists to demonstrate the workflow and results, not to provide a standalone solve environment.
 
-Ansys is a trademark of Ansys, Inc. This project is an independent technical portfolio and is not officially affiliated with Ansys, Inc.
+## 8. Ansys License & Environment Requirements
+
+Running the full version requires: 64-bit Windows 10/11, Ansys Electronics Desktop (currently pinned to 2026.1), a valid AEDT/HFSS 3D Layout license, and Python 3.10–3.12 (64-bit). Scheduled solving cannot start without a valid license.
+
+## 9. Public Showcase Scope
+
+- Only the frontend UI and generated workflow/result screenshots are included; backend source and the solve environment are not.
+- Screenshots use demo/anonymized data; local paths (`D:\...`) and absolute solver-output paths have been removed.
+- Net names (e.g. `ST_CTL` / `ST_ERROR`) and component references are demonstration naming, not identifying information from a specific customer project.
+- The scope of the full source and feature set follows the private repository's collaboration terms.
+
+## 10. Collaboration
+
+Formal technical collaboration and services are conducted through Taiwan Auto-Design Co. (TADC) using company-provided Ansys resources and licenses. For the full toolkit, technical collaboration, or a customized deployment, contact jeff.hong@cadmen.com or visit https://www.cadmen.com/.
+
+## 11. Copyright & Trademark Notice
+
+This repository is Jeff Hong's personal technical portfolio and showcase content. It is not an official account of Taiwan Auto-Design Co. (TADC), nor an official Ansys, Inc. collaboration showcase. Ansys, HFSS, and SIwave are trademarks of Ansys, Inc. Unless otherwise noted, content here is for technical demonstration only and does not constitute a direct commercial license.

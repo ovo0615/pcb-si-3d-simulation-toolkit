@@ -1,0 +1,29 @@
+name: Security / Data Exposure Report｜安全性或資料外洩回報
+description: Flag a potential security issue or exposed private data (path, credential, customer info, license info).｜回報可能的安全性問題或外洩的私有資訊(路徑、憑證、客戶資料、授權資訊)。
+labels: ["security-review", "private-boundary"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **請勿在此公開 Issue 中貼上實際的機密內容、密鑰、路徑或客戶資料。**
+        **Do not paste the actual secret, path, or customer data into this public issue.**
+        若已確認為機密外洩，請改寄信至 jeff.hong@cadmen.com，僅在此描述問題類型與所在檔案。
+        If this is a confirmed exposure, email jeff.hong@cadmen.com instead and only describe the type and location here.
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category｜類型
+      options:
+        - Local path exposure (D:\ / C:\Users\...)
+        - Credential / API key / token
+        - Customer or project-identifying data
+        - License server information
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: location
+    attributes:
+      label: File / commit / image where this appears (no secret content)｜出現位置(檔案／commit／圖片，不含機密內容本身)
+    validations:
+      required: true

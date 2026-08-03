@@ -1,67 +1,91 @@
 # PCB SI 3D Simulation Toolkit
 
-## 高頻 PCB 模擬流程自動化
+[English](README.en.md) ｜ 繁體中文
 
-PCB SI 3D Simulation Toolkit 是一套高頻 PCB 工程展示工具，聚焦於 PCB Layout 檢視、2D/3D 視覺化、訊號網路選取、Port 準備，以及 S 參數分析流程。
+> 此 Repository 為個人技術作品集之公開展示版本，非 Ansys 或虎門科技（TADC）官方帳號。Ansys 為 Ansys, Inc. 之商標。
 
-> 本公開 repository 為展示版本，私人求解器整合與公司專屬實作刻意不包含在內。
+## 1. 專案定位
 
-## 為什麼建立這個專案
+**Jeff Hong 洪敬傑**
+CAE, Senior Technical Engineer｜CAE 技術部資深技術工程師
+Taiwan Auto-Design Co. (TADC)｜虎門科技股份有限公司
 
-PCB 訊號完整性分析通常包含大量重複工作，例如 Layout 檢查、網路選取、幾何準備、Port 定義、模擬設定與結果判讀。本專案嘗試將這些步驟整理成更直觀、可重複的工程流程。
+官方網站：https://www.cadmen.com/　聯絡信箱：jeff.hong@cadmen.com
 
-## 主要功能
+核心定位：High-Frequency Electromagnetic Simulation & Engineering Automation｜高頻電磁模擬與工程自動化
 
-- 2D PCB Layout 與層管理視覺化
-- 3D 電路板預覽
-- 訊號網路與參考網路選取
-- Port 標記視覺化
-- S 參數分析介面
-- 工程導向的深色操作介面
+主要技術：Ansys HFSS 3D Layout、PyEDB、PyAEDT、PCB Signal Integrity、S-parameter Analysis、Eye Diagram Analysis、Engineering GUI Automation。
 
-## 流程預覽
+> 減少 PCB 訊號完整性分析中的重複準備工作，讓高頻模擬流程更直觀、更可重複，也更容易操作。
 
-### 高速通道 N 段分割
+## 2. 主視覺圖
 
-![N 段通道分割示意](graph/N段分割示意_20260730.png)
+![PCB SI 3D 模擬分析工具主介面](./graph/指定裁切區_20260730-public.png)
 
-### 自動串接電路
+工具以 Ansys HFSS 3D Layout（透過 PyEDB 操作 EDB）為求解環境，將 PCB／封裝通道的匯入、訊號選取、裁切、Port 建立、分段模擬與 S 參數串接整合在單一操作介面中。
 
-![自動串接電路示意](graph/自動串接電路_20260730.png)
+## 3. 解決的工程問題
 
-### SIwave 可信度驗證
+高頻 PCB 訊號完整性分析中，工程師經常需要手動重複執行：從完整板中框選訊號通道、依 Net 建立裁切範圍、於元件端手動放置 Port、視需要拆解成多段分別求解、再手動串接還原完整通道 S 參數。這些步驟耗時且容易出錯，尤其在通道過長導致單次網格規模過大、無法在合理時間內求解時更為明顯。本工具將這一整套準備與後處理流程自動化，並提供分段結果與完整板基準之間的可信度比對，讓使用者能確認分段求解策略是否可信賴。
 
-![SIwave 可信度驗證設定](graph/可信度驗證_20260730.png)
+## 4. 功能展示
 
-### Eye Diagram 結果
+| 功能 | 說明 | 狀態 |
+|---|---|---|
+| 通道裁切與 Port 建立 | 依訊號 Net 自動框選（ConvexHull／Bounding）並於元件端建立 Coax／Circuit Port | ✅ 已完成 |
+| Layout 清理 | 移除通道電磁影響範圍外的銅箔、走線與 Via，求解前先預覽再確認 | ✅ 已完成 |
+| N 段分割 | 沿通道主軸搜尋切面，輸出 N 個獨立分段 EDB 及對接資訊 | ✅ 已完成 |
+| 排程模擬 | 逐段以非圖形化 SIwave 工作階段求解並匯出 Touchstone | ✅ 已完成 |
+| S 參數自動串接 | 依分段對接資訊自動串接，還原完整通道 S 參數 | ✅ 已完成 |
+| 可信度驗證 | 分段串接結果與完整板基準比對插入損耗與延遲差 | ✅ 已完成 |
+| QuickEye 眼圖 | 以串接後 Touchstone 直接背景求解眼高、眼寬 | ✅ 已完成 |
+| 外部 Touchstone 串接 | 載入既有 `.sNp` 檔案，自動建議或手動指定接線 | ✅ 已完成 |
 
-![Eye Diagram 結果](graph/eye-result-public.png)
+裁切前後對比：
 
-### 可信度驗證報告
+![裁切前後的 Layout 對比](./graph/裁切後比對_20260730.png)
 
-![SIwave 可信度驗證報告](graph/fidelity-report-public.png)
+## 5. 工作流程
 
-## 使用技術
+Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
-- React / TypeScript / Vite
-- FastAPI 展示整合
-- Ansys HFSS 3D Layout 相關流程
-- PyAEDT / EDB 相關流程
+![N 段切割位置示意](./graph/N段分割示意_20260730.png)
 
-## 公開展示版範圍
+![排程模擬過程與各分段狀態](./graph/SIwave排程模擬過程_20260730-public.png)
 
-公開版本以前端體驗、流程視覺化與操作文件為主，不包含公司專屬後端實作、私人求解器排程、客戶資料、內部檔案路徑，以及需要授權才能執行的 Ansys 模擬環境。
+![分段 S 參數自動串接電路示意](./graph/自動串接電路_20260730.png)
 
-## 開始使用
+![分段可信度報告](./graph/可信度驗證結果_20260730-public.png)
 
-目前的展示流程與支援功能，請參考[操作說明](操作說明.md)。
+![QuickEye 眼圖與眼高、眼寬量測](./graph/眼圖結果_20260730-public.png)
 
-## 技術合作與服務
+## 6. 技術架構
 
-如需客製化 PCB 訊號完整性、HFSS 或 SIwave 自動化工具，請透過[虎門科技](https://www.cadmen.com/)聯絡 Jeff Hong：[jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com)。
+- 前端：React、TypeScript、Vite，提供 2D PCB Layout 檢視（縮放、平移、圖層與 Port 標記切換）
+- 後端：FastAPI＋WebSocket（即時系統日誌）
+- 幾何與資料層：PyEDB（EDB 讀寫、裁切、Port、清理、分段）
+- 求解層：PyAEDT 驅動 Ansys HFSS 3D Layout／SIwave 進行網格與電磁求解
+- 後處理：scikit-rf 進行 Touchstone 讀取、電路串接與 S 參數計算
 
-## 著作權與商標聲明
+## 7. Windows 使用方式
 
-本專案原始碼與視覺素材僅供展示用途。商業使用、再散布與衍生作品均須事先取得許可。
+本 Repository（公開展示版）僅包含前端原始碼與已建置的 `web_app/frontend/dist`，可直接檢視介面與功能展示畫面。**完整可執行版本**（含 FastAPI 後端、PyEDB／PyAEDT 整合與 `start.bat` 一鍵啟動）目前收錄於私人 Repository，透過 TADC 技術合作提供；公開版之目的在於呈現工作流程與成果，而非提供可獨立運作的求解環境。
 
-Ansys 為 Ansys, Inc. 的商標。本專案為獨立技術作品集，與 Ansys, Inc. 沒有官方隸屬關係。
+## 8. Ansys License 與環境需求
+
+完整版本執行時需要：64 位元 Windows 10／11、Ansys Electronics Desktop（目前固定使用 2026.1）、可用的 AEDT／HFSS 3D Layout License、Python 3.10～3.12（64 位元）。沒有可用 License 時無法執行排程求解。
+
+## 9. 公開展示版限制
+
+- 僅提供前端 UI 與已產生的示意圖／結果截圖，不包含後端原始碼與求解環境。
+- 圖片使用 Demo／匿名化資料，已移除本機路徑（`D:\...`）與求解輸出檔案的絕對路徑。
+- 淨名（如 `ST_CTL`／`ST_ERROR`）與元件編號為示範用命名，非特定客戶專案資訊。
+- 完整功能與原始碼開放範圍以私人 Repository 之合作條款為準。
+
+## 10. 技術合作方式
+
+正式技術合作與服務透過 Taiwan Auto-Design Co.（TADC）進行，並使用公司提供的 Ansys 資源與 License。如需完整功能、技術合作或客製化導入，請透過 jeff.hong@cadmen.com 或 https://www.cadmen.com/ 聯絡。
+
+## 11. 著作權與商標聲明
+
+本 Repository 為 Jeff Hong 個人技術作品集之展示內容，非 Taiwan Auto-Design Co.（TADC）官方帳號，亦非 Ansys, Inc. 官方合作展示。Ansys、HFSS、SIwave 為 Ansys, Inc. 之商標。除另有標示外，本頁面內容僅供技術展示，不代表可直接商用授權。

@@ -1,0 +1,22 @@
+name: Documentation Improvement｜文件改善
+description: Report unclear, outdated, or missing documentation (README, 操作說明.md).｜回報不清楚、過時或缺漏的文件內容。
+labels: ["documentation"]
+body:
+  - type: input
+    id: location
+    attributes:
+      label: Which document / section?｜哪份文件或章節？
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: What is unclear or incorrect?｜哪裡不清楚或不正確？
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested wording (optional)｜建議文字(選填)
+    validations:
+      required: false

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Confirmed sensitive data exposure (private)｜已確認的機密外洩(私下回報)
+    url: mailto:jeff.hong@cadmen.com
+    about: For confirmed secrets, credentials, or customer data, email directly instead of opening a public issue.｜若已確認外洩機密、憑證或客戶資料，請直接寄信,不要開公開 Issue。

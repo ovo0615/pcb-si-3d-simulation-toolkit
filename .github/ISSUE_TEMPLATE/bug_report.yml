@@ -1,0 +1,29 @@
+name: Bug Report｜錯誤回報
+description: Report unexpected behavior in the public frontend showcase.｜回報公開前端展示版的異常行為。
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?｜發生了什麼事？
+      description: Describe the bug and what you expected instead.｜描述問題與預期行為。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce｜重現步驟
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser / OS｜瀏覽器與作業系統
+    validations:
+      required: false
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots (please remove local paths, customer data, or license info)｜截圖(請先移除本機路徑、客戶資料或授權資訊)
+    validations:
+      required: false
