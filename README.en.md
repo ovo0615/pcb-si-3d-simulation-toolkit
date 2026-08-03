@@ -10,7 +10,7 @@
 CAE, Senior Technical Engineer
 Taiwan Auto-Design Co. (TADC)
 
-Company: https://www.cadmen.com/ 　Contact: jeff.hong@cadmen.com
+Contact: jeff.hong@cadmen.com　Company: https://www.cadmen.com/
 
 Focus: High-Frequency Electromagnetic Simulation & Engineering Automation
 
