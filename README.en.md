@@ -20,13 +20,13 @@ Core technologies: Ansys HFSS 3D Layout, PyEDB, PyAEDT, PCB Signal Integrity, S-
 
 ## 2. Hero View
 
-![PCB SI 3D Simulation Toolkit main interface](./graph/指定裁切區_20260730-public.png)
+![Multi-layer PCB segmentation, safety overlays, and mixed solver regions](./graph/多層板案例_20260803.png)
 
-The toolkit uses Ansys HFSS 3D Layout (driven through PyEDB against the EDB) as its solve environment, unifying PCB/package channel import, net selection, cutout, port creation, segmented solving, and S-parameter cascading in a single interface.
+The toolkit uses Ansys HFSS 3D Layout and SIwave, with PyEDB operating on the EDB, to unify PCB/package channel import, net selection, cutout, port creation, risk-aware segmentation, per-segment solving, and S-parameter cascading in one interface.
 
 ## 3. Engineering Problem
 
-High-frequency PCB signal-integrity analysis usually requires engineers to repeat the same manual preparation: selecting the signal channel from a full board, building a cutout region around the selected nets, placing ports by hand at component ends, splitting long channels into segments when a single mesh would be too large to solve in reasonable time, and manually cascading the resulting S-parameters back into a full-channel response. These steps are slow and error-prone, especially for long channels. This toolkit automates that preparation and post-processing pipeline, and adds a confidence check comparing the segmented-and-cascaded result against a full-board baseline so users can judge whether the segmentation strategy is trustworthy.
+High-frequency PCB signal-integrity analysis usually requires engineers to repeat the same manual preparation: selecting the signal channel from a full board, building a cutout region around the selected nets, placing ports by hand at component ends, splitting long channels into segments when a single mesh would be too large to solve in reasonable time, and manually cascading the resulting S-parameters back into a full-channel response. These steps are slow and error-prone, especially for long channels. This toolkit automates that preparation and post-processing pipeline, then presents the cascaded result beside a full-board SIwave baseline so the segmentation strategy can be judged directly from the S-parameter differences.
 
 ## 4. Feature Showcase
 
@@ -35,27 +35,40 @@ High-frequency PCB signal-integrity analysis usually requires engineers to repea
 | Cutout & port creation | Auto region selection (ConvexHull / Bounding) by signal net, with Coax/Circuit port creation at component ends | ✅ Done |
 | Layout cleanup | Removes copper, traces, and vias outside the channel's EM-relevant region, with preview before commit | ✅ Done |
 | N-segment splitting | Searches cut planes along the channel's main axis and outputs N independent segment EDBs with stitching info | ✅ Done |
-| Scheduled solving | Solves each segment in a non-graphical SIwave session and exports Touchstone | ✅ Done |
+| Cut-safety visualization | Color-codes hard obstacles, risky traces, candidate cuts, and per-segment solver regions | ✅ Done |
+| Mixed HFSS / SIwave solving | Recommends a solver from each segment's 3D EM complexity while allowing manual override | ✅ Done |
+| Scheduled solving | Starts an isolated solver process for each segment and exports Touchstone | ✅ Done |
 | Automatic S-parameter cascading | Cascades segments using the stitching info to reconstruct the full-channel S-parameters | ✅ Done |
-| Confidence validation | Compares cascaded result against a full-board baseline (insertion-loss and delay deltas) | ✅ Done |
+| Full-board / segmented comparison | In all-SIwave mode, compares S-parameters, mean IL delta, and P95 IL delta | ✅ Done |
 | QuickEye diagram | Solves eye height/width directly from the cascaded Touchstone | ✅ Done |
 | External Touchstone cascading | Loads existing `.sNp` files with auto-suggested or manual port stitching | ✅ Done |
 
-Cutout before/after comparison:
+### Segmentation Color Language
 
-![Layout before/after cutout comparison](./graph/裁切後比對_20260730.png)
+The segmentation view overlays the engineering decision directly on the complete layout. Safety and solver-region overlays can be disabled independently whenever the underlying routing needs to remain unobstructed.
+
+| Color / line style | Meaning |
+|---|---|
+| Glowing orange trace | Angled routing or corner-risk corridor that a cut should avoid. |
+| Translucent red area / faint red dashed line | Hard keep-out obstacle or rejected cut candidate. |
+| Solid cyan line | Selected cut plane that passed the checks. |
+| Gray dashed line | Ideal equal-division location before obstacle checks. |
+| Green region / label | Segment assigned to SIwave. |
+| Purple region / label | Segment assigned to HFSS 3D Layout. |
 
 ## 5. Workflow
 
 Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
-![N-segment split overview](./graph/N段分割示意_20260730.png)
+![Ten-segment split with safety and solver overlays](./graph/10段分割示意_20260803.png)
 
-![Scheduled solving progress across segments](./graph/SIwave排程模擬過程_20260730-public.png)
+![Per-segment HFSS and SIwave recommendations on a complex board](./graph/複雜板混合求解_20260803.png)
+
+![Ten-segment SIwave scheduled-solve progress](./graph/10段SIwave排程模擬過程_20260803.png)
 
 ![Automatic S-parameter cascade circuit](./graph/自動串接電路_20260730.png)
 
-![Segment confidence report](./graph/可信度驗證結果_20260730-public.png)
+![Full-board and segmented-cascade S-parameter comparison](./graph/分段對照結果_20260803-public.png)
 
 ![QuickEye diagram with eye height/width](./graph/眼圖結果_20260730-public.png)
 
@@ -73,12 +86,12 @@ This public repository contains only the frontend source and the prebuilt `web_a
 
 ## 8. Ansys License & Environment Requirements
 
-Running the full version requires: 64-bit Windows 10/11, Ansys Electronics Desktop (currently pinned to 2026.1), a valid AEDT/HFSS 3D Layout license, and Python 3.10–3.12 (64-bit). Scheduled solving cannot start without a valid license.
+Running the full version requires 64-bit Windows 10/11, Ansys Electronics Desktop (currently pinned to 2026.1), valid AEDT/HFSS 3D Layout/SIwave licenses, and a tested 64-bit Python 3.10 or 3.12 runtime. Scheduled solving cannot start without a valid license.
 
 ## 9. Public Showcase Scope
 
 - Only the frontend UI and generated workflow/result screenshots are included; backend source and the solve environment are not.
-- Screenshots use demo/anonymized data; local paths (`D:\...`) and absolute solver-output paths have been removed.
+- Screenshots use demo/anonymized data; local and solver-output absolute paths have been removed.
 - Net names (e.g. `ST_CTL` / `ST_ERROR`) and component references are demonstration naming, not identifying information from a specific customer project.
 - The scope of the full source and feature set follows the private repository's collaboration terms.
 
