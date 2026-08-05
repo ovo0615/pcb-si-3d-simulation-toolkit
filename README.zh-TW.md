@@ -20,7 +20,7 @@ Taiwan Auto-Design Co. (TADC)｜虎門科技股份有限公司
 
 ## 2. 主視覺圖
 
-![多層 PCB 的切板、安全疊圖與混合求解區域](./graph/多層板案例_20260803.png)
+![N 段分割與逐段求解器指定：綠色為 SIwave、紫色為 HFSS，標籤附複雜度分數](./graph/N段分割後推薦求解器示意_20260805.png)
 
 工具以 Ansys HFSS 3D Layout 與 SIwave 為求解環境，透過 PyEDB 操作 EDB，將 PCB／封裝通道的匯入、訊號選取、裁切、Port 建立、風險感知分段、逐段求解與 S 參數串接整合在單一操作介面中。
 
