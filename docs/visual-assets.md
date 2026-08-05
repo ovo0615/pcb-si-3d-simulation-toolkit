@@ -12,13 +12,13 @@ This document tracks the public visual assets used by the project README.
 - `graph/眼圖結果_20260730-public.png` — local filesystem path redacted from the Eye Diagram result
 - `graph/可信度驗證結果_20260730-public.png` — local filesystem path redacted from the fidelity report
 - `graph/SIwave排程模擬過程_20260730-public.png` — local filesystem path redacted from the scheduled-solve progress screenshot
-- `graph/10段SIwave排程模擬過程_20260803.png` — anonymized ten-segment SIwave queue progress
+- `graph/混合排程模擬過程_20260805.png` — mixed-solver schedule progress on the three-segment demo (current UI)
 - `graph/10段分割正在裁切中_20260803.png` — blurred ten-segment cutout progress overlay
-- `graph/10段分割示意_20260803.png` — Demo-board ten-segment solver-region overview
+- `graph/N段分割示意_20260805.png` — three-segment split preview with safety overlay (current UI)
 - `graph/混合求解設定_20260803.png` — per-segment HFSS／SIwave selection controls
 - `graph/分段對照結果_20260803-public.png` — current objective S-parameter comparison with local paths removed
 - `graph/N段分割後推薦求解器示意_20260805.png` — preferred README hero; N-way split with safety overlay and per-segment solver regions (green = SIwave, purple = HFSS)
-- `graph/複雜板混合求解_20260803.png` — preferred mixed-solver table for a complex multi-layer board
+- `graph/混合求解設定_20260805.png` — preferred mixed-solver table (three-segment demo, current UI)
 
 For current documentation, prefer the 20260803 multi-layer, ten-segment, mixed-solver,
 and S-parameter comparison images over the retired score-based fidelity screenshots.
