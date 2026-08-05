@@ -17,7 +17,7 @@ This document tracks the public visual assets used by the project README.
 - `graph/10段分割示意_20260803.png` — Demo-board ten-segment solver-region overview
 - `graph/混合求解設定_20260803.png` — per-segment HFSS／SIwave selection controls
 - `graph/分段對照結果_20260803-public.png` — current objective S-parameter comparison with local paths removed
-- `graph/多層板案例_20260803.png` — preferred README hero; multi-layer cut-safety colors and solver regions
+- `graph/N段分割後推薦求解器示意_20260805.png` — preferred README hero; N-way split with safety overlay and per-segment solver regions (green = SIwave, purple = HFSS)
 - `graph/複雜板混合求解_20260803.png` — preferred mixed-solver table for a complex multi-layer board
 
 For current documentation, prefer the 20260803 multi-layer, ten-segment, mixed-solver,

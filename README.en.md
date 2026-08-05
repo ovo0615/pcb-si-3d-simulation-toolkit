@@ -20,7 +20,7 @@ Core technologies: Ansys HFSS 3D Layout, PyEDB, PyAEDT, PCB Signal Integrity, S-
 
 ## 2. Hero View
 
-![Multi-layer PCB segmentation, safety overlays, and mixed solver regions](./graph/多層板案例_20260803.png)
+![N-way segmentation with per-segment solver assignment: green = SIwave, purple = HFSS, labels show complexity score](./graph/N段分割後推薦求解器示意_20260805.png)
 
 The toolkit uses Ansys HFSS 3D Layout and SIwave, with PyEDB operating on the EDB, to unify PCB/package channel import, net selection, cutout, port creation, risk-aware segmentation, per-segment solving, and S-parameter cascading in one interface.
 
