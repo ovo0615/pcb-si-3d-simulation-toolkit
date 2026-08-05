@@ -60,11 +60,11 @@ Taiwan Auto-Design Co. (TADC)｜虎門科技股份有限公司
 
 Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
-![10 段切割位置、安全疊圖與求解區域](./graph/10段分割示意_20260803.png)
+![N 段分割預覽與安全疊圖](./graph/N段分割示意_20260805.png)
 
-![複雜多層板的逐段 HFSS／SIwave 建議與覆寫](./graph/複雜板混合求解_20260803.png)
+![逐段 HFSS／SIwave 建議、指定與判斷原因](./graph/混合求解設定_20260805.png)
 
-![10 段 SIwave 排程模擬狀態](./graph/10段SIwave排程模擬過程_20260803.png)
+![混合求解排程執行中：段 1 HFSS、段 2 SIwave 已完成、段 3 等待中](./graph/混合排程模擬過程_20260805.png)
 
 ![分段 S 參數自動串接電路示意](./graph/自動串接電路_20260730.png)
 

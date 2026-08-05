@@ -60,11 +60,11 @@ The segmentation view overlays the engineering decision directly on the complete
 
 Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
-![Ten-segment split with safety and solver overlays](./graph/10段分割示意_20260803.png)
+![N-way split preview with safety overlay](./graph/N段分割示意_20260805.png)
 
-![Per-segment HFSS and SIwave recommendations on a complex board](./graph/複雜板混合求解_20260803.png)
+![Per-segment HFSS/SIwave recommendation, assignment, and rationale](./graph/混合求解設定_20260805.png)
 
-![Ten-segment SIwave scheduled-solve progress](./graph/10段SIwave排程模擬過程_20260803.png)
+![Mixed-solver schedule running: segment 1 on HFSS, segment 2 finished on SIwave, segment 3 queued](./graph/混合排程模擬過程_20260805.png)
 
 ![Automatic S-parameter cascade circuit](./graph/自動串接電路_20260730.png)
 
