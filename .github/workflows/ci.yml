@@ -28,28 +28,53 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Scan tracked files for local paths, credentials, license/customer info
+      - name: Scan tracked files for local paths, credentials, license info
         run: |
           set -e
           export LC_ALL=C
-          pattern='(^|[^A-Za-z])D:\\|(^|[^A-Za-z])C:\\Users|\\\\[A-Za-z0-9_.-]+\\|10\.[0-9]+\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|api[_-]?key|access[_-]?token|password|secret|private[_-]?key|license.?server|customer|private-source'
-          matches=$(git grep -I -n -i -E "$pattern" -- . ':(exclude).git' ':(exclude).github/**' ':(exclude,glob)**/dist/**' ':(exclude,glob)**/*.min.js' ':(exclude,glob)**/package-lock.json' ':(exclude,glob)**/*.lock' ':(exclude,glob)**/*.svg' ':(exclude,glob)**/*.aedt' ':(exclude,glob)**/*.aedtz' ':(exclude)AGENTS.md' ':(exclude)README.en.md' ':(exclude)README.zh-TW.md' ':(exclude)docs/visual-assets.md' || true)
+          EXCLUDES=":(exclude).git :(exclude).github/** :(exclude,glob)**/dist/** :(exclude,glob)**/*.min.js :(exclude,glob)**/package-lock.json :(exclude,glob)**/*.lock :(exclude,glob)**/*.svg :(exclude,glob)**/*.aedt :(exclude,glob)**/*.aedtz :(exclude)AGENTS.md :(exclude)README.en.md :(exclude)README.zh-TW.md :(exclude)docs/visual-assets.md"
+          pattern='(^|[^A-Za-z])D:\\|(^|[^A-Za-z])C:\\Users|\\\\[A-Za-z0-9_.-]+\\|10\.[0-9]+\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|api[_-]?key|access[_-]?token|password|secret|private[_-]?key|license.?server|private-source'
+          matches=$(git grep -I -n -i -E "$pattern" -- . $EXCLUDES || true)
           if [ -n "$matches" ]; then
             echo "Potential sensitive content found - review each line before merging:"
             echo "$matches"
             exit 1
           fi
           echo "OK: no obvious sensitive paths or credentials found in tracked text files."
-      - name: Reject .env / key files
+
+      # `customer` 拆成獨立一條規則，只對報告功能的原始碼豁免。
+      #
+      # 報告功能必須有「客戶名稱」這個欄位，因此 customer_name 與浮水印變數
+      # {customer} 一定會出現在原始碼裡——那是識別字，不是外洩的客戶資料。
+      # 關鍵字比對無法區分「欄位名」與「欄位值」，硬留著只會逼人關掉整條規則。
+      #
+      # 因此改為：這三個檔案不套用 customer 規則，其餘檔案照舊擋。真正會裝
+      # 客戶資料的是執行期產生的報告工作區（report_workspace/、
+      # report_manifest.json），已在下一條規則直接禁止追蹤——那才是防線所在。
+      - name: Scan for customer references outside the report feature
         run: |
           set -e
-          matches=$(git ls-files | grep -E '(^|/)\.env(\..*)?$|\.pem$|\.key$|id_rsa' || true)
+          export LC_ALL=C
+          EXCLUDES=":(exclude).git :(exclude).github/** :(exclude,glob)**/dist/** :(exclude,glob)**/package-lock.json :(exclude,glob)**/*.svg :(exclude)AGENTS.md :(exclude)README.en.md :(exclude)README.zh-TW.md :(exclude)docs/visual-assets.md"
+          REPORT_SOURCES=":(exclude,glob)**/components/ReportCenter.tsx :(exclude,glob)**/reportTypes.ts :(exclude)一鍵HTML報告_操作與交接.md"
+          matches=$(git grep -I -n -i -E 'customer' -- . $EXCLUDES $REPORT_SOURCES || true)
           if [ -n "$matches" ]; then
-            echo "Credential-shaped files must not be committed:"
+            echo "Customer references found outside the report feature - review before merging:"
             echo "$matches"
             exit 1
           fi
-          echo "OK: no .env/credential files tracked."
+          echo "OK: no customer references outside the report feature."
+
+      - name: Reject .env / key files and report workspaces
+        run: |
+          set -e
+          matches=$(git ls-files | grep -E '(^|/)\.env(\..*)?$|\.pem$|\.key$|id_rsa|(^|/)report_workspace/|(^|/)report_manifest\.json$' || true)
+          if [ -n "$matches" ]; then
+            echo "Credential-shaped files or report workspaces must not be committed:"
+            echo "$matches"
+            exit 1
+          fi
+          echo "OK: no .env/credential files or report workspaces tracked."
 
   frontend-build:
     name: Frontend TypeScript build check
