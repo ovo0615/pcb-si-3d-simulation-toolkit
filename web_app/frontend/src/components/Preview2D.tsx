@@ -121,8 +121,10 @@ interface LayerMode {
   components: boolean  // Circuit Elements — comp 圖元
 }
 
+// filled 預設關閉：銅箔平面實心填滿會蓋住底下的走線、Pad 與 Via，剛載入板子
+// 時最需要看的就是那些。改成只畫外框，要看實心再自己開。其餘欄位維持開啟。
 const DEFAULT_MODE: LayerMode = {
-  filled: true, visible: true, planes: true,
+  filled: false, visible: true, planes: true,
   traces: true, pads: true, vias: true, components: true,
 }
 

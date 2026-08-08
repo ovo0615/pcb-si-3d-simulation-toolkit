@@ -279,6 +279,13 @@ interface CutoutBoundaryResult {
   comparison: CutoutBoundaryComparison | null
 }
 
+/** 裁切外框形狀的中文名稱。後端回傳的是 PyEDB 的英文代號。 */
+const EXTENT_LABEL: Record<string, string> = {
+  Conforming: '貼合走線（Conforming）',
+  ConvexHull: '凸包（ConvexHull）',
+  Bounding: '矩形（Bounding Box）',
+}
+
 const cutoutBoundaryKey = (
   signalNets: string[], refNets: string[], expansionMm: string, extentType: string,
 ): string => JSON.stringify([
@@ -361,10 +368,14 @@ export default function App() {
 
   // ── 裁切與 Port 設定 ──
   const [expansionMm, setExpansionMm] = useState('2')
-  const [extentType, setExtentType] = useState('ConvexHull')
+  // 預設「貼合走線」：凸包對斜向與彎折通道必然多包一大塊無關銅箔與 Via。
+  // 貼合外框漏掉訊號時後端會自動回退凸包並通知，不會安靜地切壞。
+  const [extentType, setExtentType] = useState('Conforming')
   const [actualCutoutExtentType, setActualCutoutExtentType] = useState('')
   const [preciseBoundaryPreview, setPreciseBoundaryPreview] = useState<number[][] | null>(null)
   const [preciseBoundaryPreviewKey, setPreciseBoundaryPreviewKey] = useState('')
+  /** 貼合外框比凸包少包多少面積（%）；只有 Conforming 預檢成功時才有值。 */
+  const [boundaryAreaSaving, setBoundaryAreaSaving] = useState<number | null>(null)
   const [completedBoundary, setCompletedBoundary] = useState<CutoutBoundaryResult | null>(null)
   const [showCutoutDifferenceFill, setShowCutoutDifferenceFill] = useState(true)
   const [portType, setPortType] = useState('coax')
@@ -816,7 +827,9 @@ export default function App() {
         setPreciseBoundaryPreviewKey(
           cutoutBoundaryKey(signalNets, refNets, expansionMm, actualExtent),
         )
-        alert(`所選 ${extentType} 無法完成，已安全回退為 ${actualExtent}。\n${data.fallback_reason || ''}`)
+        alert(`所選 ${EXTENT_LABEL[extentType] || extentType} 無法完成，`
+          + `已安全回退為 ${EXTENT_LABEL[actualExtent] || actualExtent}。\n`
+          + String(data.fallback_reason || ''))
       }
       setActiveView('cut')
       setCleanupAnalysis(null)
@@ -1426,10 +1439,15 @@ ${state.error}` : ''}`)
       setPreciseBoundaryPreviewKey(
         cutoutBoundaryKey(signalNets, refNets, expansionMm, actualExtent),
       )
+      setBoundaryAreaSaving(
+        typeof data.area_saving_percent === 'number'
+          ? data.area_saving_percent : null,
+      )
       if (actualExtent !== extentType) {
         setExtentType(actualExtent)
         alert(
-          `PyEDB 預檢顯示 ${extentType} 無法使用，精確預覽已改為 ${actualExtent}。\n`
+          `PyEDB 預檢顯示 ${EXTENT_LABEL[extentType] || extentType} 無法使用，`
+          + `精確預覽已改為 ${EXTENT_LABEL[actualExtent] || actualExtent}。\n`
           + String(data.fallback_reason || ''),
         )
       }
@@ -2410,6 +2428,7 @@ ${state.error}` : ''}`)
                         setExtentType(e.target.value)
                         setActualCutoutExtentType('')
                       }}>
+                        <option value="Conforming">貼合走線（Conforming）</option>
                         <option value="ConvexHull">凸包（ConvexHull）</option>
                         <option value="Bounding">矩形（Bounding Box）</option>
                       </select>
@@ -2417,9 +2436,18 @@ ${state.error}` : ''}`)
                   </div>
                   <div className="status" style={{ marginTop: 6, fontSize: 11.5 }}>
                     {actualCutoutExtentType
-                      ? `上次實際裁切形狀：${actualCutoutExtentType === 'ConvexHull' ? '凸包（ConvexHull）' : '矩形（Bounding Box）'}`
-                      : '實際裁切會遵照所選形狀；只有 PyEDB 明確失敗時才回退為矩形並通知。'}
+                      ? `上次實際裁切形狀：${EXTENT_LABEL[actualCutoutExtentType] || actualCutoutExtentType}`
+                      : extentType === 'Conforming'
+                        ? '外框會沿著走線轉彎，真正只向外擴張所設距離。彎折或斜向通道用凸包時，內側會被一條弦線切過而包進大量無關的 Via。'
+                        : extentType === 'ConvexHull'
+                          ? '凸包依定義是凸的：斜向或彎折通道的內側必然被弦線切過，會多包無關銅箔。要貼著走線請改選「貼合走線」。'
+                          : '矩形最保守也最大；實際裁切會遵照所選形狀，只有 PyEDB 明確失敗時才回退並通知。'}
                   </div>
+                  {boundaryAreaSaving !== null && extentType === 'Conforming' && (
+                    <div className="status" style={{ marginTop: 4, fontSize: 11.5, color: 'var(--accent)' }}>
+                      貼合外框比凸包少包 {boundaryAreaSaving.toFixed(1)}% 的面積。
+                    </div>
+                  )}
                   <button
                     className="btn"
                     style={{ width: '100%', marginTop: 7 }}
