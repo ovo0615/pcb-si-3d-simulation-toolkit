@@ -14,16 +14,33 @@ export interface PreviewData {
   rendered_primitive_count?: number
 }
 
-export interface SegmentCutLine {
-  point: [number, number]     // 刀中心（mm，脊椎上的點）
-  tangent: [number, number]   // 通道局部走向（單位向量；刀與其垂直）
-  half_len: number            // 刀半長（mm）
-  valid: boolean
-}
-
 export interface SegmentCutsInfo {
-  cuts: SegmentCutLine[]      // N-1 把「旋轉直線刀」
-  spine?: number[][]          // 通道脊椎折線（mm），淡色虛線顯示
+  direction: 'x' | 'y'
+  positions_mm: number[]
+  valids?: boolean[]
+  region_solvers?: ('hfss' | 'siwave')[]
+  region_scores?: number[]
+  ideal_positions_mm?: number[]
+  rejected_candidates?: {
+    position_mm: number
+    hard_blocked: boolean
+    reasons: string[]
+  }[]
+  safety_overlay?: {
+    items: {
+      kind: string
+      severity: 'hard' | 'risk'
+      label: string
+      net: string
+      layer: string
+      estimated: boolean
+      bounds_mm: [number, number, number, number]
+      points_mm?: [number, number][]
+      width_mm?: number
+    }[]
+    total: number
+    truncated: boolean
+  } | null
 }
 
 export interface CleanupBox {
@@ -58,6 +75,11 @@ interface Preview2DProps {
   expansionMm?: number      // 裁切擴張距離預覽（mm）
   extentType?: string       // 'ConvexHull' | 'Bounding' — 裁切形狀
   segmentCuts?: SegmentCutsInfo | null  // 功能2：N 段分割切割線
+  showSegmentSafetyOverlay?: boolean // 功能2：是否顯示禁切區與被拒絕候選
+  onSegmentSafetyOverlayChange?: (visible: boolean) => void
+  showSolverRegionOverlay?: boolean // 混合求解：是否顯示每段 HFSS／SIwave 色塊
+  onSolverRegionOverlayChange?: (visible: boolean) => void
+  onSegmentRegionClick?: (zeroBasedIndex: number) => void
   cleanupOverlay?: CleanupOverlay | null // Layout 清理：預計移除物件紅框
   layerPanelEnabled?: boolean // 比較模式可關閉側欄，保留更多畫布空間
   removedGeometry?: CleanupRemovedGeometry | null // 清理時實際刪除的原始幾何
@@ -65,6 +87,17 @@ interface Preview2DProps {
   differenceKind?: 'all' | 'primitive' | 'via'
   differenceLayer?: string
   focusBounds?: { min: [number, number]; max: [number, number] } | null
+  estimatedCutoutBoundary?: number[][] | null // PyEDB 唯讀預檢外框（mm）
+  actualCutoutBoundary?: number[][] | null // 正式裁切回傳外框（mm）
+  showBoundaryDifferenceFill?: boolean // 正式裁切比對：是否顯示橘／藍／綠半透明差異填色
+  onBoundaryDifferenceFillChange?: (visible: boolean) => void
+  boundaryComparison?: {
+    available: boolean
+    within_tolerance: boolean
+    tolerance_mm: number
+    max_boundary_error_mm: number | null
+    area_difference_percent: number | null
+  } | null
 }
 
 // ── 顏色常數 ────────────────────────────────────────────────
@@ -76,53 +109,6 @@ const FALLBACK_PALETTE = [
   '#ff3b30', '#00e676', '#ffd600', '#00b0ff', '#e040fb',
   '#ff9100', '#18ffff', '#c6ff00', '#ff4081', '#7c4dff',
 ]
-
-// ── 凸包演算法（Graham scan）—回傳 CCW 順序的頂點串列 ───────────
-function computeConvexHull(points: number[][]): number[][] {
-  if (points.length < 3) return points.slice()
-  const sorted = [...points].sort((a, b) => a[0] !== b[0] ? a[0] - b[0] : a[1] - b[1])
-  const cross = (o: number[], a: number[], b: number[]) =>
-    (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0])
-  const lower: number[][] = []
-  for (const p of sorted) {
-    while (lower.length >= 2 && cross(lower[lower.length-2], lower[lower.length-1], p) <= 0) lower.pop()
-    lower.push(p)
-  }
-  const upper: number[][] = []
-  for (let i = sorted.length-1; i >= 0; i--) {
-    const p = sorted[i]
-    while (upper.length >= 2 && cross(upper[upper.length-2], upper[upper.length-1], p) <= 0) upper.pop()
-    upper.push(p)
-  }
-  lower.pop(); upper.pop()
-  return [...lower, ...upper]
-}
-
-// ── 凸多邊形向外側均勻最山 d mm（bisector offset）───────────────
-function expandConvexHull(hull: number[][], d: number): number[][] {
-  const n = hull.length
-  if (n < 3) return hull
-  return hull.map((curr, i) => {
-    const prev = hull[(i - 1 + n) % n]
-    const next = hull[(i + 1) % n]
-    // 不同次邊的邊向量
-    const dx1 = curr[0]-prev[0], dy1 = curr[1]-prev[1]
-    const dx2 = next[0]-curr[0], dy2 = next[1]-curr[1]
-    const len1 = Math.hypot(dx1, dy1), len2 = Math.hypot(dx2, dy2)
-    if (len1 < 1e-10 || len2 < 1e-10) return [...curr]
-    // CCW 凸包的向外法向量（右垂群向）
-    const nx1 = dy1/len1, ny1 = -dx1/len1
-    const nx2 = dy2/len2, ny2 = -dx2/len2
-    // 兩法向量的平分線方向
-    const bx = nx1+nx2, by = ny1+ny2
-    const blen = Math.hypot(bx, by)
-    if (blen < 1e-10) return [curr[0]+nx1*d, curr[1]+ny1*d]
-    // 平分線方向與其中一個法向的夺積分 = cos(半角)
-    const cosHalf = (bx*nx1 + by*ny1) / blen
-    const scale   = cosHalf > 1e-4 ? d / cosHalf : d
-    return [curr[0] + bx/blen * scale, curr[1] + by/blen * scale]
-  })
-}
 
 // ── 每層七欄顯示設定 ─────────────────────────────────────────
 interface LayerMode {
@@ -166,6 +152,11 @@ export default function Preview2D({
   highlightNets = [], signalNets = [], refNets = [],
   expansionMm, extentType = 'Bounding',
   segmentCuts = null,
+  showSegmentSafetyOverlay = true,
+  onSegmentSafetyOverlayChange,
+  showSolverRegionOverlay = true,
+  onSolverRegionOverlayChange,
+  onSegmentRegionClick,
   cleanupOverlay = null,
   layerPanelEnabled = true,
   removedGeometry = null,
@@ -173,6 +164,11 @@ export default function Preview2D({
   differenceKind = 'all',
   differenceLayer = '',
   focusBounds = null,
+  estimatedCutoutBoundary = null,
+  actualCutoutBoundary = null,
+  showBoundaryDifferenceFill = true,
+  onBoundaryDifferenceFillChange,
+  boundaryComparison = null,
 }: Preview2DProps) {
   const canvasRef    = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -181,6 +177,7 @@ export default function Preview2D({
   const [transform,  setTransform]  = useState({ x: 0, y: 0, scale: 1 })
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart,  setDragStart]  = useState({ x: 0, y: 0 })
+  const mouseDownPoint = useRef({ x: 0, y: 0 })
 
   // 圖層顯示設定
   const [layerModes,   setLayerModes]   = useState<Record<string, LayerMode>>({})
@@ -510,159 +507,270 @@ export default function Preview2D({
       ctx.restore()
     }
 
-    // ── 功能2：N 段分割「旋轉直線刀」（沿通道走向；青色虛線 + 編號）──
-    if (segmentCuts && segmentCuts.cuts.length > 0) {
+    // ── 功能2：禁切外框、理想位置、拒絕候選與選定切面 ───────
+    if (segmentCuts && segmentCuts.positions_mm.length > 0) {
+      const contentBounds = computeContentBounds() || data.bounds
+      const axis = segmentCuts.direction === 'x' ? 0 : 1
       ctx.save()
       ctx.translate(transform.x, transform.y + rect.height)
       ctx.scale(transform.scale, -transform.scale)
       const px2 = (n: number) => n / transform.scale
 
-      // 通道脊椎（淡青色點線，顯示切割所依循的通道走向）
-      if (segmentCuts.spine && segmentCuts.spine.length >= 2) {
-        ctx.strokeStyle = 'rgba(0, 229, 255, 0.35)'
-        ctx.lineWidth = px2(1.2)
-        ctx.setLineDash([px2(2.5), px2(4)])
-        ctx.beginPath()
-        ctx.moveTo(segmentCuts.spine[0][0], segmentCuts.spine[0][1])
-        for (let i = 1; i < segmentCuts.spine.length; i++) {
-          ctx.lineTo(segmentCuts.spine[i][0], segmentCuts.spine[i][1])
-        }
-        ctx.stroke()
+      const regionEdges = [
+        contentBounds.min[axis],
+        ...segmentCuts.positions_mm,
+        contentBounds.max[axis],
+      ]
+      if (showSolverRegionOverlay && segmentCuts.region_solvers?.length) {
+        regionEdges.slice(0, -1).forEach((start, index) => {
+          const end = regionEdges[index + 1]
+          const solver = segmentCuts.region_solvers?.[index] || 'hfss'
+          ctx.fillStyle = solver === 'siwave'
+            ? 'rgba(46, 204, 113, 0.14)'
+            : 'rgba(126, 87, 194, 0.16)'
+          ctx.strokeStyle = solver === 'siwave'
+            ? 'rgba(76, 230, 137, 0.72)'
+            : 'rgba(166, 126, 255, 0.78)'
+          ctx.lineWidth = px2(1.2)
+          if (axis === 0) {
+            ctx.fillRect(
+              start, contentBounds.min[1], end - start,
+              contentBounds.max[1] - contentBounds.min[1],
+            )
+            ctx.strokeRect(
+              start, contentBounds.min[1], end - start,
+              contentBounds.max[1] - contentBounds.min[1],
+            )
+          } else {
+            ctx.fillRect(
+              contentBounds.min[0], start,
+              contentBounds.max[0] - contentBounds.min[0], end - start,
+            )
+            ctx.strokeRect(
+              contentBounds.min[0], start,
+              contentBounds.max[0] - contentBounds.min[0], end - start,
+            )
+          }
+        })
       }
 
-      segmentCuts.cuts.forEach((c, i) => {
-        const [px, py] = c.point
-        const [tx, ty] = c.tangent
-        const vx = -ty, vy = tx                     // 刀方向 = 通道走向的垂直
-        const hl = Math.max(c.half_len, 1) * 1.12   // 略為延伸方便辨識
-        const ax0 = px - vx * hl, ay0 = py - vy * hl
-        const bx0 = px + vx * hl, by0 = py + vy * hl
-        const ok = c.valid !== false
+      if (showSegmentSafetyOverlay && segmentCuts.safety_overlay) {
+        segmentCuts.safety_overlay.items.forEach(item => {
+          if (item.kind === 'angled_trace' && item.points_mm && item.points_mm.length >= 2) {
+            ctx.save()
+            ctx.beginPath()
+            item.points_mm.forEach((point, index) => {
+              if (index === 0) ctx.moveTo(point[0], point[1])
+              else ctx.lineTo(point[0], point[1])
+            })
+            ctx.strokeStyle = 'rgba(255, 145, 0, 0.27)'
+            ctx.lineWidth = Math.max(item.width_mm || 0, px2(8))
+            ctx.lineCap = 'round'
+            ctx.lineJoin = 'round'
+            ctx.stroke()
+            ctx.strokeStyle = 'rgba(255, 183, 77, 0.92)'
+            ctx.lineWidth = Math.max(item.width_mm || 0, px2(1.5))
+            ctx.stroke()
+            ctx.restore()
+            return
+          }
+          const [xmin, ymin, xmax, ymax] = item.bounds_mm
+          const width = Math.max(xmax - xmin, px2(2))
+          const height = Math.max(ymax - ymin, px2(2))
+          const x = xmin - (width - (xmax - xmin)) / 2
+          const y = ymin - (height - (ymax - ymin)) / 2
+          const hard = item.severity === 'hard'
+          ctx.fillStyle = hard ? 'rgba(255, 55, 75, 0.17)' : 'rgba(255, 166, 0, 0.14)'
+          ctx.strokeStyle = hard ? 'rgba(255, 82, 82, 0.72)' : 'rgba(255, 183, 77, 0.72)'
+          ctx.lineWidth = px2(0.9)
+          ctx.fillRect(x, y, width, height)
+          ctx.strokeRect(x, y, width, height)
+        })
+
+        ctx.lineWidth = px2(1)
+        ctx.setLineDash([px2(3), px2(5)])
+        ctx.strokeStyle = 'rgba(255, 82, 82, 0.22)'
+        ;(segmentCuts.rejected_candidates || []).forEach(candidate => {
+          ctx.beginPath()
+          if (axis === 0) {
+            ctx.moveTo(candidate.position_mm, contentBounds.min[1])
+            ctx.lineTo(candidate.position_mm, contentBounds.max[1])
+          } else {
+            ctx.moveTo(contentBounds.min[0], candidate.position_mm)
+            ctx.lineTo(contentBounds.max[0], candidate.position_mm)
+          }
+          ctx.stroke()
+        })
+        ctx.setLineDash([])
+      }
+
+      // 灰色虛線＝未考慮障礙時的理想等分位置。
+      ctx.strokeStyle = 'rgba(180, 190, 204, 0.58)'
+      ctx.lineWidth = px2(1.1)
+      ctx.setLineDash([px2(5), px2(5)])
+      ;(segmentCuts.ideal_positions_mm || []).forEach(position => {
+        ctx.beginPath()
+        if (axis === 0) {
+          ctx.moveTo(position, contentBounds.min[1])
+          ctx.lineTo(position, contentBounds.max[1])
+        } else {
+          ctx.moveTo(contentBounds.min[0], position)
+          ctx.lineTo(contentBounds.max[0], position)
+        }
+        ctx.stroke()
+      })
+      ctx.setLineDash([])
+
+      segmentCuts.positions_mm.forEach((position, index) => {
+        const ok = !segmentCuts.valids || segmentCuts.valids[index] !== false
         ctx.strokeStyle = ok ? '#00e5ff' : '#ff5252'
         ctx.lineWidth = px2(2.2)
-        ctx.setLineDash([px2(9), px2(6)])
+        ctx.setLineDash(ok ? [] : [px2(9), px2(6)])
         ctx.beginPath()
-        ctx.moveTo(ax0, ay0)
-        ctx.lineTo(bx0, by0)
+        if (axis === 0) {
+          ctx.moveTo(position, contentBounds.min[1])
+          ctx.lineTo(position, contentBounds.max[1])
+        } else {
+          ctx.moveTo(contentBounds.min[0], position)
+          ctx.lineTo(contentBounds.max[0], position)
+        }
         ctx.stroke()
-        ctx.setLineDash([])
-        // 刀中心點
-        ctx.fillStyle = ok ? '#00e5ff' : '#ff5252'
-        ctx.beginPath()
-        ctx.arc(px, py, px2(3), 0, 2 * Math.PI)
-        ctx.fill()
-        // 編號（畫在刀的一端）
+      })
+      ctx.setLineDash([])
+
+      const edges = regionEdges
+      for (let index = 0; index + 1 < edges.length; index++) {
+        const center = (edges[index] + edges[index + 1]) / 2
+        const labelX = axis === 0 ? center : contentBounds.max[0]
+        const labelY = axis === 0 ? contentBounds.max[1] : center
         ctx.save()
-        ctx.translate(bx0, by0)
+        ctx.translate(labelX, labelY)
         ctx.scale(1 / transform.scale, -1 / transform.scale)
         ctx.font = 'bold 12px "Calibri","Microsoft JhengHei",sans-serif'
-        ctx.fillStyle = ok ? 'rgba(0, 229, 255, 0.95)' : 'rgba(255, 82, 82, 0.95)'
-        ctx.fillText(`#${i + 1}`, 4, -4)
+        const regionSolver = segmentCuts.region_solvers?.[index]
+        const regionScore = segmentCuts.region_scores?.[index]
+        ctx.fillStyle = regionSolver === 'siwave'
+          ? 'rgba(91, 245, 154, 0.98)'
+          : regionSolver === 'hfss'
+            ? 'rgba(190, 160, 255, 0.98)'
+            : 'rgba(0, 229, 255, 0.95)'
+        const suffix = regionSolver
+          ? ` ${regionSolver.toUpperCase()}${Number.isFinite(regionScore) ? ` · ${regionScore}` : ''}`
+          : ''
+        ctx.fillText(`S${index + 1}${suffix}`, -8, -8)
         ctx.restore()
-      })
+      }
       ctx.restore()
     }
 
-    // ── 裁切預覽框（橘色虛線 + 外部遮罩）───────────────
-    if (signalNets.length > 0 && expansionMm !== undefined) {
-      // 收集訊號網路圖元的所有座標點
-      const sigSet = new Set(signalNets)
-      const rawPts: number[][] = []
+    // ── 裁切外框：PyEDB 精確預估／正式裁切比對 ──────
+    // 先前這裡還有一種「快速估算」：直接拿 2D 預覽的圖元在前端算凸包或
+    // 外接矩形。那份資料本身是為了畫面顯示而降階過的，算出來的外框與正式
+    // 裁切可能相差甚遠，容易讓人誤以為那就是實際裁切範圍，已整段移除。
+    // 現在只在按下「分析精確裁切外框」（後端唯讀呼叫與正式裁切相同的
+    // 演算法）之後才會畫預估外框。
+    const hasBackendEstimate = (estimatedCutoutBoundary?.length || 0) >= 3
+    const hasActualBoundary = (actualCutoutBoundary?.length || 0) >= 3
+    if (hasBackendEstimate) {
       let sx1 = Infinity, sy1 = Infinity, sx2 = -Infinity, sy2 = -Infinity
-
-      for (const prims of Object.values(data.layers)) {
-        for (const p of prims) {
-          if (!p.net || !sigSet.has(p.net)) continue
-          const add = (x: number, y: number) => {
-            rawPts.push([x, y])
-            if (x < sx1) sx1 = x; if (y < sy1) sy1 = y
-            if (x > sx2) sx2 = x; if (y > sy2) sy2 = y
-          }
-          if ((p.kind === 'rect' || p.kind === 'comp') && p.w > 0 && p.h > 0) {
-            add(p.x, p.y); add(p.x+p.w, p.y); add(p.x, p.y+p.h); add(p.x+p.w, p.y+p.h)
-          } else if (p.kind === 'circle') {
-            add(p.x-p.r, p.y-p.r); add(p.x+p.r, p.y-p.r)
-            add(p.x-p.r, p.y+p.r); add(p.x+p.r, p.y+p.r)
-          } else if ((p.kind === 'polygon' || p.kind === 'path') && p.points) {
-            for (const pt of p.points) add(pt[0], pt[1])
-          }
-        }
-      }
-
-      if (isFinite(sx1) && rawPts.length >= 3) {
-        const exp = expansionMm
+      {
+        const exp = expansionMm || 0
         const isConvexHull = extentType === 'ConvexHull'
+        const previewPoly: number[][] = estimatedCutoutBoundary || []
+        const actualPoly = hasActualBoundary ? actualCutoutBoundary! : null
+        const outlinePoints = actualPoly || previewPoly
+        const outlineXs = outlinePoints.map(point => point[0])
+        const outlineYs = outlinePoints.map(point => point[1])
+        sx1 = Math.min(...outlineXs); sx2 = Math.max(...outlineXs)
+        sy1 = Math.min(...outlineYs); sy2 = Math.max(...outlineYs)
 
-        // 計算裁切外塆形狀
-        let previewPoly: number[][] = []
-        if (isConvexHull) {
-          const hull = computeConvexHull(rawPts)
-          previewPoly = expandConvexHull(hull, exp)
-        } else {
-          // Bounding Box — 四點矩形（CCW）
-          const bx1 = sx1-exp, by1 = sy1-exp, bx2 = sx2+exp, by2 = sy2+exp
-          previewPoly = [[bx1,by1],[bx2,by1],[bx2,by2],[bx1,by2]]
-        }
-
-        // 板子整體範圍
         const cb  = computeContentBounds() || data.bounds
-        const bW  = Math.max(sx2-sx1+exp*2, 1)
-        const bH  = Math.max(sy2-sy1+exp*2, 1)
+        const bW  = Math.max(sx2-sx1, 1)
+        const bH  = Math.max(sy2-sy1, 1)
         const pad = Math.max(bW, bH) * 0.1
-        const mx1 = Math.min(cb.min[0], sx1-exp) - pad
-        const my1 = Math.min(cb.min[1], sy1-exp) - pad
-        const mx2 = Math.max(cb.max[0], sx2+exp) + pad
-        const my2 = Math.max(cb.max[1], sy2+exp) + pad
+        const mx1 = Math.min(cb.min[0], sx1) - pad
+        const my1 = Math.min(cb.min[1], sy1) - pad
+        const mx2 = Math.max(cb.max[0], sx2) + pad
+        const my2 = Math.max(cb.max[1], sy2) + pad
 
         ctx.save()
         ctx.translate(transform.x, transform.y + rect.height)
         ctx.scale(transform.scale, -transform.scale)
         const px2 = (n: number) => n / transform.scale
+        const polygonPath = (points: number[][]) => {
+          ctx.beginPath()
+          ctx.moveTo(points[0][0], points[0][1])
+          for (let index = 1; index < points.length; index++) {
+            ctx.lineTo(points[index][0], points[index][1])
+          }
+          ctx.closePath()
+        }
 
-        // 外部遮罩：大矩形減去裁切外塆（用 compositing）
-        ctx.globalCompositeOperation = 'source-over'
-        // 畫天地大大矩形（深色性邊遮罩）
-        ctx.fillStyle = 'rgba(0,0,0,0.52)'
-        ctx.beginPath()
-        ctx.rect(mx1, my1, mx2-mx1, my2-my1)  // 外層大矩形（CCW 若透明背景）
-        // 內層：裁切外塆所在区域（抖泄效果，evenodd 規則）
-        ctx.moveTo(previewPoly[0][0], previewPoly[0][1])
-        for (let i = 1; i < previewPoly.length; i++) ctx.lineTo(previewPoly[i][0], previewPoly[i][1])
-        ctx.closePath()
-        ctx.fill('evenodd')
+        if (!actualPoly) {
+          // 尚未正式裁切：壓暗外部區域，橘框代表「預估」而非已完成結果。
+          ctx.fillStyle = 'rgba(0,0,0,0.52)'
+          ctx.beginPath()
+          ctx.rect(mx1, my1, mx2-mx1, my2-my1)
+          ctx.moveTo(previewPoly[0][0], previewPoly[0][1])
+          for (let index = 1; index < previewPoly.length; index++) {
+            ctx.lineTo(previewPoly[index][0], previewPoly[index][1])
+          }
+          ctx.closePath()
+          ctx.fill('evenodd')
+        } else {
+          if (showBoundaryDifferenceFill) {
+            // 先畫兩側差異，再把交集覆成綠色：橘＝僅預估、藍＝僅實際、綠＝共同。
+            polygonPath(previewPoly)
+            ctx.fillStyle = 'rgba(255,140,0,0.38)'
+            ctx.fill()
+            polygonPath(actualPoly)
+            ctx.fillStyle = 'rgba(0,229,255,0.34)'
+            ctx.fill()
+            ctx.save()
+            polygonPath(previewPoly)
+            ctx.clip()
+            polygonPath(actualPoly)
+            ctx.fillStyle = 'rgba(62,207,142,0.52)'
+            ctx.fill()
+            ctx.restore()
+          }
 
-        // 裁切外塆號記諮：橘色虛線
+          polygonPath(actualPoly)
+          ctx.strokeStyle = '#00e5ff'
+          ctx.lineWidth = px2(2.5)
+          ctx.setLineDash([])
+          ctx.stroke()
+        }
+
+        polygonPath(previewPoly)
         ctx.strokeStyle = '#ff8c00'
-        ctx.lineWidth   = px2(2.5)
+        ctx.lineWidth = px2(2.5)
         ctx.setLineDash([px2(10), px2(5)])
-        ctx.beginPath()
-        ctx.moveTo(previewPoly[0][0], previewPoly[0][1])
-        for (let i = 1; i < previewPoly.length; i++) ctx.lineTo(previewPoly[i][0], previewPoly[i][1])
-        ctx.closePath()
         ctx.stroke()
         ctx.setLineDash([])
 
-        // 頂點小圓點
-        ctx.fillStyle = '#ff8c00'
-        const cs = px2(4)
-        previewPoly.forEach(([cx, cy]) => {
-          ctx.beginPath()
-          ctx.arc(cx, cy, cs, 0, 2*Math.PI)
-          ctx.fill()
-        })
-
         ctx.restore()
 
-        // 標籤（螢幕座標）
         ctx.save()
         ctx.font = 'bold 12px "Microsoft JhengHei","Calibri",sans-serif'
-        ctx.fillStyle = '#ff8c00'
         const modeLabel = isConvexHull ? 'ConvexHull' : 'Bounding'
-        ctx.fillText(`▣ 裁切預覽 [${modeLabel}]  向外 ±${exp} mm`, 12, rect.height - 12)
+        if (actualPoly) {
+          const errorText = boundaryComparison?.available
+            ? `最大差異 ${boundaryComparison.max_boundary_error_mm?.toFixed(3)} mm／容差 ${boundaryComparison.tolerance_mm.toFixed(3)} mm`
+            : '差異量測不可用'
+          ctx.fillStyle = boundaryComparison?.within_tolerance ? '#7ee787' : '#ffb347'
+          const legend = showBoundaryDifferenceFill
+            ? '綠＝共同　橘＝僅預估　藍＝僅實際'
+            : '差異填色已關閉　橘虛線＝預估　藍實線＝實際'
+          ctx.fillText(`${legend}　${errorText}`, 12, rect.height - 12)
+        } else {
+          ctx.fillStyle = '#ff8c00'
+          ctx.fillText(`▣ PyEDB 精確預估 [${modeLabel}]  向外 ±${exp} mm`, 12, rect.height - 12)
+        }
         ctx.restore()
       }
     }
-  }, [data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, segmentCuts, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, getLayerColor, getStackupLayers, computeContentBounds])
+  }, [data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, actualCutoutBoundary, showBoundaryDifferenceFill, boundaryComparison, segmentCuts, showSegmentSafetyOverlay, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, getLayerColor, getStackupLayers, computeContentBounds])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
@@ -683,6 +791,7 @@ export default function Preview2D({
     setTransform(prev => ({ x: mx-(mx-prev.x)*f, y: my-(my-prev.y)*f, scale: prev.scale*f }))
   }
   const handleMouseDown = (e: React.MouseEvent) => {
+    mouseDownPoint.current = { x: e.clientX, y: e.clientY }
     setIsDragging(true)
     setDragStart({ x: e.clientX-transform.x, y: e.clientY-transform.y })
   }
@@ -690,7 +799,34 @@ export default function Preview2D({
     if (!isDragging) return
     setTransform(prev => ({ ...prev, x: e.clientX-dragStart.x, y: e.clientY-dragStart.y }))
   }
-  const handleMouseUp = () => setIsDragging(false)
+  const handleMouseUp = (e: React.MouseEvent) => {
+    const movement = Math.hypot(
+      e.clientX - mouseDownPoint.current.x,
+      e.clientY - mouseDownPoint.current.y,
+    )
+    setIsDragging(false)
+    if (movement > 4 || !onSegmentRegionClick || !segmentCuts || !data) return
+    const canvasRect = canvasRef.current?.getBoundingClientRect()
+    if (!canvasRect) return
+    const screenX = e.clientX - canvasRect.left
+    const screenY = e.clientY - canvasRect.top
+    const worldX = (screenX - transform.x) / transform.scale
+    const worldY = (canvasRect.height + transform.y - screenY) / transform.scale
+    const bounds = computeContentBounds() || data.bounds
+    const axis = segmentCuts.direction === 'x' ? 0 : 1
+    const coordinate = axis === 0 ? worldX : worldY
+    const edges = [
+      bounds.min[axis],
+      ...segmentCuts.positions_mm,
+      bounds.max[axis],
+    ]
+    const index = edges.findIndex((edge, position) => (
+      position + 1 < edges.length
+      && coordinate >= Math.min(edge, edges[position + 1])
+      && coordinate <= Math.max(edge, edges[position + 1])
+    ))
+    if (index >= 0) onSegmentRegionClick(index)
+  }
 
   // ── Layers 操作 ───────────────────────────────────────────
   // 切換單一層的某欄
@@ -805,6 +941,77 @@ export default function Preview2D({
         onMouseLeave={handleMouseUp}
       >
         <canvas ref={canvasRef} style={{ cursor: isDragging ? 'grabbing' : 'grab', display: 'block' }} />
+
+        {/* 裁切外框差異填色開關：與 Canvas 同層，避免被預覽畫布遮住。 */}
+        {onBoundaryDifferenceFillChange && (
+          <div
+            style={{ position: 'absolute', left: 16, top: 38, zIndex: 20 }}
+            onMouseDown={event => event.stopPropagation()}
+          >
+            <button
+              className={'boundary-fill-toggle' + (showBoundaryDifferenceFill ? ' boundary-fill-toggle--active' : '')}
+              type="button"
+              aria-pressed={showBoundaryDifferenceFill}
+              title={showBoundaryDifferenceFill
+                ? '關閉半透明差異填色，讓 Layout 細節更清楚'
+                : '顯示預估與實際裁切外框的差異填色'}
+              onClick={event => {
+                event.stopPropagation()
+                onBoundaryDifferenceFillChange(!showBoundaryDifferenceFill)
+              }}
+            >
+              差異填色：{showBoundaryDifferenceFill ? '開啟' : '關閉'}
+            </button>
+          </div>
+        )}
+
+        {segmentCuts?.safety_overlay && onSegmentSafetyOverlayChange && (
+          <div
+            style={{ position: 'absolute', left: 16, top: 38, zIndex: 20 }}
+            onMouseDown={event => event.stopPropagation()}
+          >
+            <button
+              className={'boundary-fill-toggle' + (showSegmentSafetyOverlay ? ' boundary-fill-toggle--active' : '')}
+              type="button"
+              aria-pressed={showSegmentSafetyOverlay}
+              title={showSegmentSafetyOverlay
+                ? '關閉禁切區與拒絕候選疊圖，讓 Layout 細節更清楚'
+                : '顯示硬性禁切區、風險區與拒絕候選'}
+              onClick={event => {
+                event.stopPropagation()
+                onSegmentSafetyOverlayChange(!showSegmentSafetyOverlay)
+              }}
+            >
+              安全疊圖：{showSegmentSafetyOverlay ? '開啟' : '關閉'}
+            </button>
+          </div>
+        )}
+
+        {segmentCuts?.region_solvers?.length && onSolverRegionOverlayChange && (
+          <div
+            style={{
+              position: 'absolute', left: 16,
+              top: segmentCuts?.safety_overlay ? 76 : 38,
+              zIndex: 20,
+            }}
+            onMouseDown={event => event.stopPropagation()}
+          >
+            <button
+              className={'boundary-fill-toggle' + (showSolverRegionOverlay ? ' boundary-fill-toggle--active' : '')}
+              type="button"
+              aria-pressed={showSolverRegionOverlay}
+              title={showSolverRegionOverlay
+                ? '關閉 HFSS／SIwave 求解區域色塊'
+                : '顯示每個 Segment 的求解器區域'}
+              onClick={event => {
+                event.stopPropagation()
+                onSolverRegionOverlayChange(!showSolverRegionOverlay)
+              }}
+            >
+              求解區域：{showSolverRegionOverlay ? '開啟' : '關閉'}
+            </button>
+          </div>
+        )}
 
         {/* Fit All */}
         {data && (

@@ -1,9 +1,17 @@
 // 串接電路示意圖（純 SVG）— 功能3：解算前即可預覽 N 段接線
 // 資料契約與後端 /api/cascade/preview 一致；外部檔案模式由前端自組相同結構。
 // 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
+import { useEffect, useState, type WheelEvent } from 'react'
 
 export interface CascadeGraph {
-  blocks: { label: string; sub_label?: string; ports: string[]; solved?: boolean }[]
+  blocks: {
+    label: string
+    sub_label?: string
+    ports: string[]
+    solved?: boolean
+    solver?: 'hfss' | 'siwave'
+    complexity_score?: number
+  }[]
   connections: { a: { block: number; port: string }; b: { block: number; port: string }; net?: string; stripline?: boolean }[]
   shorts: { block: number; ports: string[] }[]
 }
@@ -30,9 +38,6 @@ interface PinGroup { ports: string[]; side: 'left' | 'right' | 'top'; y: number;
 
 export default function CascadeSchematic({ graph }: Props) {
   const { blocks, connections, shorts } = graph
-  if (blocks.length === 0) {
-    return <div style={{ padding: 40, color: 'var(--faint)', textAlign: 'center' }}>尚無串接資料</div>
-  }
 
   // 1. 每個 block 把 port 歸入短路群（未在群組者自成一群）
   const groupsPerBlock: { key: string; ports: string[] }[][] = blocks.map((b, bi) => {
@@ -93,12 +98,59 @@ export default function CascadeSchematic({ graph }: Props) {
     })
   })
 
-  const svgW = MARGIN.x * 2 + blocks.length * BLOCK_W + (blocks.length - 1) * GAP_X
+  const svgW = Math.max(100, MARGIN.x * 2 + blocks.length * BLOCK_W + (blocks.length - 1) * GAP_X)
   const svgH = blockY + blockH + MARGIN.bottom
+  const initialView = { x: 0, y: 0, w: svgW, h: svgH }
+  const [view, setView] = useState(initialView)
+  const [drag, setDrag] = useState<{ x: number; y: number; viewX: number; viewY: number } | null>(null)
+
+  const fitAll = () => setView(initialView)
+  useEffect(() => {
+    setView({ x: 0, y: 0, w: svgW, h: svgH })
+  }, [svgW, svgH])
+  const handleWheel = (event: WheelEvent<SVGSVGElement>) => {
+    event.preventDefault()
+    const rect = event.currentTarget.getBoundingClientRect()
+    const ratioX = (event.clientX - rect.left) / Math.max(rect.width, 1)
+    const ratioY = (event.clientY - rect.top) / Math.max(rect.height, 1)
+    const factor = event.deltaY > 0 ? 1.15 : 0.87
+    const nextW = Math.max(svgW * 0.2, Math.min(svgW * 5, view.w * factor))
+    const nextH = Math.max(svgH * 0.2, Math.min(svgH * 5, view.h * factor))
+    setView({
+      x: view.x + (view.w - nextW) * ratioX,
+      y: view.y + (view.h - nextH) * ratioY,
+      w: nextW,
+      h: nextH,
+    })
+  }
+  if (blocks.length === 0) {
+    return <div style={{ padding: 40, color: 'var(--faint)', textAlign: 'center' }}>尚無串接資料</div>
+  }
 
   return (
-    <div style={{ overflowX: 'auto', overflowY: 'auto', height: '100%', background: '#0c0e12' }}>
-      <svg width={svgW} height={svgH} style={{ display: 'block', margin: '0 auto', minWidth: svgW }}>
+    <div style={{ height: '100%', background: '#0c0e12', position: 'relative' }}>
+      <button className="btn" onClick={fitAll}
+        style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 2, padding: '5px 10px' }}>
+        ⟳ Fit All
+      </button>
+      <svg width="100%" height="100%" viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+        preserveAspectRatio="xMidYMid meet"
+        onWheel={handleWheel}
+        onMouseDown={event => setDrag({
+          x: event.clientX, y: event.clientY, viewX: view.x, viewY: view.y,
+        })}
+        onMouseMove={event => {
+          if (!drag) return
+          const rect = event.currentTarget.getBoundingClientRect()
+          setView(current => ({
+            ...current,
+            x: drag.viewX - (event.clientX - drag.x) / Math.max(rect.width, 1) * current.w,
+            y: drag.viewY - (event.clientY - drag.y) / Math.max(rect.height, 1) * current.h,
+          }))
+        }}
+        onMouseUp={() => setDrag(null)}
+        onMouseLeave={() => setDrag(null)}
+        style={{ display: 'block', cursor: drag ? 'grabbing' : 'grab', userSelect: 'none' }}>
         {/* 連線（先畫，讓方塊蓋在上面）*/}
         {connections.map((c, ci) => {
           const pa = pinPos[`${c.a.block}|${groupOf(c.a.block, c.a.port)}`]
@@ -121,15 +173,23 @@ export default function CascadeSchematic({ graph }: Props) {
         {/* 方塊與 pin */}
         {blocks.map((b, bi) => {
           const x0 = MARGIN.x + bi * (BLOCK_W + GAP_X)
+          const solverColor = b.solver === 'siwave' ? '#2ecc71' : '#8e6de8'
           return (
             <g key={bi}>
               <rect x={x0} y={blockY} width={BLOCK_W} height={blockH} rx={8}
                 fill="rgba(30,38,50,0.95)"
-                stroke={b.solved === false ? 'var(--warn, #e3b341)' : '#4f83cc'}
+                stroke={b.solved === false ? 'var(--warn, #e3b341)' : solverColor}
                 strokeWidth={1.4}
                 strokeDasharray={b.solved === false ? '5 4' : undefined} />
               <text x={x0 + BLOCK_W / 2} y={blockY + 15} fill="#e6edf3" fontSize={12}
                 fontWeight={700} textAnchor="middle">{b.label}</text>
+              {b.solver && (
+                <text x={x0 + BLOCK_W / 2} y={blockY + 29} fill={solverColor}
+                  fontSize={8.5} fontWeight={700} textAnchor="middle">
+                  {b.solver.toUpperCase()}
+                  {Number.isFinite(b.complexity_score) ? ` · ${b.complexity_score}` : ''}
+                </text>
+              )}
               {b.sub_label && (
                 <text x={x0 + BLOCK_W / 2} y={blockY + blockH - 8} fill="#5c677d"
                   fontSize={8} textAnchor="middle">{b.sub_label}
