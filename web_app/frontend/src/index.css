@@ -266,6 +266,35 @@ pre {
   font-size: 12px;
 }
 
+.boundary-fill-toggle {
+  padding: 5px 10px;
+  border: 1px solid rgba(126, 231, 135, 0.45);
+  border-radius: 6px;
+  background: rgba(22, 26, 33, 0.94);
+  color: #c9d1d9;
+  cursor: pointer;
+  font-family: "Calibri", "Microsoft JhengHei", sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+}
+
+.boundary-fill-toggle:hover {
+  border-color: #7ee787;
+  color: #fff;
+}
+
+.boundary-fill-toggle--active {
+  background: rgba(46, 160, 67, 0.9);
+  border-color: #7ee787;
+  color: #fff;
+}
+
+.boundary-fill-toggle:focus-visible {
+  outline: 2px solid #58a6ff;
+  outline-offset: 2px;
+}
+
 .cleanup-compare__canvas {
   flex: 1;
   min-height: 0;
@@ -569,6 +598,290 @@ select.input {
   background: var(--danger-soft);
 }
 
+/* ── N 段切面評估表 ─────────────────────────────────── */
+.segment-analysis {
+  margin-top: 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+  font-size: 11.5px;
+}
+
+.segment-analysis__summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 9px;
+  padding: 7px 9px;
+  color: var(--text);
+  background: linear-gradient(180deg, #f8fafc, #eef2f7);
+  border-bottom: 1px solid var(--border);
+}
+
+.segment-analysis__summary span {
+  color: var(--muted);
+}
+
+.segment-analysis__gate-error {
+  display: block;
+  padding: 7px 9px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-bottom: 1px solid rgba(230, 57, 70, 0.2);
+}
+
+.segment-analysis__table-wrap {
+  max-height: 260px;
+  overflow: auto;
+}
+
+.segment-analysis__table {
+  width: 100%;
+  min-width: 690px;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.segment-analysis__table th,
+.segment-analysis__table td {
+  padding: 6px 7px;
+  text-align: center;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.segment-analysis__table th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  color: #4d5b6b;
+  background: #e8edf3;
+  font-weight: 700;
+}
+
+.segment-analysis__table th:first-child,
+.segment-analysis__table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+.segment-analysis__table th:first-child {
+  z-index: 4;
+}
+
+.segment-analysis__row td:first-child {
+  background: #ffffff;
+}
+
+.segment-analysis__row:hover td {
+  background: #f4f7fb;
+}
+
+.segment-analysis__row:hover td:first-child {
+  background: #eef3f9;
+}
+
+.segment-analysis__row--警告 td {
+  background: rgba(255, 183, 77, 0.08);
+}
+
+.segment-analysis__row--警告 td:first-child {
+  background: #fff8ec;
+}
+
+.segment-analysis__row--禁止 td {
+  background: rgba(230, 57, 70, 0.07);
+}
+
+.segment-analysis__row--禁止 td:first-child {
+  background: #fff1f2;
+}
+
+.segment-analysis__region {
+  font-weight: 700;
+  color: #34455a;
+}
+
+/* ── 每段 HFSS／SIwave 混合求解規劃 ─────────────────── */
+.segment-solver-plan {
+  margin-top: 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+  font-size: 11px;
+}
+
+.segment-solver-plan__toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 7px;
+  background: linear-gradient(180deg, #f8fafc, #eef2f7);
+  border-bottom: 1px solid var(--border);
+}
+
+.segment-solver-plan__toolbar strong {
+  margin-right: auto;
+  color: #34455a;
+}
+
+.segment-solver-plan__toolbar .btn {
+  width: auto;
+  padding: 3px 7px;
+  font-size: 10.5px;
+}
+
+.segment-solver-plan__table-wrap {
+  max-height: 210px;
+  overflow: auto;
+}
+
+.segment-solver-plan__table {
+  width: 100%;
+  min-width: 650px;
+  border-collapse: collapse;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.segment-solver-plan__table th,
+.segment-solver-plan__table td {
+  padding: 5px 6px;
+  text-align: center;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.segment-solver-plan__table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  color: #4d5b6b;
+  background: #e8edf3;
+}
+
+.segment-solver-plan__table tr.is-overridden td {
+  background: rgba(255, 183, 77, 0.09);
+}
+
+.segment-solver-plan__select {
+  width: 86px;
+  padding: 3px 5px;
+  font-size: 11px;
+}
+
+.segment-solver-plan__warning {
+  margin-left: 4px;
+  color: var(--warn);
+  font-weight: 800;
+}
+
+.segment-solver-plan__reason {
+  max-width: 230px;
+  overflow: hidden;
+  text-align: left !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.solver-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.solver-badge--hfss {
+  color: #5e35b1;
+  background: rgba(126, 87, 194, 0.16);
+  border: 1px solid rgba(126, 87, 194, 0.36);
+}
+
+.solver-badge--siwave {
+  color: #08783d;
+  background: rgba(46, 204, 113, 0.16);
+  border: 1px solid rgba(46, 204, 113, 0.36);
+}
+
+.segment-grade,
+.segment-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.segment-grade--a,
+.segment-grade--m,
+.segment-state--通過 {
+  color: #147568;
+  background: rgba(42, 157, 143, 0.16);
+}
+
+.segment-grade--b {
+  color: #2768a8;
+  background: rgba(64, 145, 220, 0.16);
+}
+
+.segment-grade--c,
+.segment-grade--d,
+.segment-state--警告 {
+  color: #a65311;
+  background: rgba(255, 166, 0, 0.2);
+}
+
+.segment-grade--f,
+.segment-state--禁止 {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.segment-analysis__rule {
+  padding: 6px 9px;
+  color: var(--muted);
+  background: #f8fafc;
+  border-top: 1px solid var(--border);
+  line-height: 1.45;
+}
+
+.segment-analysis__rejected {
+  padding: 6px 9px 8px;
+  border-top: 1px solid var(--border);
+}
+
+.segment-analysis__rejected summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #4d5b6b;
+}
+
+.segment-analysis__rejected-list {
+  max-height: 130px;
+  margin-top: 5px;
+  padding: 5px 7px;
+  overflow-y: auto;
+  color: var(--muted);
+  background: #f7f9fc;
+  border-radius: 5px;
+  line-height: 1.45;
+}
+
 /* ── 捲動軸 ─────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 10px;
@@ -617,3 +930,55 @@ select.input {
   width: 24px;
   height: 4px;
 }
+
+/* ── 可信度報告：左指標、右圖表 ──────────────────────────────
+   讓四項指標與 S 參數圖同時落在一屏內，不需捲動就能看清曲線。
+   視窗較窄時自動改回上下堆疊，避免圖表被壓到無法判讀。 */
+/* 指標壓成上方一排小卡，把整個寬度讓給 S 參數圖 */
+.fidelity-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fidelity-chip {
+  flex: 1 1 auto;
+  min-width: 104px;
+  border: 1px solid #303a48;
+  border-radius: 6px;
+  background: #131820;
+  padding: 4px 9px;
+}
+
+.fidelity-chip__label {
+  color: #93a4b8;
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.fidelity-chip__value {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+/* 檔案路徑：最小字級、單行截斷，不佔圖表高度 */
+.fidelity-paths {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2px 14px;
+  color: #6b7a8d;
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.fidelity-paths > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 入口介面隱藏未勾選的面板；hidden 的 UA 樣式會輸給任何 author 的 display 規則，
+   因此明確蓋回去。 */
+[hidden] { display: none !important; }
