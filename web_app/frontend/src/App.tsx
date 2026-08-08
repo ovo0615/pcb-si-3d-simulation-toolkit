@@ -2190,8 +2190,9 @@ ${state.error}` : ''}`)
         />
       </header>
 
-      {/* 選單列 */}
-      <nav className="menubar" onClick={(e) => e.stopPropagation()}>
+      {/* 選單列。入口畫面開著時隱藏——那些動作都要先選好項目才有意義。 */}
+      <nav className="menubar" hidden={pickerOpen}
+        onClick={(e) => e.stopPropagation()}>
         {Object.entries(menus).map(([name, entries]) => (
           <div key={name} className="menubar__item">
             <button
