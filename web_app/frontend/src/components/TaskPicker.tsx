@@ -39,10 +39,10 @@ export default function TaskPicker(
       padding: '14px 24px 12px',
     }}>
       <div style={{ flexShrink: 0, marginBottom: 10 }}>
-        <div style={{ fontSize: 18, fontWeight: 700, color: '#eaf1fa' }}>
+        <div style={{ fontSize: 21, fontWeight: 700, color: '#eaf1fa' }}>
           PCB SI 3D 模擬分析工具
         </div>
-        <div style={{ fontSize: 12, color: '#93a4b8', marginTop: 2 }}>
+        <div style={{ fontSize: 13.5, color: '#93a4b8', marginTop: 3 }}>
           勾選這次要用的項目，介面只會顯示這些；之後可從左上角「調整項目」隨時改。
         </div>
       </div>
@@ -50,23 +50,27 @@ export default function TaskPicker(
       <div style={{
         flex: 1, minHeight: 0, overflowY: 'auto',
         display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-        gap: '10px 20px', alignContent: 'start',
+        gap: '14px 24px', alignContent: 'start',
+        // CSS Grid 預設 alignItems: stretch，會把同一列裡較短的那組硬拉伸到
+        // 跟最高的那組一樣高，在短的那組底下留下一大片空白。改成 start
+        // 讓每組只佔自己內容的高度。
+        alignItems: 'start',
       }}>
         {TASK_GROUPS.map(group => (
           <div key={group.title}>
             <div style={{
-              fontSize: 11.5, fontWeight: 700, color: '#7fd1ff',
-              letterSpacing: 0.5, marginBottom: 5,
+              fontSize: 13, fontWeight: 700, color: '#7fd1ff',
+              letterSpacing: 0.5, marginBottom: 7,
             }}>
               {group.title}
             </div>
-            <div style={{ display: 'grid', gap: 4 }}>
+            <div style={{ display: 'grid', gap: 6 }}>
               {group.tasks.map(task => (
                 <label
                   key={task.key}
                   style={{
-                    display: 'flex', gap: 8, alignItems: 'flex-start',
-                    padding: '6px 10px', borderRadius: 7, cursor: 'pointer',
+                    display: 'flex', gap: 10, alignItems: 'flex-start',
+                    padding: '10px 14px', borderRadius: 8, cursor: 'pointer',
                     border: '1px solid ' + (flags[task.key] ? '#2f6d8f' : '#242c36'),
                     background: flags[task.key] ? '#152430' : '#12161c',
                   }}
@@ -75,15 +79,15 @@ export default function TaskPicker(
                     type="checkbox"
                     checked={flags[task.key]}
                     onChange={event => onToggle(task.key, event.target.checked)}
-                    style={{ marginTop: 2, flexShrink: 0 }}
+                    style={{ marginTop: 3, flexShrink: 0, width: 15, height: 15 }}
                   />
                   <span style={{ minWidth: 0 }}>
-                    <span style={{ fontSize: 12.5, fontWeight: 600 }}>
+                    <span style={{ fontSize: 15, fontWeight: 600 }}>
                       {task.label}
                     </span>
                     <span style={{
-                      display: 'block', fontSize: 10.5, color: '#8d9db0',
-                      marginTop: 1, lineHeight: 1.4,
+                      display: 'block', fontSize: 12.5, color: '#96a6ba',
+                      marginTop: 3, lineHeight: 1.5,
                     }}>
                       {task.hint}
                     </span>
@@ -97,11 +101,11 @@ export default function TaskPicker(
 
       {gaps.length > 0 && (
         <div style={{
-          flexShrink: 0, marginTop: 8,
+          flexShrink: 0, marginTop: 10,
           border: '1px solid #6a5326', background: '#221c10',
-          borderRadius: 7, padding: '6px 11px',
-          fontSize: 11, lineHeight: 1.6, color: '#ffd98a',
-          maxHeight: 76, overflowY: 'auto',
+          borderRadius: 8, padding: '8px 14px',
+          fontSize: 12.5, lineHeight: 1.7, color: '#ffd98a',
+          maxHeight: 90, overflowY: 'auto',
         }}>
           <b>以下項目缺少前置，仍可繼續，但流程可能接不起來：</b>
           {gaps.map(({ task, missing }) => (
