@@ -66,9 +66,27 @@ interface SegmentCut {
   nearest_obstacle?: { kind: string; label: string; net: string; layer: string } | null
 }
 
+type QualityThreshold = 'A' | 'B' | 'C'
+
+interface ThresholdReportItem {
+  grade: QualityThreshold
+  feasible: boolean
+  candidate_count: number
+  max_segment_mm?: number
+  min_segment_mm?: number
+  balance_ratio?: number
+}
+
 interface SegmentAnalysis {
   mode: 'axis'
-  optimization_mode: 'auto' | 'manual'
+  quality_threshold: QualityThreshold
+  /** 選定門檻下是否找得到可行的切點組合；false 時切面僅供參考，不可執行。 */
+  threshold_feasible: boolean
+  /** A／B／C 三個門檻各自的可行性與平衡度，用來回報「放寬一級能改善多少」。 */
+  threshold_report: ThresholdReportItem[]
+  segment_lengths_mm: number[]
+  balance_ratio: number
+  balance_warning: string | null
   direction: 'x' | 'y'
   bounds_mm: { min: [number, number]; max: [number, number] }
   n_segments: number
@@ -320,7 +338,7 @@ export default function App() {
   const [spData, setSpData] = useState<any | null>(null)
   const [spBusy, setSpBusy] = useState(false)
   const [spError, setSpError] = useState('')
-  // 已裁切檔案：只建立 Port 與求解器設定，不執行裁切（直接匯入模式使用）
+  // 設定 Port 與求解器：只建立 Port 與 Setup，不執行裁切
   const [portsOutputPath, setPortsOutputPath] = useState('')
   // 6c 疊構更換
   const [stackupFilePath, setStackupFilePath] = useState('')
@@ -391,9 +409,8 @@ export default function App() {
 
   // ── N 段分割 ──
   const [nSegments, setNSegments] = useState('3')
-  const [segmentAutoOptimize, setSegmentAutoOptimize] = useState(true)
-  const [segmentMaxAngleDeg, setSegmentMaxAngleDeg] = useState('30')
-  const [segmentClearanceMm, setSegmentClearanceMm] = useState('0.2')
+  // 這次可以接受的切點評分。門檻越嚴候選越少，各段就越難平分。
+  const [segmentQuality, setSegmentQuality] = useState<QualityThreshold>('B')
   const [segOutputDir, setSegOutputDir] = useState('')
   const [segAnalysis, setSegAnalysis] = useState<SegmentAnalysis | null>(null)
   const [segRun, setSegRun] = useState<SegmentRunResult | null>(null)
@@ -413,8 +430,19 @@ export default function App() {
   const [pickerReturning, setPickerReturning] = useState(false)
   const show = makeFlags(enabledTasks)
   // 「模擬設定」被四個任務共用，任一個勾了就要顯示。
-  const showSolverSetup = show.cutout || show.ports
-    || show.segment || show.schedule
+  // 裁切已不再建立 Port／Setup（見 create_ports），所以「模擬設定」不再跟
+  // show.cutout 綁定；只有真的會用到 Setup 的任務才需要它。
+  const showSolverSetup = show.ports || show.segment || show.schedule
+
+  // 「直接匯入分段」完全由入口的「局部裁切」決定，不需要使用者再勾一次：
+  // 要裁切 → 載入的是整片板、之後才切；不裁切 → 載入的檔案本身就是通道，
+  // 直接進分段。「設定 Port 與求解器」與這個判斷無關（Port 兩種情況都可能要建）。
+  const forcedDirectSegment = !show.cutout
+
+  useEffect(() => {
+    setDirectSegmentMode(prev =>
+      prev === forcedDirectSegment ? prev : forcedDirectSegment)
+  }, [forcedDirectSegment])
 
   const [schedMetaPath, setSchedMetaPath] = useState('')
   // 遠端求解包：打包 SIwave 段，複製到求解機雙擊執行
@@ -680,7 +708,7 @@ export default function App() {
         // 直接分段模式：預設清理與分段輸出路徑，載入後可直接到「Layout 清理」／8
         setCleanupOutputPath(normalized.replace(/\.aedb$/i, '') + '_cleaned.aedb')
         setSegOutputDir(normalized.replace(/\.aedb$/i, '') + '_segments')
-        // 「已裁切檔案：建立 Port 與求解器設定」 的輸出（另存新檔，不覆寫使用者自己裁切好的來源）
+        // 「設定 Port 與求解器」的輸出（另存新檔，不覆寫使用者自己裁切好的來源）
         setPortsOutputPath(normalized.replace(/\.aedb$/i, '') + '_ports.aedb')
       } else {
         setOutputPath(normalized.replace(/\.[^/.]+$/, '') + '_Cutout.aedb')
@@ -732,6 +760,9 @@ export default function App() {
         extent_type: extentType,
         port_components: comps,
         port_type: portType,
+        // 入口沒勾「設定 Port 與求解器」＝這次只要裁切；後端會跳過建 Port
+        // 與套用 Setup，之後可再用「設定 Port 與求解器」單獨補上。
+        create_ports: show.ports,
         output_path: outputPath,
         overwrite_existing: overwriteExisting,
         solution_freq: parseFloat(solutionFreq) || 25,
@@ -1146,7 +1177,7 @@ ${state.error}` : ''}`)
   // ── N 段分割 ───────────────────────────────────
   const handleSegmentAnalyze = async () => {
     const n = parseInt(nSegments, 10)
-    if (!canSegment) { alert('請先執行「執行裁切並建立 Port」，或勾選「直接匯入分段」後載入檔案'); return }
+    if (!canSegment) { alert('請先執行「局部裁切」，或勾選「直接匯入分段」後載入檔案'); return }
     if (signalNets.length === 0) { alert('請先於「選擇網路」 選擇訊號網路'); return }
     if (!n || n < 2) { alert('分段數 N 必須大於等於 2'); return }
     setLoadingMsg('分析切割位置中…')
@@ -1156,9 +1187,7 @@ ${state.error}` : ''}`)
         n_segments: n,
         signal_nets: signalNets,
         reference_nets: refNets,
-        auto_optimize: segmentAutoOptimize,
-        clearance_mm: parseFloat(segmentClearanceMm) || 0,
-        max_angle_deg: parseFloat(segmentMaxAngleDeg) || 30,
+        quality_threshold: segmentQuality,
         hfss_mesh_method: hfssMeshMethod,
       })
       setSegAnalysis(data)
@@ -1899,8 +1928,21 @@ ${state.error}` : ''}`)
   const handleSegmentRun = async () => {
     if (!segAnalysis) { alert('請先分析切割位置'); return }
     if (!segOutputDir) { alert('請設定分段輸出資料夾'); return }
+    if (!segAnalysis.threshold_feasible) {
+      const looser = segAnalysis.threshold_report.filter(r => r.feasible)
+      alert(looser.length
+        ? `以 ${segAnalysis.quality_threshold} 級為門檻找不到可行的切點組合。`
+          + `放寬到 ${looser.map(r => `${r.grade} 級（最大段 ${r.max_segment_mm!.toFixed(1)} mm）`).join('、')}`
+          + `可行，請改選「可接受評分」後重新分析。`
+        : `即使放寬到 C 級也找不到可行的切點組合，請降低分段數 N 後重新分析。`)
+      return
+    }
     if (!segAnalysis.requested_safe || segAnalysis.cuts.some(c => c.hard_blocked)) {
       alert(`硬性安全閘門未通過，不能執行 ${segAnalysis.n_segments} 段分割。此 Layout 最多只能安全切成 ${segAnalysis.max_safe_segments} 段，請降低 N 後重新分析。`)
+      return
+    }
+    if (segAnalysis.balance_warning
+        && !confirm(`${segAnalysis.balance_warning}\n\n分段是逐段依序求解，總時間與記憶體由最大段決定，差距過大等於沒有加速效果。仍要繼續執行嗎？`)) {
       return
     }
     if (segAnalysis.cuts.some(c => !c.valid || c.clearance_ok === false || c.poly_hit || c.risk_hit)) {
@@ -1915,9 +1957,7 @@ ${state.error}` : ''}`)
         direction: segAnalysis.direction,
         positions_mm: segAnalysis.cuts.map(c => c.position_mm),
         output_dir: segOutputDir,
-        auto_optimize: segmentAutoOptimize,
-        clearance_mm: parseFloat(segmentClearanceMm) || 0,
-        max_angle_deg: parseFloat(segmentMaxAngleDeg) || 30,
+        quality_threshold: segmentQuality,
       })
       setSegRun(data)
       setActiveSegIdx(-1)   // 執行完先顯示整體視圖（完整板 + 切割線），方便確認每段位置
@@ -2024,7 +2064,8 @@ ${state.error}` : ''}`)
       { label: '重新載入原始檔', action: handleReloadOriginal, disabled: allNets.length === 0 },
     ],
     '執行': [
-      { label: '執行裁切並建立 Port', action: handleCutout, disabled: signalNets.length === 0 },
+      { label: show.ports ? '執行裁切並建立 Port' : '執行裁切',
+        action: handleCutout, disabled: signalNets.length === 0 },
       { label: '分析 N 段切割位置', action: handleSegmentAnalyze, disabled: !cutScene },
       { label: '執行 N 段分割', action: handleSegmentRun, disabled: !segAnalysis },
       { label: 'S 參數串接', action: () => {}, disabled: true },
@@ -2284,12 +2325,14 @@ ${state.error}` : ''}`)
                     />
                     <button className="btn" onClick={handleBrowseInput}>瀏覽…</button>
                   </div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, fontSize: 12.5, cursor: 'pointer' }}
-                    title="檔案已是通道範圍（例如先前裁切的結果）時，勾選此項可跳過「裁切設定」~6 的裁切，載入後可先清理 Layout 或直接進行 N 段分割。">
-                    <input type="checkbox" checked={directSegmentMode}
-                      onChange={e => setDirectSegmentMode(e.target.checked)} />
-                    直接匯入分段（跳過裁切，直接進行 N 段分割）
-                  </label>
+                  {/* 原本這裡有「直接匯入分段」勾選框。入口的「局部裁切」已經
+                      決定了同一件事，再擺一個框只是要使用者把同樣的決定講第二遍。
+                      模式改由按鈕文字與下方這行說明表達。 */}
+                  <div className="panel-hint" style={{ marginTop: 6, fontSize: 11 }}>
+                    {directSegmentMode
+                      ? '入口未勾「局部裁切」，此檔案將直接作為通道進入後續步驟，不再裁切。'
+                      : '入口已勾「局部裁切」，載入後可設定裁切範圍。'}
+                  </div>
                   <button className="btn--primary" onClick={handleLoadFile} style={{ marginTop: 6 }}>
                     {directSegmentMode ? '載入檔案（直接分段）' : '載入電路板'}
                   </button>
@@ -2394,7 +2437,7 @@ ${state.error}` : ''}`)
                 </div>
 
                 {/* 「Port 設定」：Port 設定（直接分段模式不需要） */}
-                <div hidden={!(show.cutout || show.ports)} style={directSegmentMode ? { opacity: 0.4, pointerEvents: 'none' } : undefined}>
+                <div hidden={!show.ports} style={directSegmentMode ? { opacity: 0.4, pointerEvents: 'none' } : undefined}>
                   <h3 className="panel-title">Port 設定</h3>
                   <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1 }}>
@@ -2586,7 +2629,15 @@ ${state.error}` : ''}`)
 
                 {/* 「執行裁切並建立 Port」：輸出與執行（直接分段模式不需要） */}
                 <div hidden={!(show.cutout)} style={directSegmentMode ? { opacity: 0.4, pointerEvents: 'none' } : undefined}>
-                  <h3 className="panel-title">執行裁切並建立 Port</h3>
+                  <h3 className="panel-title">
+                    {show.ports ? '執行裁切並建立 Port' : '執行裁切'}
+                  </h3>
+                  {!show.ports && (
+                    <p className="panel-hint">
+                      入口未勾「設定 Port 與求解器」，這次只做裁切；輸出的通道還沒有
+                      元件端 Port 與 Setup，之後要排程求解前記得補上。
+                    </p>
+                  )}
                   <div className="field-row" style={{ marginTop: 6 }}>
                     <input
                       type="text"
@@ -2603,17 +2654,21 @@ ${state.error}` : ''}`)
                     disabled={signalNets.length === 0 || refNets.length === 0}
                     style={{ marginTop: 6 }}
                   >
-                    執行裁切並建立 Port
+                    {show.ports ? '執行裁切並建立 Port' : '執行裁切'}
                   </button>
                 </div>
 
-                {/* 已裁切檔案：跳過裁切，只建立 Port 與求解器設定 */}
-                <div hidden={!(show.ports)} style={directSegmentMode ? undefined : { opacity: 0.4, pointerEvents: 'none' }}>
-                  <h3 className="panel-title">已裁切檔案：建立 Port 與求解器設定</h3>
+                {/* 設定 Port 與求解器：對目前的工作檔建立 Port 與 Setup，不裁切。
+                    啟用條件用 canSegment 而不是 directSegmentMode——拆分後
+                    「先裁切、再單獨設 Port」也是合法路徑，那時 directSegmentMode
+                    是 false，用它當條件會把面板鎖死。 */}
+                <div hidden={!(show.ports)} style={canSegment ? undefined : { opacity: 0.4, pointerEvents: 'none' }}>
+                  <h3 className="panel-title">設定 Port 與求解器</h3>
                   <p className="panel-hint">
-                    直接匯入自己裁切好的通道時使用；不再執行裁切，只在上方選定的端點元件上建立
-                    Port 並套用求解器設定。<b>跳過這一步，通道頭尾不會有元件端 Port</b>，
-                    分段與求解都會白做，最後電路串接必定失敗。永遠另存新檔，來源檔不會被修改。
+                    在目前的通道上建立元件端 Port 並套用求解器設定，不執行裁切。
+                    適用於自己裁切好的檔案，或上一步只做了裁切的輸出。
+                    <b>跳過這一步，通道頭尾不會有元件端 Port</b>，分段與求解都會白做，
+                    最後電路串接必定失敗。永遠另存新檔，來源檔不會被修改。
                   </p>
                   <div className="field-row" style={{ marginTop: 6 }}>
                     <input
@@ -2644,30 +2699,36 @@ ${state.error}` : ''}`)
                 <div hidden={!(show.stackup)} style={{ opacity: canSegment ? 1 : 0.5, pointerEvents: canSegment ? undefined : 'none' }}>
                   <h3 className="panel-title">疊構更換</h3>
                   <p className="panel-hint">
-                    匯出目前疊構 → 在外部編輯材料與層厚 → 匯入。支援 XML／CSV／JSON；
-                    XML 為 Ansys Control 格式。<b>套用前一定會先列出差異</b>，永遠另存新檔。
+                    指定疊構檔即可直接分析並套用，支援 XML／CSV／JSON；XML 為 Ansys
+                    Control 格式。<b>套用前一定會先列出差異</b>，永遠另存新檔。
                   </p>
 
-                  <div className="field-row" style={{ marginTop: 6 }}>
-                    <select className="input" style={{ width: 90 }} value={stackupExportFormat}
+                  <div className="field-label" style={{ marginTop: 6 }}>疊構檔</div>
+                  <input type="text" className="input" value={stackupFilePath}
+                    onChange={e => { setStackupFilePath(e.target.value); setStackupDiff(null) }}
+                    placeholder="疊構檔路徑…（.xml／.csv／.json）" />
+                  <button className="btn--primary" style={{ width: '100%', marginTop: 6 }}
+                    onClick={handleStackupAnalyze} disabled={!stackupFilePath}>
+                    分析差異
+                  </button>
+
+                  {/* 匯出是選用的輔助功能，不是流程的第一步——手上已經有疊構檔
+                      （例如來自其他工具）時完全不需要先匯出。原本用「1）2）3）」
+                      編號，會讓人以為非得先匯出不可。 */}
+                  <div className="field-row" style={{ marginTop: 8 }}>
+                    <span className="panel-hint" style={{ flex: 1, margin: 0 }}>
+                      沒有現成檔案？可先匯出目前疊構當範本再編輯：
+                    </span>
+                    <select className="input" style={{ width: 76 }} value={stackupExportFormat}
                       onChange={e => setStackupExportFormat(e.target.value as 'xml' | 'csv' | 'json')}>
                       <option value="xml">XML</option>
                       <option value="csv">CSV</option>
                       <option value="json">JSON</option>
                     </select>
-                    <button className="btn" style={{ flex: 1 }} onClick={handleStackupExport}>
-                      1）匯出目前疊構
+                    <button className="btn" onClick={handleStackupExport}>
+                      匯出
                     </button>
                   </div>
-
-                  <div className="field-label" style={{ marginTop: 8 }}>疊構檔（編輯完成後）</div>
-                  <input type="text" className="input" value={stackupFilePath}
-                    onChange={e => { setStackupFilePath(e.target.value); setStackupDiff(null) }}
-                    placeholder="疊構檔路徑…（.xml／.csv／.json）" />
-                  <button className="btn" style={{ width: '100%', marginTop: 6 }}
-                    onClick={handleStackupAnalyze} disabled={!stackupFilePath}>
-                    2）分析差異
-                  </button>
 
                   {stackupDiff && (
                     <div className="status" style={{ marginTop: 6, fontSize: 11.5 }}>
@@ -2710,7 +2771,7 @@ ${state.error}` : ''}`)
                     onClick={handleStackupApply}
                     disabled={!stackupDiff || stackupDiff.comparable === false
                       || (stackupDiff.requires_confirmation && !stackupConfirmRemoval)}>
-                    3）套用疊構並另存
+                    套用疊構並另存
                   </button>
                 </div>
 
@@ -2904,62 +2965,97 @@ ${state.error}` : ''}`)
                     將裁切後的板子分成 N 段，切面自動截斷走線並建立 Gap Port。
                     {directSegmentMode && <span style={{ color: 'var(--accent)' }}>（直接分段模式：已跳過裁切）</span>}
                   </p>
-                  <label style={{ marginTop: 7, display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                    <input type="checkbox" checked={segmentAutoOptimize}
-                      onChange={e => { setSegmentAutoOptimize(e.target.checked); setSegAnalysis(null) }}
-                      disabled={!canSegment} />
-                    <span>自動最佳化每個切面（建議）</span>
-                  </label>
-                  <div className="status" style={{ marginTop: 5, fontSize: 11.5 }}>
-                    {segmentAutoOptimize
-                      ? '工具會依局部線寬、參考層高度、Via／Pad 距離與走線角度，自動選擇 A～D 級最佳切點。'
-                      : '手動模式：所有切面共用下方的垂直度與淨空條件。'}
-                  </div>
                   <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: segmentAutoOptimize ? '80px 1fr' : '80px 1fr 1fr',
-                    gap: 8, marginTop: 6, alignItems: 'end',
+                    display: 'grid', gridTemplateColumns: '80px 1fr',
+                    gap: 8, marginTop: 7, alignItems: 'end',
                   }}>
                     <div>
                       <div className="field-label">分段數 N</div>
                       <input type="number" className="input" min="2" max="10" step="1"
                         value={nSegments} onChange={e => setNSegments(e.target.value)} disabled={!canSegment} />
                     </div>
-                    {!segmentAutoOptimize && (
-                      <>
-                        <div>
-                          <div className="field-label">垂直度容差（°）</div>
-                          <input type="number" className="input" min="1" max="89" step="1"
-                            value={segmentMaxAngleDeg}
-                            onChange={e => { setSegmentMaxAngleDeg(e.target.value); setSegAnalysis(null) }}
-                            disabled={!canSegment} />
-                        </div>
-                        <div>
-                          <div className="field-label">建議淨空（mm）</div>
-                          <input type="number" className="input" min="0" step="0.1"
-                            value={segmentClearanceMm}
-                            onChange={e => { setSegmentClearanceMm(e.target.value); setSegAnalysis(null) }}
-                            disabled={!canSegment} />
-                        </div>
-                      </>
-                    )}
+                    <div>
+                      <div className="field-label">可接受評分</div>
+                      <select className="input" value={segmentQuality}
+                        onChange={e => {
+                          setSegmentQuality(e.target.value as QualityThreshold)
+                          setSegAnalysis(null)
+                        }}
+                        disabled={!canSegment}>
+                        <option value="A">A 級以上（最嚴，候選最少）</option>
+                        <option value="B">B 級以上（建議）</option>
+                        <option value="C">C 級以上（最容易平分，需人工複核）</option>
+                      </select>
+                    </div>
                     <button className="btn" style={{ gridColumn: '1 / -1' }} onClick={handleSegmentAnalyze} disabled={!canSegment}>
                       1) 分析切割位置
                     </button>
+                  </div>
+                  <div className="status" style={{ marginTop: 5, fontSize: 11.5 }}>
+                    工具會在這個評分之上，把各段長度盡可能平分——分段是逐段依序求解，
+                    總時間與記憶體由最大的那一段決定。
+                    {segmentQuality === 'C' && (
+                      <b style={{ color: 'var(--warn, #d79a35)' }}>
+                        　C 級切點的角度或淨空已放寬，執行前建議人工複核切面位置。
+                      </b>
+                    )}
                   </div>
                   {segAnalysis && (
                     <div className="segment-analysis">
                       <div className="segment-analysis__summary">
                         <strong>切面評估表</strong>
                         <span>主方向 {segAnalysis.direction.toUpperCase()}</span>
-                        <span>{segAnalysis.optimization_mode === 'auto' ? '自動最佳化' : '手動條件'}</span>
+                        <span>門檻 {segAnalysis.quality_threshold} 級以上</span>
                         <span>{segAnalysis.cuts.length} 個切面</span>
                       </div>
-                      {!segAnalysis.requested_safe && (
+
+                      {/* 段長分布：這是「有沒有加速效果」的關鍵，放在最前面。 */}
+                      {segAnalysis.threshold_feasible && (
+                        <div className="status" style={{ marginTop: 6, fontSize: 11.5 }}>
+                          各段長度　{segAnalysis.segment_lengths_mm.map(v => v.toFixed(1)).join('／')} mm
+                          　·　最大／最小 <b>{segAnalysis.balance_ratio.toFixed(2)} 倍</b>
+                          {segAnalysis.balance_ratio <= 1.5 && '（分布良好）'}
+                        </div>
+                      )}
+
+                      {!segAnalysis.threshold_feasible && (
+                        <strong className="segment-analysis__gate-error">
+                          以 {segAnalysis.quality_threshold} 級為門檻找不到可行的切點組合。
+                          {segAnalysis.threshold_report.some(r => r.feasible)
+                            ? `　放寬到 ${segAnalysis.threshold_report.filter(r => r.feasible)
+                                .map(r => `${r.grade} 級（最大段 ${r.max_segment_mm!.toFixed(1)} mm、`
+                                  + `${r.balance_ratio!.toFixed(2)} 倍）`).join('、')}`
+                              + ' 可行，請改選「可接受評分」後重新分析。'
+                            : '　即使放寬到 C 級也無解，請降低分段數 N。下方切面位置僅供參考，不可執行。'}
+                        </strong>
+                      )}
+
+                      {segAnalysis.balance_warning && (
+                        <strong className="segment-analysis__gate-error">
+                          {segAnalysis.balance_warning}
+                        </strong>
+                      )}
+
+                      {!segAnalysis.requested_safe && segAnalysis.threshold_feasible && (
                         <strong className="segment-analysis__gate-error">
                           硬性安全閘門未通過：要求 {segAnalysis.n_segments} 段，最多只能安全切成 {segAnalysis.max_safe_segments} 段。
                         </strong>
                       )}
+
+                      {/* 三個門檻的對照，讓「放寬一級值不值得」一眼可判斷。 */}
+                      <div className="status" style={{ marginTop: 6, fontSize: 11 }}>
+                        門檻對照：{segAnalysis.threshold_report.map(item => (
+                          <span key={item.grade} style={{ marginRight: 10 }}>
+                            <b style={{
+                              color: item.grade === segAnalysis.quality_threshold
+                                ? 'var(--accent)' : undefined,
+                            }}>{item.grade} 級</b>
+                            {item.feasible
+                              ? ` 最大 ${item.max_segment_mm!.toFixed(1)} mm／${item.balance_ratio!.toFixed(2)} 倍`
+                              : ' 無解'}
+                          </span>
+                        ))}
+                      </div>
                       <div className="segment-analysis__table-wrap">
                         <table className="segment-analysis__table">
                           <thead>

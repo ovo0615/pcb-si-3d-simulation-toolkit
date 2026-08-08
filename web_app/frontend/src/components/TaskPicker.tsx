@@ -9,6 +9,7 @@ import {
   DEFAULT_TASKS,
   TASK_GROUPS,
   missingPrerequisites,
+  type TaskDef,
   type TaskFlags,
   type TaskKey,
 } from '../taskConfig'
@@ -23,6 +24,69 @@ interface Props {
 }
 
 const FONT = '"Calibri", "Microsoft JhengHei", sans-serif'
+
+/** 畫一個項目；有 children 時，子選項只在父項目勾選時出現。 */
+function renderTask(
+  task: TaskDef,
+  flags: TaskFlags,
+  onToggle: (key: TaskKey, checked: boolean) => void,
+  depth = 0,
+) {
+  const on = flags[task.key]
+  return (
+    <div key={task.key}>
+      <label
+        style={{
+          display: 'flex', gap: 10, alignItems: 'flex-start',
+          padding: depth ? '7px 12px' : '10px 14px',
+          borderRadius: 8, cursor: 'pointer',
+          border: '1px solid ' + (on ? '#2f6d8f' : '#242c36'),
+          background: on ? '#152430' : '#12161c',
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={event => onToggle(task.key, event.target.checked)}
+          style={{ marginTop: 3, flexShrink: 0, width: 15, height: 15 }}
+        />
+        <span style={{ minWidth: 0 }}>
+          <span style={{ fontSize: depth ? 13.5 : 15, fontWeight: 600 }}>
+            {task.label}
+          </span>
+          <span style={{
+            display: 'block', fontSize: depth ? 11.5 : 12.5, color: '#96a6ba',
+            marginTop: 3, lineHeight: 1.5,
+          }}>
+            {task.hint}
+          </span>
+          {/* 取消勾選的後果直接寫在這裡，不必等使用者勾了別的東西才跳警告 */}
+          {!on && task.offNote && (
+            <span style={{
+              display: 'block', fontSize: 11.5, color: '#ffd98a',
+              marginTop: 3, lineHeight: 1.5,
+            }}>
+              {task.offNote}
+            </span>
+          )}
+        </span>
+      </label>
+
+      {task.children && task.children.length > 0 && on && (
+        <div style={{
+          marginTop: 5, marginLeft: 16, paddingLeft: 12,
+          borderLeft: '2px solid #2a3644',
+          display: 'grid', gap: 5,
+        }}>
+          <div style={{ fontSize: 11.5, color: '#8d9db0' }}>
+            這次要對這片板子做什麼：
+          </div>
+          {task.children.map(child => renderTask(child, flags, onToggle, depth + 1))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function TaskPicker(
   { flags, onToggle, onSetAll, onStart, returning }: Props,
@@ -65,35 +129,7 @@ export default function TaskPicker(
               {group.title}
             </div>
             <div style={{ display: 'grid', gap: 6 }}>
-              {group.tasks.map(task => (
-                <label
-                  key={task.key}
-                  style={{
-                    display: 'flex', gap: 10, alignItems: 'flex-start',
-                    padding: '10px 14px', borderRadius: 8, cursor: 'pointer',
-                    border: '1px solid ' + (flags[task.key] ? '#2f6d8f' : '#242c36'),
-                    background: flags[task.key] ? '#152430' : '#12161c',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={flags[task.key]}
-                    onChange={event => onToggle(task.key, event.target.checked)}
-                    style={{ marginTop: 3, flexShrink: 0, width: 15, height: 15 }}
-                  />
-                  <span style={{ minWidth: 0 }}>
-                    <span style={{ fontSize: 15, fontWeight: 600 }}>
-                      {task.label}
-                    </span>
-                    <span style={{
-                      display: 'block', fontSize: 12.5, color: '#96a6ba',
-                      marginTop: 3, lineHeight: 1.5,
-                    }}>
-                      {task.hint}
-                    </span>
-                  </span>
-                </label>
-              ))}
+              {group.tasks.map(task => renderTask(task, flags, onToggle))}
             </div>
           </div>
         ))}

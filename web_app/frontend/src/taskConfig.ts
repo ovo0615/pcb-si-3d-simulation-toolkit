@@ -5,8 +5,8 @@
 // 設計要點：
 //  * 勾選單位是「任務」而不是「面板」——使用者想的是「我要切局部」，不是
 //    「我要看裁切設定面板」。
-//  * 任務與面板**不是一對一**：「模擬設定」面板被局部裁切、已裁切檔案建 Port、
-//    N 段分割、排程求解四個任務共用，任一個勾了就得顯示。
+//  * 任務與面板**不是一對一**：「模擬設定」面板被設定 Port 與求解器、
+//    N 段分割、排程求解共用，任一個勾了就得顯示。
 //  * 有三個任務不是獨立面板，而是別的面板裡的區塊（遠端求解包在排程面板內、
 //    分段對照與眼圖在串接面板內）。
 
@@ -33,6 +33,16 @@ export interface TaskDef {
   requires?: TaskKey[]
   /** 前置不足時要補充說明的例外情形。 */
   requiresNote?: string
+  /** 取消勾選這個項目時要一併說明的後果，顯示在項目底下。 */
+  offNote?: string
+  /**
+   * 子選項：只有在父項目勾選時才顯示。
+   *
+   * 「載入電路板」底下的兩個項目全都 requires: ['load']，攤平成同層會讓人以為
+   * 三者平行；實際上不載入板子就只剩外部 S 參數串接可用。做成父子關係，畫面
+   * 才對得上真正的相依。
+   */
+  children?: TaskDef[]
 }
 
 export interface TaskGroup {
@@ -48,18 +58,21 @@ export const TASK_GROUPS: TaskGroup[] = [
         key: 'load',
         label: '載入電路板',
         hint: '匯入 .aedb／.brd／.tgz，選擇訊號與參考網路。',
-      },
-      {
-        key: 'cutout',
-        label: '局部裁切（含 Port 與求解設定）',
-        hint: '依訊號範圍裁出通道，建立元件端 Port 與 HFSS Setup。',
-        requires: ['load'],
-      },
-      {
-        key: 'ports',
-        label: '已裁切檔案：建立 Port 與求解設定',
-        hint: '手上已是裁切好的通道時，只補建 Port 與 Setup，不重跑裁切。',
-        requires: ['load'],
+        offNote: '不勾選＝不載入板子，只能用「外部 S 參數檔」做串接與檢視。',
+        children: [
+          {
+            key: 'cutout',
+            label: '局部裁切',
+            hint: '依訊號範圍裁出通道。只做裁切，不建立 Port。',
+            requires: ['load'],
+          },
+          {
+            key: 'ports',
+            label: '設定 Port 與求解器',
+            hint: '在通道上建立元件端 Port 與 HFSS Setup／掃頻。',
+            requires: ['load'],
+          },
+        ],
       },
     ],
   },
@@ -141,7 +154,12 @@ export const TASK_GROUPS: TaskGroup[] = [
   },
 ]
 
-export const ALL_TASKS: TaskDef[] = TASK_GROUPS.flatMap(group => group.tasks)
+function flatten(tasks: TaskDef[]): TaskDef[] {
+  return tasks.flatMap(task => [task, ...flatten(task.children ?? [])])
+}
+
+export const ALL_TASKS: TaskDef[] = flatten(
+  TASK_GROUPS.flatMap(group => group.tasks))
 
 /** 首次啟動的預設組：能一路走完的最短路徑。
  *
