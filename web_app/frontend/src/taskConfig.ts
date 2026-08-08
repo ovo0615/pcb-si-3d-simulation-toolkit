@@ -24,6 +24,7 @@ export type TaskKey =
   | 'sparam'
   | 'fidelity'
   | 'eye'
+  | 'report'
 
 export interface TaskDef {
   key: TaskKey
@@ -149,6 +150,11 @@ export const TASK_GROUPS: TaskGroup[] = [
         label: '眼圖',
         hint: '以串接後 Touchstone 直接求解 QuickEye 眼圖。',
         requires: ['cascade'],
+      },
+      {
+        key: 'report',
+        label: '一鍵 HTML 報告',
+        hint: '保存各結果畫面的最新快照，加入公司品牌與浮水印後產生自包含 HTML 報告。',
       },
     ],
   },

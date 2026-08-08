@@ -15,6 +15,9 @@ import {
   type TaskKey,
 } from './taskConfig'
 import CascadeSchematic, { CascadeGraph } from './components/CascadeSchematic'
+import ReportCenter from './components/ReportCenter'
+import ReportSnapshotButton from './components/ReportSnapshotButton'
+import { markReportSnapshotsStale } from './reportApi'
 
 const normalizeUserPath = (path: string): string => {
   let value = path.trim()
@@ -205,7 +208,7 @@ interface ComponentInfo {
   pin_count: number
 }
 
-type ViewMode = 'full' | 'cut' | 'cleanup' | 'segments' | 'schematic' | 'sparam' | 'fidelity' | 'eye'
+type ViewMode = 'full' | 'cut' | 'cleanup' | 'segments' | 'schematic' | 'sparam' | 'fidelity' | 'eye' | 'report'
 
 /** 量測容器實際高度，讓圖表填滿剩餘空間而不需捲動。
  *  分頁高度會隨視窗與 Allotment 分隔線改變，因此以 ResizeObserver 追蹤，
@@ -224,6 +227,29 @@ function useMeasuredHeight<T extends HTMLElement>() {
     return () => observer.disconnect()
   }, [])
   return [ref, height] as const
+}
+
+/** 結果物件換版後，將同類報告快照標記為可能過期；第一次載入不誤報。 */
+function useReportStaleRevision(
+  workspace: string,
+  kinds: string[],
+  revision: unknown,
+  reason: string,
+) {
+  const previous = useRef(revision)
+  const kindKey = kinds.join('|')
+  useEffect(() => {
+    if (!workspace) {
+      previous.current = revision
+      return
+    }
+    if (previous.current && revision && previous.current !== revision) {
+      void markReportSnapshotsStale(workspace, kinds, reason).catch(() => undefined)
+    }
+    previous.current = revision
+  // kinds 由固定字串建立，以 kindKey 作為穩定相依值。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace, revision, kindKey, reason])
 }
 
 /** 由資料速率推得發送端 Tr／Tf：Tr = 0.2 × UI（與後端 rise_time_ps_for 同式）。
@@ -538,6 +564,7 @@ export default function App() {
   const [fullScene, setFullScene] = useState<PreviewData | null>(null)
   const [cutScene, setCutScene] = useState<PreviewData | null>(null)
   const [activeView, setActiveView] = useState<ViewMode>('full')
+  const [reportWorkspace, setReportWorkspace] = useState('')
 
   // 是否可進行分段：裁切完成、或直接匯入分段模式已載入
   const canSegment = !!cutScene || (directSegmentMode && allNets.length > 0)
@@ -2093,6 +2120,7 @@ ${state.error}` : ''}`)
       { label: '完整 Layout', action: () => setActiveView('full') },
       { label: '裁切後 Layout', action: () => setActiveView('cut'), disabled: !cutScene },
       { label: '清理前後對比', action: () => setActiveView('cleanup'), disabled: !cleanupAfterScene },
+      { label: '一鍵 HTML 報告中心', action: () => setActiveView('report') },
     ],
     '說明': [
       { label: '關於本工具', action: () => alert('PCB SI 3D 模擬分析工具\n\n電路板裁切與 Port 自動建立\n疊構更換、背鑽與 Layout 清理\nN 段分割與 HFSS／SIwave 混合求解\n遠端求解包（求解機不需安裝 Python）\nS 參數串接、分段對照與眼圖\n\n此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供') },
@@ -2158,6 +2186,41 @@ ${state.error}` : ''}`)
   const visibleActualBoundary = activeView === 'cut'
     ? completedBoundary?.actual || null
     : null
+  // 報告工作區優先跟隨分段輸出，其次為裁切輸出與原始板路徑。
+  // 後端會確保 .aedb 不被當成一般資料夾而寫入內部。
+  const reportBasePath = segOutputDir || outputPath || inputPath
+  const reportProjectName = (inputPath.split(/[\\/]/).pop() || 'PCB SI 分析專案')
+    .replace(/\.(aedb|brd|tgz)$/i, '')
+  const reportSectionByView: Record<ViewMode, string> = {
+    full: 'board', cut: 'cutout', cleanup: 'cleanup', segments: 'segments',
+    schematic: 'schematic', sparam: 'sparam', fidelity: 'fidelity', eye: 'eye',
+    report: 'results',
+  }
+  const reportSourceRevision = activeView === 'segments'
+    ? (schedMetaPath || segOutputDir)
+    : activeView === 'schematic' || activeView === 'sparam'
+      ? String(cascadeResult?.output_path || schedMetaPath || '')
+      : activeView === 'fidelity'
+        ? String(fidelityStatus?.result?.report_path || '')
+        : activeView === 'eye'
+          ? String(eyeJob?.result?.image_path || '')
+          : activeView === 'cut' || activeView === 'cleanup'
+            ? outputPath
+            : inputPath
+  const reportSnapshotAvailable = activeView !== 'report' && Boolean(
+    scene
+    || (activeView === 'schematic' && schematicGraph)
+    || (activeView === 'sparam' && cascadeResult)
+    || (activeView === 'fidelity' && fidelityStatus?.result)
+    || (activeView === 'eye' && eyeJob?.status === 'done'),
+  )
+  useReportStaleRevision(reportWorkspace, ['board'], fullScene, '完整板資料已重新載入')
+  useReportStaleRevision(reportWorkspace, ['cutout'], cutScene, '裁切結果已更新')
+  useReportStaleRevision(reportWorkspace, ['cleanup'], cleanupAfterScene, 'Layout 清理結果已更新')
+  useReportStaleRevision(reportWorkspace, ['segments'], segRun, 'N 段分割結果已更新')
+  useReportStaleRevision(reportWorkspace, ['schematic', 'sparam'], cascadeResult, '電路串接結果已更新')
+  useReportStaleRevision(reportWorkspace, ['fidelity'], fidelityStatus?.result, '可信度結果已更新')
+  useReportStaleRevision(reportWorkspace, ['eye'], eyeJob?.result, '眼圖結果已更新')
   const formatBytes = (value: number) => {
     if (value < 1024) return `${value} B`
     if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
@@ -3923,6 +3986,11 @@ ${state.error}` : ''}`)
                   onClick={() => setActiveView('eye')}
                   disabled={!eyeJob || eyeJob.status === 'idle'}
                 >眼圖</button>
+                <button
+                  hidden={!(show.report)}
+                  className={'viewtab' + (activeView === 'report' ? ' viewtab--active' : '')}
+                  onClick={() => setActiveView('report')}
+                >報告</button>
               </div>
 
               <div style={{ flex: 1, minHeight: 0 }}>
@@ -3930,8 +3998,8 @@ ${state.error}` : ''}`)
                   {/* 2D 預覽 */}
                   <Allotment.Pane minSize={200}>
                     <div style={{ paddingBottom: showLogs ? 7 : 0, height: '100%' }}>
-                      <div className="panel" style={{ overflow: 'hidden', position: 'relative', height: '100%', background: '#0c0e12', borderTopLeftRadius: 0 }}>
-                        {activeView !== 'cleanup' && activeView !== 'fidelity' && activeView !== 'eye' && <div style={{ position: 'absolute', top: 12, left: 16, zIndex: 1, fontSize: 12.5, fontWeight: 700, color: activeView === 'cut' ? '#7ee787' : '#9fb0c3', pointerEvents: 'none' }}>
+                      <div id="report-result-capture" className="panel" style={{ overflow: 'hidden', position: 'relative', height: '100%', background: '#0c0e12', borderTopLeftRadius: 0 }}>
+                        {activeView !== 'cleanup' && activeView !== 'fidelity' && activeView !== 'eye' && activeView !== 'report' && <div style={{ position: 'absolute', top: 12, left: 16, zIndex: 1, fontSize: 12.5, fontWeight: 700, color: activeView === 'cut' ? '#7ee787' : '#9fb0c3', pointerEvents: 'none' }}>
                           {sceneLabel}
                           {scene?.preview_mode === 'coarse' ? ' · 大板快速預覽（實際 EDB 未簡化）' : ''}
                           {activeView !== 'schematic' ? ' · 左鍵平移、滾輪縮放 · 右側 ◀▶ 展開圖層面板' : ''}
@@ -3939,7 +4007,28 @@ ${state.error}` : ''}`)
                             ? ` · 外框最大差異 ${completedBoundary.comparison.max_boundary_error_mm?.toFixed(3)} mm`
                             : ''}
                         </div>}
-                        {activeView === 'eye' ? (
+                        {show.report && reportSnapshotAvailable && (
+                          <ReportSnapshotButton
+                            basePath={reportBasePath}
+                            projectName={reportProjectName}
+                            targetId="report-result-capture"
+                            kind={activeView === 'segments' && segRun && !isOverviewMode
+                              ? `segments-${activeSegIdx + 1}` : activeView}
+                            title={sceneLabel}
+                            section={reportSectionByView[activeView]}
+                            sourceRevision={reportSourceRevision}
+                            sourceMetadata={{
+                              signal_net_count: signalNets.length,
+                              reference_net_count: refNets.length,
+                              segment_count: segRun?.segments?.length || segAnalysis?.n_segments || 0,
+                            }}
+                            onSaved={setReportWorkspace}
+                          />
+                        )}
+                        {activeView === 'report' ? (
+                          <ReportCenter basePath={reportBasePath} projectName={reportProjectName}
+                            onWorkspaceChange={setReportWorkspace} />
+                        ) : activeView === 'eye' ? (
                           <div style={{
                             height: '100%', overflow: 'hidden', padding: 14,
                             display: 'flex', flexDirection: 'column', gap: 8,
@@ -4338,7 +4427,7 @@ ${state.error}` : ''}`)
                           </div>
                         )}
 
-                        {!scene && activeView !== 'schematic' && (
+                        {!scene && activeView !== 'schematic' && activeView !== 'report' && (
                           <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: '#5c677d', fontSize: 14, pointerEvents: 'none' }}>
                             請先於左側載入電路板檔案
                           </div>
