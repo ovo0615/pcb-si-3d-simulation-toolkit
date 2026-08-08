@@ -511,6 +511,10 @@ export default function App() {
   const [openMenu, setOpenMenu] = useState<string | null>(null)
 
   const logBoxRef = useRef<HTMLDivElement | null>(null)
+  // 載入遮罩內的日誌尾巴用獨立 ref：遮罩顯示時把系統日誌整個蓋住，使用者在
+  // 長時間操作（例如讀取大型 EDB）期間看不到任何進度，只能乾等一個籠統的
+  // 訊息。這個 ref 對應的框在遮罩顯示時才存在，所以需要自己的自動捲動邏輯。
+  const loadingLogBoxRef = useRef<HTMLDivElement | null>(null)
   const signalFileRef = useRef<HTMLInputElement | null>(null)
 
   // 新日誌進來時自動捲到最底；使用者往上捲閱讀時不打擾
@@ -520,6 +524,12 @@ export default function App() {
     const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60
     if (nearBottom) box.scrollTop = box.scrollHeight
   }, [logs])
+
+  useEffect(() => {
+    const box = loadingLogBoxRef.current
+    if (!box) return
+    box.scrollTop = box.scrollHeight
+  }, [logs, isLoading])
 
   // WebSocket 日誌（含斷線自動重連）
   useEffect(() => {
@@ -2152,6 +2162,27 @@ ${state.error}` : ''}`)
               {cutoutStopping ? '停止中…' : '停止裁切工作'}
             </button>
           )}
+          {/* 遮罩擋住操作的期間，系統日誌本體也被蓋在下面看不到；這裡直接秀
+              最新幾行，讓長時間操作（例如讀取大型 EDB）不是乾等一句籠統訊息。
+              logs 是全域 websocket 狀態，遮罩顯示與否都持續即時更新。 */}
+          <div
+            ref={loadingLogBoxRef}
+            style={{
+              width: 'min(640px, 80vw)', maxHeight: '32vh', overflowY: 'auto',
+              fontSize: 12, fontWeight: 400, fontFamily: '"Cascadia Mono", monospace',
+              textAlign: 'left', color: 'var(--muted)',
+              background: 'rgba(20,24,30,0.82)', padding: '10px 12px',
+              borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+            }}
+          >
+            {logs.slice(-60).map((l, i) => (
+              <div key={i} style={{
+                color: /錯誤|失敗|error|fail/i.test(l) ? 'var(--danger)'
+                  : /警告|warn/i.test(l) ? 'var(--warn)' : undefined,
+              }}>{l}</div>
+            ))}
+            {logs.length === 0 && <div style={{ color: 'var(--faint)' }}>目前無日誌…</div>}
+          </div>
         </div>
       )}
       {chartExpanded && (
