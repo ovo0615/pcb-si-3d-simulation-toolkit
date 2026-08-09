@@ -47,3 +47,31 @@ export const loadMainSplit = () => load(MAIN_KEY, DEFAULT_MAIN)
 export const saveMainSplit = (sizes: number[]) => save(MAIN_KEY, sizes)
 export const loadLogSplit = () => load(LOG_KEY, DEFAULT_LOG)
 export const saveLogSplit = (sizes: number[]) => save(LOG_KEY, sizes)
+
+// ── 報告工作區 ───────────────────────────────────────────────────────────
+//
+// 報告快照全部寫進同一個工作區，這個位置必須跨越「換一個匯入來源」而不變。
+// 原本它每次都由目前載入的檔案重新推導，於是同一個案子會長出好幾個
+// report_workspace（載入板子一個、看串接 .sNp 又一個），快照散落各處。
+//
+// 這裡只負責記住使用者實際用過的那一個；第一次還沒有時回空字串，由呼叫端
+// 依目前檔案推導出預設值。
+
+const REPORT_WORKSPACE_KEY = 'pcbsi.reportWorkspace.v1'
+
+export function loadReportWorkspace(): string {
+  try {
+    return window.localStorage.getItem(REPORT_WORKSPACE_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+export function saveReportWorkspace(path: string): void {
+  try {
+    if (path) window.localStorage.setItem(REPORT_WORKSPACE_KEY, path)
+    else window.localStorage.removeItem(REPORT_WORKSPACE_KEY)
+  } catch {
+    // localStorage 不可用時不該讓介面壞掉，只是這次的位置不會被記住。
+  }
+}

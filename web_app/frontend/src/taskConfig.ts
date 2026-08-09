@@ -111,8 +111,10 @@ export const TASK_GROUPS: TaskGroup[] = [
       },
       {
         key: 'segment',
-        label: 'N 段分割',
-        hint: '沿通道主方向切成 N 段，於切面建立 Port。',
+        label: 'N 段分割（可選擇不分割）',
+        hint: '沿通道主方向切成 N 段，於切面建立 Port；'
+          + '也可以按「不分割，整片求解」把整條通道當成一段，'
+          + '拿來當分段結果的對照基準。',
         requires: ['load'],
       },
       {

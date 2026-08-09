@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, type ChangeEvent } from 'react'
 import { Allotment } from 'allotment'
 import {
   loadLogSplit, loadMainSplit, saveLogSplit, saveMainSplit,
+  loadReportWorkspace, saveReportWorkspace,
 } from './splitLayout'
 import { logColor } from './logLevel'
 import 'allotment/dist/style.css'
@@ -603,7 +604,17 @@ export default function App() {
   const [fullScene, setFullScene] = useState<PreviewData | null>(null)
   const [cutScene, setCutScene] = useState<PreviewData | null>(null)
   const [activeView, setActiveView] = useState<ViewMode>('full')
-  const [reportWorkspace, setReportWorkspace] = useState('')
+  // 報告工作區一旦定下來就固定，並記住到下一次開啟。
+  //
+  // 它原本每次都由「目前載入的檔案」重新推導，於是同一個案子只要換個匯入來源
+  // ——載入板子、改看串接後的 .sNp、指向另一份 segments.json——就各自長出一個
+  // report_workspace，快照散在好幾個資料夾裡，事後根本找不到是哪一個。
+  // 要換位置仍然可以，在報告中心的工作區欄位改就好。
+  const [reportWorkspace, setReportWorkspace] = useState(loadReportWorkspace)
+  const rememberReportWorkspace = (value: string) => {
+    setReportWorkspace(value)
+    saveReportWorkspace(value)
+  }
 
   // 是否可進行分段：裁切完成、或直接匯入分段模式已載入
   const canSegment = !!cutScene || (directSegmentMode && allNets.length > 0)
@@ -2139,6 +2150,40 @@ ${data.output_path}`)
     }
   }
 
+  /** 不分割：整條通道當成一段，直接產生 segments.json。
+   *
+   *  分段是為了讓大通道分頭求解，但常常只是想知道「整片解出來長什麼樣」
+   *  ——當作分段結果的基準，或通道本來就小到不必切。這條路徑不需要先分析
+   *  切割位置，也不會建立任何切面 Port。 */
+  const handleSingleSegmentRun = async () => {
+    if (!canSegment) { alert('請先完成裁切，或以直接分段模式載入通道檔案'); return }
+    if (!segOutputDir) { alert('請設定輸出資料夾'); return }
+    if (!signalNets.length) { alert('請先選擇訊號網路'); return }
+    setLoadingMsg('建立不分割求解設定中…')
+    setIsLoading(true)
+    try {
+      const data = await api('/api/segment/run-single', {
+        signal_nets: signalNets,
+        reference_nets: refNets,
+        output_dir: segOutputDir,
+      })
+      setSegRun(data)
+      setActiveSegIdx(-1)
+      setActiveView('segments')
+      setSchedMetaPath(data.metadata_path || '')
+      setSegmentSolverPlans((data.segments || []).map((segment: any) => ({
+        index: segment.index,
+        path: segment.path,
+        ...(segment.solver_plan || {}),
+      })))
+      setShowSolverRegionOverlay(false)
+    } catch (e) {
+      alert('不分割設定失敗: ' + String(e))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const handleSegmentRun = async () => {
     if (!segAnalysis) { alert('請先分析切割位置'); return }
     if (!segOutputDir) { alert('請設定分段輸出資料夾'); return }
@@ -2282,6 +2327,7 @@ ${data.output_path}`)
         disabled: signalNets.length === 0 },
       { label: '分析 N 段切割位置', action: handleSegmentAnalyze, disabled: !cutScene },
       { label: '執行 N 段分割', action: handleSegmentRun, disabled: !segAnalysis },
+      { label: '不分割，整片求解', action: handleSingleSegmentRun, disabled: !canSegment },
       { label: 'S 參數串接', action: () => {}, disabled: true },
     ],
     '檢視': [
@@ -2394,14 +2440,20 @@ ${data.output_path}`)
   const visibleActualBoundary = activeView === 'cut'
     ? completedBoundary?.actual || null
     : null
-  // 報告工作區優先跟隨分段輸出，其次為裁切輸出與原始板路徑。
+  // 報告工作區的「預設位置」——只在還沒有工作區時用得到。
+  //
+  // 要跟著使用者現在在看的東西放，不要落到 C 槽的家目錄。依序取：分段輸出
+  // 資料夾 → 裁切輸出 → 目前結果的 S 參數檔 → 輸入檔。cascadeResult 那一項
+  // 是為了「只載入一個外部 .sNp 來看曲線」的情形——那時前三項都是空的，但那
+  // 個 .sNp 就在使用者的專案目錄裡，正是該放報告的地方。
   // 後端會確保 .aedb 不被當成一般資料夾而寫入內部。
-  // 報告工作區要跟著「使用者現在在看的東西」放，不要落到 C 槽的家目錄。
-  // 依序取：分段輸出資料夾 → 裁切輸出 → 目前結果的 S 參數檔 → 輸入檔。
-  // cascadeResult 那一項是為了「只載入一個外部 .sNp 來看曲線」的情形——那時
-  // 前三項都是空的，但那個 .sNp 就在使用者的專案目錄裡，正是該放報告的地方。
-  const reportBasePath = segOutputDir || outputPath
+  //
+  // 注意：實際傳給報告功能的是 `reportWorkspace || reportDefaultBasePath`。
+  // 一旦工作區定下來就固定，不再隨載入的檔案漂移——否則同一個案子換個匯入
+  // 來源就會各自長出一個 report_workspace，快照散在好幾個資料夾裡。
+  const reportDefaultBasePath = segOutputDir || outputPath
     || cascadeResult?.output_path || inputPath
+  const reportBasePath = reportWorkspace || reportDefaultBasePath
   const reportProjectName = (
     (inputPath || cascadeResult?.output_path || '').split(/[\/]/).pop()
     || 'PCB SI 分析專案'
@@ -3599,6 +3651,21 @@ ${data.output_path}`)
                   >
                     執行 N 段分割
                   </button>
+                  <button
+                    className="btn"
+                    onClick={handleSingleSegmentRun}
+                    disabled={!canSegment}
+                    style={{ marginTop: 6, width: '100%' }}
+                    title="整條通道當成一段求解，不做任何切割"
+                  >
+                    不分割，整片求解
+                  </button>
+                  <div className="panel-hint" style={{ marginTop: 3, fontSize: 11 }}>
+                    不分割不需要先分析切割位置，也不會建立切面 Port——Port 完全
+                    來自〈設定 Port 與求解器〉。之後的排程求解、遠端求解包、S 參數
+                    與眼圖都照常使用，適合拿來當分段結果的對照基準，或通道本來就
+                    小到不必切的情形。
+                  </div>
                   {segRun && (
                     <div className="status status--ok" style={{ marginTop: 6, fontSize: 11.5 }}>
                       已產生 {segRun.segments.length} 段，切面 Port 配對
@@ -4298,7 +4365,7 @@ ${data.output_path}`)
                         reference_net_count: refNets.length,
                         segment_count: segRun?.segments?.length || segAnalysis?.n_segments || 0,
                       }}
-                      onSaved={setReportWorkspace}
+                      onSaved={rememberReportWorkspace}
                     />
                   </div>
                 )}
@@ -4321,7 +4388,7 @@ ${data.output_path}`)
                         </div>}
                         {activeView === 'report' ? (
                           <ReportCenter basePath={reportBasePath} projectName={reportProjectName}
-                            onWorkspaceChange={setReportWorkspace} />
+                            onWorkspaceChange={rememberReportWorkspace} />
                         ) : activeView === 'eye' ? (
                           <div style={{
                             height: '100%', overflow: 'hidden', padding: 14,

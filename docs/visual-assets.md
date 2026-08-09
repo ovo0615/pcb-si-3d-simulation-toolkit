@@ -44,3 +44,4 @@ local workspace paths.
 3. End-to-end workflow diagram: Import → Select Nets → Cutout → Port → Segment → Solve → Analyze.
 
 Use Demo or anonymized data only. Store future README images under `graph/` or `docs/images/` and reference them with repository-relative paths.
+
