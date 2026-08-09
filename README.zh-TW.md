@@ -39,7 +39,6 @@ Taiwan Auto-Design Co. (TADC)｜虎門科技股份有限公司
 | HFSS／SIwave 混合求解 | 依每段 3D 電磁複雜度提出建議，並允許使用者逐段覆寫 | ✅ 已完成 |
 | 排程模擬 | 逐段啟動獨立求解程序並匯出 Touchstone | ✅ 已完成 |
 | S 參數自動串接 | 依分段對接資訊自動串接，還原完整通道 S 參數 | ✅ 已完成 |
-| 完整板／分段對照 | 在全 SIwave 模式比較完整板與分段串接的 S 參數、平均 IL 差及 P95 IL 差 | ✅ 已完成 |
 | QuickEye 眼圖 | 以串接後 Touchstone 直接背景求解眼高、眼寬 | ✅ 已完成 |
 | 外部 Touchstone 串接 | 載入既有 `.sNp` 檔案，自動建議或手動指定接線 | ✅ 已完成 |
 
@@ -66,11 +65,9 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 ![混合求解排程執行中：段 1 HFSS、段 2 SIwave 已完成、段 3 等待中](./graph/混合排程模擬過程_20260805.png)
 
-![分段 S 參數自動串接電路示意](./graph/自動串接電路_20260730.png)
+![分段 S 參數自動串接電路示意](./graph/串接電路示意圖_20260809.png)
 
-![完整板與分段串接 S 參數對照](./graph/分段對照結果_20260803-public.png)
-
-![QuickEye 眼圖與眼高、眼寬量測](./graph/眼圖結果_20260730-public.png)
+![QuickEye 眼圖與眼高、眼寬量測](./graph/QuickEye眼圖_20260809-public.png)
 
 ## 6. 技術架構
 

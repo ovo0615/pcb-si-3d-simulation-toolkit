@@ -16,7 +16,6 @@ This document tracks the public visual assets used by the project README.
 - `graph/10段分割正在裁切中_20260803.png` — blurred ten-segment cutout progress overlay
 - `graph/N段分割示意_20260805.png` — three-segment split preview with safety overlay (current UI)
 - `graph/混合求解設定_20260803.png` — per-segment HFSS／SIwave selection controls
-- `graph/分段對照結果_20260803-public.png` — current objective S-parameter comparison with local paths removed
 - `graph/N段分割後推薦求解器示意_20260805.png` — preferred README hero; N-way split with safety overlay and per-segment solver regions (green = SIwave, purple = HFSS)
 - `graph/混合求解設定_20260805.png` — preferred mixed-solver table (three-segment demo, current UI)
 

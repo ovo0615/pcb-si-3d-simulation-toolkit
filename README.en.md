@@ -39,7 +39,6 @@ High-frequency PCB signal-integrity analysis usually requires engineers to repea
 | Mixed HFSS / SIwave solving | Recommends a solver from each segment's 3D EM complexity while allowing manual override | ✅ Done |
 | Scheduled solving | Starts an isolated solver process for each segment and exports Touchstone | ✅ Done |
 | Automatic S-parameter cascading | Cascades segments using the stitching info to reconstruct the full-channel S-parameters | ✅ Done |
-| Full-board / segmented comparison | In all-SIwave mode, compares S-parameters, mean IL delta, and P95 IL delta | ✅ Done |
 | QuickEye diagram | Solves eye height/width directly from the cascaded Touchstone | ✅ Done |
 | External Touchstone cascading | Loads existing `.sNp` files with auto-suggested or manual port stitching | ✅ Done |
 
@@ -66,11 +65,9 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 ![Mixed-solver schedule running: segment 1 on HFSS, segment 2 finished on SIwave, segment 3 queued](./graph/混合排程模擬過程_20260805.png)
 
-![Automatic S-parameter cascade circuit](./graph/自動串接電路_20260730.png)
+![Automatic S-parameter cascade circuit](./graph/串接電路示意圖_20260809.png)
 
-![Full-board and segmented-cascade S-parameter comparison](./graph/分段對照結果_20260803-public.png)
-
-![QuickEye diagram with eye height/width](./graph/眼圖結果_20260730-public.png)
+![QuickEye diagram with eye height/width](./graph/QuickEye眼圖_20260809-public.png)
 
 ## 6. Technical Architecture
 
