@@ -59,13 +59,21 @@ Taiwan Auto-Design Co. (TADC)｜虎門科技股份有限公司
 
 Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
+![完整電路板 Layout 與右側圖層面板](./graph/完整板Layout_20260809.png)
+
+![裁切後 Layout：只留下目標通道與元件端 Port](./graph/裁切後Layout_20260809.png)
+
 ![N 段分割預覽與安全疊圖](./graph/N段分割示意_20260805.png)
 
 ![逐段 HFSS／SIwave 建議、指定與判斷原因](./graph/混合求解設定_20260805.png)
 
-![混合求解排程執行中：段 1 HFSS、段 2 SIwave 已完成、段 3 等待中](./graph/混合排程模擬過程_20260805.png)
+![整體視圖：切割線與逐段求解器指派](./graph/分段整體視圖_20260809.png)
+
+![混合求解排程執行中：段 1 HFSS、段 2 SIwave 已完成、段 3 等待中](./graph/混合排程模擬過程_20260805-public.png)
 
 ![分段 S 參數自動串接電路示意](./graph/串接電路示意圖_20260809.png)
+
+![串接後 S 參數：單端／差動可切換，游標可同時讀取所有曲線](./graph/串接後S參數_20260809-public.png)
 
 ![QuickEye 眼圖與眼高、眼寬量測](./graph/QuickEye眼圖_20260809-public.png)
 

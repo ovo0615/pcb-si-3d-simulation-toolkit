@@ -59,13 +59,21 @@ The segmentation view overlays the engineering decision directly on the complete
 
 Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
+![Full board layout with the layer panel](./graph/完整板Layout_20260809.png)
+
+![Cutout layout: only the target channel and its component-side ports remain](./graph/裁切後Layout_20260809.png)
+
 ![N-way split preview with safety overlay](./graph/N段分割示意_20260805.png)
 
 ![Per-segment HFSS/SIwave recommendation, assignment, and rationale](./graph/混合求解設定_20260805.png)
 
-![Mixed-solver schedule running: segment 1 on HFSS, segment 2 finished on SIwave, segment 3 queued](./graph/混合排程模擬過程_20260805.png)
+![Overview: cut lines with the per-segment solver assignment](./graph/分段整體視圖_20260809.png)
+
+![Mixed-solver schedule running: segment 1 on HFSS, segment 2 finished on SIwave, segment 3 queued](./graph/混合排程模擬過程_20260805-public.png)
 
 ![Automatic S-parameter cascade circuit](./graph/串接電路示意圖_20260809.png)
+
+![Cascaded S-parameters: single-ended/differential toggle, cursor reads every trace at once](./graph/串接後S參數_20260809-public.png)
 
 ![QuickEye diagram with eye height/width](./graph/QuickEye眼圖_20260809-public.png)
 
