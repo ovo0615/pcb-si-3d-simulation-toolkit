@@ -751,8 +751,8 @@ export default function App() {
   /** 去掉副檔名——只動檔名那一段，不會咬到目錄。
    *
    *  常見寫法 `path.replace(/\.[^/.]+$/, '')` 在 Windows 路徑上會出事：
-   *  `[^/.]` 允許反斜線，所以 `D:\v1.2\board`（目錄名含小數點、檔名沒有
-   *  副檔名）會被整段吃成 `D:\v1`。
+   *  `[^/.]` 允許反斜線，所以像 `…\v1.2\board` 這種（目錄名含小數點、檔名
+   *  沒有副檔名）會從小數點一路吃到結尾，只剩 `…\v1`。
    */
   const stripExtension = (path: string) => {
     const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
