@@ -17,6 +17,28 @@ export interface PreviewData {
 export interface SegmentCutsInfo {
   direction: 'x' | 'y'
   positions_mm: number[]
+  /** 依複雜度分段：逐刀各自帶軸向，一橫一豎可並存。有值時取代 positions_mm。 */
+  cuts?: {
+    direction: 'x' | 'y'
+    position_mm: number
+    quality_grade?: string
+    region?: number
+    /** 這把刀是使用者拖過的；自動位置留在 auto_position_mm 供對照。 */
+    manual?: boolean
+    auto_position_mm?: number | null
+  }[]
+  /** 依複雜度分段：每段是矩形而非帶狀，並帶上該段要用哪個求解器。 */
+  segment_boxes?: {
+    index: number
+    bounds_mm: [number, number, number, number]
+    solver: 'hfss' | 'siwave'
+  }[]
+  /** 偵測到的 3D 複雜區（換層 Via、元件端 launch 的聚集處）。 */
+  complexity_regions?: {
+    index: number
+    bounds_mm: [number, number, number, number]
+    feature_count: number
+  }[]
   valids?: boolean[]
   region_solvers?: ('hfss' | 'siwave')[]
   region_scores?: number[]
@@ -80,6 +102,9 @@ interface Preview2DProps {
   showSolverRegionOverlay?: boolean // 混合求解：是否顯示每段 HFSS／SIwave 色塊
   onSolverRegionOverlayChange?: (visible: boolean) => void
   onSegmentRegionClick?: (zeroBasedIndex: number) => void
+  /** 依複雜度分段：使用者把某把刀拖到新位置後回報（放開滑鼠才觸發一次）。
+   *  給了這個 callback 才開放拖曳。 */
+  onCutDrag?: (cutIndex: number, positionMm: number) => void
   cleanupOverlay?: CleanupOverlay | null // Layout 清理：預計移除物件紅框
   layerPanelEnabled?: boolean // 比較模式可關閉側欄，保留更多畫布空間
   removedGeometry?: CleanupRemovedGeometry | null // 清理時實際刪除的原始幾何
@@ -159,6 +184,7 @@ export default function Preview2D({
   showSolverRegionOverlay = true,
   onSolverRegionOverlayChange,
   onSegmentRegionClick,
+  onCutDrag,
   cleanupOverlay = null,
   layerPanelEnabled = true,
   removedGeometry = null,
@@ -180,6 +206,12 @@ export default function Preview2D({
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart,  setDragStart]  = useState({ x: 0, y: 0 })
   const mouseDownPoint = useRef({ x: 0, y: 0 })
+
+  // 刀線拖曳：拖動時只有這條線跟著走，分段矩形要等後端重算才會對，
+  // 因此拖動期間把矩形壓暗，表示「這是舊的」。
+  const [draggingCut, setDraggingCut] =
+    useState<{ index: number; positionMm: number } | null>(null)
+  const [hoverCutAxis, setHoverCutAxis] = useState<number | null>(null)
 
   // 圖層顯示設定
   const [layerModes,   setLayerModes]   = useState<Record<string, LayerMode>>({})
@@ -309,6 +341,30 @@ export default function Preview2D({
     ctx.scale(transform.scale, -transform.scale)
     const px = (n: number) => n / transform.scale
 
+    // ── 標籤佔位：畫過的地方不再畫第二個 ──────────────────
+    // Port 名稱是逐個畫上去的，密集處會疊成無法閱讀的一團。這裡在螢幕座標
+    // 上記下每個已畫標籤佔的矩形，之後要畫的若與任何一個重疊就跳過。效果是
+    // 縮得很小時只看到零星幾個名字（或一個都沒有），放大到有空間時才逐一
+    // 浮現——而不是永遠糊成一片。
+    const labelBoxes: number[][] = []
+    const claimLabelBox = (worldX: number, worldY: number, text: string) => {
+      const screenX = worldX * transform.scale + transform.x
+      const screenY = rect.height + transform.y - worldY * transform.scale
+      // 11px 字約 6.2px 寬；不必精準，只要能反映佔用範圍。
+      const w = text.length * 6.2
+      const h = 12
+      const box = [screenX, screenY - h / 2, screenX + w, screenY + h / 2]
+      // 畫布外的直接跳過，省得白算。
+      if (box[2] < 0 || box[0] > rect.width
+        || box[3] < 0 || box[1] > rect.height) return false
+      for (const other of labelBoxes) {
+        if (box[0] < other[2] && other[0] < box[2]
+          && box[1] < other[3] && other[1] < box[3]) return false
+      }
+      labelBoxes.push(box)
+      return true
+    }
+
     const tracePoly = (pts: number[][], holes?: number[][][]) => {
       ctx.beginPath()
       ctx.moveTo(pts[0][0], pts[0][1])
@@ -425,7 +481,10 @@ export default function Preview2D({
           ctx.moveTo(prim.x-r*1.7, prim.y); ctx.lineTo(prim.x+r*1.7, prim.y)
           ctx.moveTo(prim.x, prim.y-r*1.7); ctx.lineTo(prim.x, prim.y+r*1.7)
           ctx.stroke()
-          if (prim.name) {
+          // 只在標籤真的看得清楚時才畫。BGA 底下擠著幾十個元件端 Port，
+          // 每個都畫名字會疊成一團紅色糊塊——那比不畫還糟，既讀不到任何一個
+          // 名字，還會蓋住底下的 Layout。縮放進去看得到間距時自然就會出現。
+          if (prim.name && claimLabelBox(prim.x + r * 2.0, prim.y, prim.name)) {
             ctx.save()
             ctx.translate(prim.x+r*2.0, prim.y)
             ctx.scale(1/transform.scale, -1/transform.scale)
@@ -523,7 +582,31 @@ export default function Preview2D({
         ...segmentCuts.positions_mm,
         contentBounds.max[axis],
       ]
-      if (showSolverRegionOverlay && segmentCuts.region_solvers?.length) {
+      // 拖曳中的那把刀跟著游標走，其餘維持原位。
+      const liveCuts = (segmentCuts.cuts || []).map((cut, index) => (
+        draggingCut && draggingCut.index === index
+          ? { ...cut, position_mm: draggingCut.positionMm }
+          : cut
+      ))
+      // 依複雜度分段的每一段是矩形（混合軸向時垂直方向也被收緊），
+      // 不能再用「起訖座標 × 整個垂直範圍」的帶狀畫法。
+      if (showSolverRegionOverlay && segmentCuts.segment_boxes?.length) {
+        // 拖曳中矩形還是舊的邊界，壓暗表示待重算，不要讓人以為已經跟上。
+        ctx.globalAlpha = draggingCut ? 0.35 : 1
+        segmentCuts.segment_boxes.forEach(segment => {
+          const [x0, y0, x1, y1] = segment.bounds_mm
+          ctx.fillStyle = segment.solver === 'siwave'
+            ? 'rgba(46, 204, 113, 0.14)'
+            : 'rgba(126, 87, 194, 0.16)'
+          ctx.strokeStyle = segment.solver === 'siwave'
+            ? 'rgba(76, 230, 137, 0.72)'
+            : 'rgba(166, 126, 255, 0.78)'
+          ctx.lineWidth = px2(1.2)
+          ctx.fillRect(x0, y0, x1 - x0, y1 - y0)
+          ctx.strokeRect(x0, y0, x1 - x0, y1 - y0)
+        })
+        ctx.globalAlpha = 1
+      } else if (showSolverRegionOverlay && segmentCuts.region_solvers?.length) {
         regionEdges.slice(0, -1).forEach((start, index) => {
           const end = regionEdges[index + 1]
           const solver = segmentCuts.region_solvers?.[index] || 'hfss'
@@ -623,13 +706,22 @@ export default function Preview2D({
       })
       ctx.setLineDash([])
 
-      segmentCuts.positions_mm.forEach((position, index) => {
-        const ok = !segmentCuts.valids || segmentCuts.valids[index] !== false
+      // 3D 複雜區：橘色虛線框，標出「為什麼刀下在這裡」
+      ;(segmentCuts.complexity_regions || []).forEach(region => {
+        const [x0, y0, x1, y1] = region.bounds_mm
+        ctx.strokeStyle = 'rgba(232, 163, 58, 0.9)'
+        ctx.lineWidth = px2(1.6)
+        ctx.setLineDash([px2(6), px2(4)])
+        ctx.strokeRect(x0, y0, x1 - x0, y1 - y0)
+        ctx.setLineDash([])
+      })
+
+      const drawCut = (position: number, cutAxis: number, ok: boolean) => {
         ctx.strokeStyle = ok ? '#00e5ff' : '#ff5252'
         ctx.lineWidth = px2(2.2)
         ctx.setLineDash(ok ? [] : [px2(9), px2(6)])
         ctx.beginPath()
-        if (axis === 0) {
+        if (cutAxis === 0) {
           ctx.moveTo(position, contentBounds.min[1])
           ctx.lineTo(position, contentBounds.max[1])
         } else {
@@ -637,8 +729,72 @@ export default function Preview2D({
           ctx.lineTo(contentBounds.max[0], position)
         }
         ctx.stroke()
-      })
+      }
+
+      if (liveCuts.length) {
+        // 依複雜度分段：一橫一豎可並存，每把刀用自己的軸向。
+        liveCuts.forEach((cut, index) => {
+          const cutAxis = cut.direction === 'x' ? 0 : 1
+          // 自動位置留一條灰虛線當參考，才知道自己拖多遠了。
+          const auto = cut.auto_position_mm
+          if (auto !== null && auto !== undefined) {
+            ctx.strokeStyle = 'rgba(180, 190, 204, 0.5)'
+            ctx.lineWidth = px2(1.1)
+            ctx.setLineDash([px2(5), px2(5)])
+            ctx.beginPath()
+            if (cutAxis === 0) {
+              ctx.moveTo(auto, contentBounds.min[1])
+              ctx.lineTo(auto, contentBounds.max[1])
+            } else {
+              ctx.moveTo(contentBounds.min[0], auto)
+              ctx.lineTo(contentBounds.max[0], auto)
+            }
+            ctx.stroke()
+            ctx.setLineDash([])
+          }
+          drawCut(cut.position_mm, cutAxis, true)
+          // 拖曳中的那把刀加粗，讓人確定抓到的是哪一條。
+          if (draggingCut?.index === index) {
+            ctx.strokeStyle = 'rgba(0, 229, 255, 0.35)'
+            ctx.lineWidth = px2(9)
+            ctx.beginPath()
+            if (cutAxis === 0) {
+              ctx.moveTo(cut.position_mm, contentBounds.min[1])
+              ctx.lineTo(cut.position_mm, contentBounds.max[1])
+            } else {
+              ctx.moveTo(contentBounds.min[0], cut.position_mm)
+              ctx.lineTo(contentBounds.max[0], cut.position_mm)
+            }
+            ctx.stroke()
+          }
+        })
+      } else {
+        segmentCuts.positions_mm.forEach((position, index) => {
+          const ok = !segmentCuts.valids || segmentCuts.valids[index] !== false
+          drawCut(position, axis, ok)
+        })
+      }
       ctx.setLineDash([])
+
+      if (segmentCuts.segment_boxes?.length) {
+        ctx.globalAlpha = draggingCut ? 0.35 : 1
+        segmentCuts.segment_boxes.forEach(segment => {
+          const [x0, y0, x1, y1] = segment.bounds_mm
+          ctx.save()
+          ctx.translate((x0 + x1) / 2, (y0 + y1) / 2)
+          ctx.scale(1 / transform.scale, -1 / transform.scale)
+          ctx.font = 'bold 12px "Calibri","Microsoft JhengHei",sans-serif'
+          ctx.fillStyle = segment.solver === 'siwave'
+            ? 'rgba(91, 245, 154, 0.98)'
+            : 'rgba(190, 160, 255, 0.98)'
+          ctx.fillText(
+            `S${segment.index} ${segment.solver.toUpperCase()}`, -22, -6)
+          ctx.restore()
+        })
+        ctx.globalAlpha = 1
+        ctx.restore()
+        return
+      }
 
       const edges = regionEdges
       for (let index = 0; index + 1 < edges.length; index++) {
@@ -772,7 +928,7 @@ export default function Preview2D({
         ctx.restore()
       }
     }
-  }, [data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, actualCutoutBoundary, showBoundaryDifferenceFill, boundaryComparison, segmentCuts, showSegmentSafetyOverlay, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, getLayerColor, getStackupLayers, computeContentBounds])
+  }, [data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, actualCutoutBoundary, showBoundaryDifferenceFill, boundaryComparison, segmentCuts, draggingCut, showSegmentSafetyOverlay, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, getLayerColor, getStackupLayers, computeContentBounds])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
@@ -792,13 +948,68 @@ export default function Preview2D({
     const mx = e.clientX-r.left, my = e.clientY-r.top
     setTransform(prev => ({ x: mx-(mx-prev.x)*f, y: my-(my-prev.y)*f, scale: prev.scale*f }))
   }
+  // ── 刀線拖曳 ──────────────────────────────────────────────
+  /** 螢幕座標 → 圖面座標（mm）。 */
+  const toWorld = (e: React.MouseEvent) => {
+    const rect = canvasRef.current?.getBoundingClientRect()
+    if (!rect) return null
+    return {
+      x: (e.clientX - rect.left - transform.x) / transform.scale,
+      y: (rect.height + transform.y - (e.clientY - rect.top)) / transform.scale,
+    }
+  }
+
+  /** 游標附近（6 螢幕像素內）的刀，沒有就回 null。 */
+  const cutUnderCursor = (e: React.MouseEvent) => {
+    if (!onCutDrag || !segmentCuts?.cuts?.length) return null
+    const world = toWorld(e)
+    if (!world) return null
+    const tolerance = 6 / transform.scale
+    const hits = segmentCuts.cuts
+      .map((cut, index) => {
+        const axis = cut.direction === 'x' ? 0 : 1
+        return {
+          index, axis,
+          distance: Math.abs((axis === 0 ? world.x : world.y) - cut.position_mm),
+        }
+      })
+      .filter(hit => hit.distance <= tolerance)
+      .sort((a, b) => a.distance - b.distance)
+    return hits[0] || null
+  }
+
   const handleMouseDown = (e: React.MouseEvent) => {
     mouseDownPoint.current = { x: e.clientX, y: e.clientY }
+    const target = cutUnderCursor(e)
+    if (target) {
+      // 抓到刀就只拖刀，不要同時平移畫面。
+      const world = toWorld(e)!
+      setDraggingCut({
+        index: target.index,
+        positionMm: target.axis === 0 ? world.x : world.y,
+      })
+      return
+    }
     setIsDragging(true)
     setDragStart({ x: e.clientX-transform.x, y: e.clientY-transform.y })
   }
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging) return
+    if (draggingCut) {
+      const world = toWorld(e)
+      const cut = segmentCuts?.cuts?.[draggingCut.index]
+      if (!world || !cut) return
+      const axis = cut.direction === 'x' ? 0 : 1
+      setDraggingCut({
+        index: draggingCut.index,
+        positionMm: axis === 0 ? world.x : world.y,
+      })
+      return
+    }
+    if (!isDragging) {
+      const target = cutUnderCursor(e)
+      setHoverCutAxis(target ? target.axis : null)
+      return
+    }
     setTransform(prev => ({ ...prev, x: e.clientX-dragStart.x, y: e.clientY-dragStart.y }))
   }
   const handleMouseUp = (e: React.MouseEvent) => {
@@ -806,6 +1017,13 @@ export default function Preview2D({
       e.clientX - mouseDownPoint.current.x,
       e.clientY - mouseDownPoint.current.y,
     )
+    if (draggingCut) {
+      const pending = draggingCut
+      setDraggingCut(null)
+      // 只是點到線上、沒真的拖動，就別觸發一次多餘的重新分析。
+      if (movement > 3) onCutDrag?.(pending.index, pending.positionMm)
+      return
+    }
     setIsDragging(false)
     if (movement > 4 || !onSegmentRegionClick || !segmentCuts || !data) return
     const canvasRect = canvasRef.current?.getBoundingClientRect()
@@ -942,7 +1160,14 @@ export default function Preview2D({
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        <canvas ref={canvasRef} style={{ cursor: isDragging ? 'grabbing' : 'grab', display: 'block' }} />
+        <canvas ref={canvasRef} style={{
+          cursor: (draggingCut ? draggingCut.index : hoverCutAxis) !== null
+            ? ((draggingCut
+                ? (segmentCuts?.cuts?.[draggingCut.index]?.direction === 'x' ? 0 : 1)
+                : hoverCutAxis) === 0 ? 'col-resize' : 'row-resize')
+            : isDragging ? 'grabbing' : 'grab',
+          display: 'block',
+        }} />
 
         {/* 裁切外框差異填色開關：與 Canvas 同層，避免被預覽畫布遮住。 */}
         {onBoundaryDifferenceFillChange && (

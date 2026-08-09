@@ -14,6 +14,9 @@ interface Props {
   series: SParamSeries[]
   height?: number
   interactive?: boolean
+  /** 有給才會出現「匯出 Excel」；匯出的是目前圖上這幾條。 */
+  onExport?: (series: SParamSeries[]) => void
+  exporting?: boolean
 }
 
 interface ViewRange {
@@ -38,7 +41,11 @@ interface HoverState {
   values: HoverValue[]
 }
 
-const W = 920
+// 預設 viewBox 寬度。互動模式會改用實測的容器尺寸，讓 viewBox 與容器同比例
+// ——否則 width:100% 搭配固定 viewBox 時，渲染高度會被寬高比綁死，圖不是超出
+// 容器就是留一段空白。（不能用 preserveAspectRatio="none" 硬拉：那會連文字與
+// 線寬一起變形。）
+const DEFAULT_W = 920
 const PAD = { left: 72, right: 18, top: 12, bottom: 42 }
 
 function normalizedRange(min: number, max: number, fallbackSpan: number): [number, number] {
@@ -47,14 +54,25 @@ function normalizedRange(min: number, max: number, fallbackSpan: number): [numbe
   return [center - fallbackSpan / 2, center + fallbackSpan / 2]
 }
 
-export default function SParamChart({ series, height = 220, interactive = false }: Props) {
+export default function SParamChart({
+  series, height = 220, interactive = false, onExport, exporting = false,
+}: Props) {
   const clipId = useId().replace(/:/g, '')
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const boxRef = useRef<HTMLDivElement | null>(null)
+  const [boxWidth, setBoxWidth] = useState(DEFAULT_W)
+  const [boxHeight, setBoxHeight] = useState(0)
+  /** 游標讀值：預設關閉，圖上按兩下開／再按兩下關。
+   *  一直開著的話游標移過去就跳出一大塊數值蓋住曲線，而且沒有辦法關掉。 */
+  const [readout, setReadout] = useState(false)
   const dragRef = useRef<{ x: number, y: number, view: ViewRange } | null>(null)
   const [axisMode, setAxisMode] = useState<AxisMode>('xy')
   const [yPreset, setYPreset] = useState<YPreset>('auto')
   const [view, setView] = useState<ViewRange | null>(null)
   const [hover, setHover] = useState<HoverState | null>(null)
+  // 圖例與軸控制收進側邊抽屜。串音有 28 條曲線，圖例攤在圖上方會把整張圖擠
+  // 出畫面——實測勾選 NEXT 之後曲線完全看不到。抽屜可以收起，圖就吃滿整格。
+  const [panelOpen, setPanelOpen] = useState(false)
 
   const validSeries = useMemo(
     () => series.map(item => ({
@@ -92,6 +110,29 @@ export default function SParamChart({ series, height = 220, interactive = false 
     setHover(null)
   }, [dataSignature])
 
+  // viewBox 的寬度跟著容器走，圖才會剛好填滿而不是被寬高比擠出去。
+  useEffect(() => {
+    const box = svgRef.current
+    if (!box || !interactive) return
+    const measure = (width: number, boxH: number) => {
+      if (width > 0) setBoxWidth(width)
+      if (boxH > 0) setBoxHeight(boxH)
+    }
+    const observer = new ResizeObserver(entries => {
+      const rect = entries[0]?.contentRect
+      if (rect) measure(rect.width, rect.height)
+    })
+    observer.observe(box)
+    const rect = box.getBoundingClientRect()
+    measure(rect.width || DEFAULT_W, rect.height)
+    return () => observer.disconnect()
+  // 必須包含 validSeries.length：沒有資料時元件會提早 return，那一輪根本沒有
+  // <svg>，svgRef 是 null。只依賴 [interactive] 的話這個 effect 就只在那一次
+  // 跑過，之後曲線進來、SVG 掛上了也不會再量——viewBox 永遠停在預設的
+  // 920×160，圖就縮在上面一小塊，下面空一大片。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [interactive, validSeries.length])
+
   if (validSeries.length === 0) {
     return (
       <div style={{
@@ -105,7 +146,10 @@ export default function SParamChart({ series, height = 220, interactive = false 
   }
 
   const activeView = view ?? autoView
-  const H = Math.max(height, 160)
+  // viewBox 直接等於 SVG 實際被 CSS 撐成的大小：比例一致，既不會變形也不會
+  // 留邊。互動模式由 flex 撐滿，非互動模式仍用呼叫端給的固定高度。
+  const W = interactive ? Math.max(boxWidth, 320) : DEFAULT_W
+  const H = interactive ? Math.max(boxHeight, 160) : Math.max(height, 160)
   const plotW = W - PAD.left - PAD.right
   const plotH = H - PAD.top - PAD.bottom
   const x = (freq: number) => PAD.left + (freq - activeView.fMin) / (activeView.fMax - activeView.fMin) * plotW
@@ -169,7 +213,7 @@ export default function SParamChart({ series, height = 220, interactive = false 
         }
         return { label: item.label, color: item.color, db: nearest.db }
       })
-      setHover({ freq: frequency, svgX, values })
+      if (readout) setHover({ freq: frequency, svgX, values })
     } else {
       setHover(null)
     }
@@ -220,49 +264,104 @@ export default function SParamChart({ series, height = 220, interactive = false 
     : PAD.left
 
   return (
-    <div>
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        flexWrap: 'wrap', gap: 8, marginBottom: 5,
-      }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: interactive ? 13 : 11 }}>
+    <div ref={boxRef} style={{
+      position: 'relative', height: '100%',
+      display: interactive ? 'flex' : undefined,
+      flexDirection: interactive ? 'column' : undefined,
+    }}>
+      {/* 圖例與軸控制收進右側抽屜——留給曲線的空間才是這一格的重點。
+          收合時只剩一條把手，圖佔滿整格；展開時覆蓋在圖上而不是把圖推小，
+          所以開合不會讓曲線跳動。 */}
+      {interactive && (
+        <>
+          <button type="button" onClick={() => setPanelOpen(open => !open)}
+            title={panelOpen ? '收起圖例與軸控制' : '展開圖例與軸控制'}
+            style={{
+              position: 'absolute', top: 6, right: panelOpen ? 250 : 6, zIndex: 3,
+              background: 'rgba(20,24,30,0.92)', color: 'var(--accent)',
+              border: '1px solid var(--border)', borderRadius: 6,
+              padding: '3px 9px', fontSize: 12, cursor: 'pointer',
+              fontFamily: '"Calibri", "Microsoft JhengHei", sans-serif',
+            }}>
+            {panelOpen ? '▶ 收起' : `◀ 圖例／軸（${validSeries.length}）`}
+          </button>
+
+          {panelOpen && (
+            <div style={{
+              position: 'absolute', top: 0, right: 0, bottom: 0, width: 244,
+              zIndex: 2, overflowY: 'auto', padding: '34px 10px 10px',
+              background: 'rgba(14,17,22,0.94)', backdropFilter: 'blur(3px)',
+              border: '1px solid var(--border)', borderRadius: 8,
+              fontFamily: '"Calibri", "Microsoft JhengHei", sans-serif',
+            }}
+              onWheel={event => event.stopPropagation()}
+              onPointerDown={event => event.stopPropagation()}>
+
+              <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>縮放／平移軸</div>
+              <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                {(['xy', 'x', 'y'] as AxisMode[]).map(mode => (
+                  <button key={mode} type="button"
+                    className={`btn ${axisMode === mode ? 'btn--primary' : ''}`}
+                    onClick={() => setAxisMode(mode)}
+                    style={{ flex: 1, padding: '4px 0' }}>{mode.toUpperCase()}</button>
+                ))}
+              </div>
+
+              <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 8 }}>Y 軸範圍</div>
+              <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                {([['20', '0…−20'], ['40', '0…−40'], ['80', '0…−80'],
+                   ['auto', 'Auto']] as [YPreset, string][]).map(([preset, label]) => (
+                  <button key={preset} type="button"
+                    className={`btn ${yPreset === preset ? 'btn--primary' : ''}`}
+                    onClick={() => applyYPreset(preset)}
+                    style={{ flex: '1 0 46%', padding: '4px 0' }}>{label}</button>
+                ))}
+              </div>
+
+              <button type="button" className="btn" onClick={fitAll}
+                style={{ width: '100%', marginTop: 6, padding: '4px 0' }}>Fit All</button>
+
+              {onExport && (
+                <button type="button" className="btn--primary" disabled={exporting}
+                  onClick={() => onExport(series)}
+                  style={{ width: '100%', marginTop: 6, padding: '5px 0' }}>
+                  {exporting ? '匯出中…' : '匯出 Excel'}
+                </button>
+              )}
+
+              <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 10 }}>
+                曲線（{validSeries.length}）
+              </div>
+              <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.55 }}>
+                {validSeries.map(item => (
+                  <div key={item.label} style={{ color: item.color, fontWeight: 600 }}
+                    title={item.label}>— {item.label}</div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* 非互動（報告快照等）維持原本把圖例排在上方的樣子。 */}
+      {!interactive && (
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11, marginBottom: 5,
+        }}>
           {validSeries.map(item => (
             <span key={item.label} style={{ color: item.color, fontWeight: 600 }}>— {item.label}</span>
           ))}
         </div>
-        {interactive && (
-          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, fontSize: 12 }}>
-            <span style={{ color: 'var(--faint)' }}>縮放／平移軸：</span>
-            {(['xy', 'x', 'y'] as AxisMode[]).map(mode => (
-              <button key={mode} type="button" className={`btn ${axisMode === mode ? 'btn--primary' : ''}`}
-                onClick={() => setAxisMode(mode)} style={{ minWidth: 42, padding: '4px 8px' }}>
-                {mode.toUpperCase()}
-              </button>
-            ))}
-            <span style={{ color: 'var(--faint)', marginLeft: 5 }}>Y 軸：</span>
-            {([
-              ['20', '0…−20'],
-              ['40', '0…−40'],
-              ['80', '0…−80'],
-              ['auto', 'Auto'],
-            ] as [YPreset, string][]).map(([preset, label]) => (
-              <button key={preset} type="button"
-                className={`btn ${yPreset === preset ? 'btn--primary' : ''}`}
-                onClick={() => applyYPreset(preset)}
-                style={{ padding: '4px 7px' }}>
-                {label}
-              </button>
-            ))}
-            <button type="button" className="btn" onClick={fitAll}
-              style={{ padding: '4px 9px' }}>Fit All</button>
-          </div>
-        )}
-      </div>
+      )}
       <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`}
         onWheel={zoomAt} onPointerDown={beginPan} onPointerMove={pan}
         onPointerUp={endPan} onPointerCancel={endPan} onPointerLeave={endPan}
+        onDoubleClick={() => { setReadout(open => !open); setHover(null) }}
+        preserveAspectRatio="none"
         style={{
-          width: '100%', background: '#0c0e12', borderRadius: 6,
+          width: '100%', background: '#0c0e12', borderRadius: 6, display: 'block',
+          // 互動模式讓 flex 把 SVG 撐滿剩餘高度；viewBox 會跟著量到的大小走。
+          ...(interactive ? { flex: '1 1 auto', minHeight: 0 } : {}),
           cursor: interactive ? (dragRef.current ? 'grabbing' : 'grab') : 'default',
           touchAction: 'none', userSelect: 'none',
         }}>
@@ -336,10 +435,12 @@ export default function SParamChart({ series, height = 220, interactive = false 
         )}
       </svg>
       {interactive && (
-        <div style={{ color: clippedBelow || clippedAbove ? '#f0b429' : 'var(--faint)', fontSize: 12, marginTop: 5, textAlign: 'center' }}>
+        <div style={{ color: clippedBelow || clippedAbove ? '#f0b429' : 'var(--faint)', fontSize: 12, marginTop: 5, textAlign: 'center', flex: '0 0 auto' }}>
           {clippedBelow || clippedAbove
             ? `目前 Y 軸預設已裁掉範圍外資料${clippedBelow ? '（下方）' : ''}${clippedAbove ? '（上方）' : ''}；按 Auto 或 Fit All 查看全部。`
-            : '滾輪約每格縮放 6%；按住左鍵拖曳平移；游標可讀取所有曲線。'}
+            : readout
+              ? '讀值開啟中：游標可讀取所有曲線；在圖上按兩下可關閉。'
+              : '滾輪約每格縮放 6%；按住左鍵拖曳平移；在圖上按兩下開啟游標讀值。'}
         </div>
       )}
     </div>

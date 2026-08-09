@@ -3,6 +3,10 @@
 // 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
 import { useState, useEffect, useRef, type ChangeEvent } from 'react'
 import { Allotment } from 'allotment'
+import {
+  loadLogSplit, loadMainSplit, saveLogSplit, saveMainSplit,
+} from './splitLayout'
+import { logColor } from './logLevel'
 import 'allotment/dist/style.css'
 import Preview2D, { CleanupOverlay, CleanupRemovedGeometry, PreviewData, SegmentCutsInfo } from './components/Preview2D'
 import SParamChart, { SParamSeries } from './components/SParamChart'
@@ -70,6 +74,47 @@ interface SegmentCut {
 }
 
 type QualityThreshold = 'A' | 'B' | 'C'
+
+/** 依 3D 複雜度分段的分析結果。段數是偵測結果，不是輸入。 */
+interface ComplexityAnalysis {
+  mode: 'complexity'
+  feasible: boolean
+  reason: string
+  quality_threshold: QualityThreshold
+  feature_count: number
+  bounds_mm: { min: [number, number]; max: [number, number] }
+  regions: {
+    index: number
+    bounds_mm: [number, number, number, number]
+    feature_count: number
+    kinds: string[]
+    exit_count: number
+  }[]
+  cuts: {
+    axis: number
+    direction: 'x' | 'y'
+    position_mm: number
+    region: number
+    margin_mm: number
+    quality_grade: string
+    quality_reason: string
+    worst_angle_deg: number | null
+    crossing_count: number
+    /** 這把刀是在預覽圖上拖過的；auto_position_mm 是原本的自動位置。 */
+    manual: boolean
+    auto_position_mm: number | null
+  }[]
+  segments: {
+    index: number
+    bounds_mm: [number, number, number, number]
+    signal_length_mm: number
+    regions: number[]
+    solver: 'hfss' | 'siwave'
+    solver_reason: string
+  }[]
+  unresolved: { region: number; reason: string }[]
+  corner_crossings: { net: string; x_mm: number; y_mm: number }[]
+}
 
 interface ThresholdReportItem {
   grade: QualityThreshold
@@ -208,7 +253,7 @@ interface ComponentInfo {
   pin_count: number
 }
 
-type ViewMode = 'full' | 'cut' | 'cleanup' | 'segments' | 'schematic' | 'sparam' | 'fidelity' | 'eye' | 'report'
+type ViewMode = 'full' | 'cut' | 'cleanup' | 'segments' | 'schematic' | 'sparam' | 'eye' | 'report'
 
 /** 量測容器實際高度，讓圖表填滿剩餘空間而不需捲動。
  *  分頁高度會隨視窗與 Allotment 分隔線改變，因此以 ResizeObserver 追蹤，
@@ -271,26 +316,6 @@ interface ExtFileInfo {
 interface ExtConn { a_file: number; a_port: string; b_file: number; b_port: string }
 interface ExtShort { file: number; ports: string[] }
 
-interface FidelityPair {
-  port_a: string
-  port_b: string
-  label: string
-  confidence: string
-  reason?: string
-}
-
-interface FidelityPreparation {
-  source_edb: string
-  segmented_touchstone: string
-  port_names: string[]
-  pair_suggestion: {
-    pairs: FidelityPair[]
-    confidence: string
-    requires_confirmation: boolean
-  }
-  thresholds: Record<string, number>
-}
-
 interface CutoutBoundaryComparison {
   available: boolean
   within_tolerance: boolean
@@ -303,6 +328,35 @@ interface CutoutBoundaryResult {
   estimated: number[][]
   actual: number[][]
   comparison: CutoutBoundaryComparison | null
+}
+
+/** 疊構／背鑽／清理會改動幾何，對已建好的元件端 Port 有風險。
+ *
+ *  Port 的負端綁在特定層與座標上，幾何一改就可能失去附著點；而失敗要等到
+ *  求解時才會以 invalid port 出現。介面的流程順序已經把 Port 排在這三步
+ *  之後，但那只是建議——使用者仍可照任意順序操作，所以套用前再擋一次。
+ */
+function PortWarning({ warning }: { warning: any }) {
+  if (!warning || !warning.count) return null
+  return (
+    <div
+      className="status"
+      style={{
+        marginTop: 6, fontSize: 11.5, lineHeight: 1.7,
+        border: '1px solid #6a5326', background: '#221c10',
+        borderRadius: 6, padding: '7px 10px', color: '#ffd98a',
+      }}
+    >
+      <b>這份 EDB 已有 {warning.count} 個元件端 Port。</b>
+      {warning.message}
+      {warning.names?.length > 0 && (
+        <div style={{ marginTop: 3, opacity: 0.8 }}>
+          例如：{warning.names.slice(0, 4).join('、')}
+          {warning.count > 4 ? ' …' : ''}
+        </div>
+      )}
+    </div>
+  )
 }
 
 /** 裁切外框形狀的中文名稱。後端回傳的是 PyEDB 的英文代號。 */
@@ -448,6 +502,9 @@ export default function App() {
   const [nSegments, setNSegments] = useState('3')
   // 這次可以接受的切點評分。門檻越嚴候選越少，各段就越難平分。
   const [segmentQuality, setSegmentQuality] = useState<QualityThreshold>('B')
+  /** 依複雜度分段的分析結果；與等分分段互斥，後分析的那個生效。 */
+  const [complexityAnalysis, setComplexityAnalysis] =
+    useState<ComplexityAnalysis | null>(null)
   const [segOutputDir, setSegOutputDir] = useState('')
   const [segAnalysis, setSegAnalysis] = useState<SegmentAnalysis | null>(null)
   const [segRun, setSegRun] = useState<SegmentRunResult | null>(null)
@@ -522,29 +579,11 @@ export default function App() {
   // 一鍵眼圖背景工作：輪詢狀態，完成後在「眼圖」分頁顯示 AEDT 產的 JPG
   const [eyeJob, setEyeJob] = useState<any | null>(null)
   const [eyeImageRevision, setEyeImageRevision] = useState(0)
-  // 分段對照的圖表容器：量到多少就畫多高，整頁不需捲動
-  const [fidelityChartRef, fidelityChartHeight] = useMeasuredHeight<HTMLDivElement>()
   const [spChartRef, spChartHeight] = useMeasuredHeight<HTMLDivElement>()
   // 外部檔案接線模式
   const [extFiles, setExtFiles] = useState<ExtFileInfo[]>([])
   const [extConns, setExtConns] = useState<ExtConn[]>([])
   const [extShorts, setExtShorts] = useState<ExtShort[]>([])
-  // SIwave 完整板基準／分段串接 S 參數對照
-  const [fidelityPrep, setFidelityPrep] = useState<FidelityPreparation | null>(null)
-  const [fidelityPairs, setFidelityPairs] = useState<FidelityPair[]>([])
-  const [fidelityStatus, setFidelityStatus] = useState<any | null>(null)
-  const [fidelityBusy, setFidelityBusy] = useState(false)
-  const [fidelityThresholds, setFidelityThresholds] = useState({
-    // 比較頻段下限：自 DC 至主通道跌破此值為止。深止帶的差異屬雜訊，
-    // 納入計算會讓平均值失真。
-    valid_band_floor_db: '-30',
-  })
-  const scheduleSolverJobs = Array.isArray(schedStatus?.jobs) ? schedStatus.jobs : []
-  const fidelityAllSegmentsSiwave = scheduleSolverJobs.length > 0
-    ? scheduleSolverJobs.every((job: any) => String(job?.solver || '').toLowerCase() === 'siwave')
-    : segmentSolverPlans.length > 0
-      ? segmentSolverPlans.every(plan => plan.requested_solver === 'siwave')
-      : schedStatus?.solver === 'siwave'
   // 純粹用來讓「求解中」的段耗時每秒跳動；不打 API，只觸發重繪
   const [nowTick, setNowTick] = useState(() => Date.now() / 1000)
 
@@ -568,6 +607,18 @@ export default function App() {
 
   // 是否可進行分段：裁切完成、或直接匯入分段模式已載入
   const canSegment = !!cutScene || (directSegmentMode && allNets.length > 0)
+
+  /** 後端 session 目前開著的那個檔。每個會另存新檔的步驟完成後都要更新。
+   *
+   *  各步驟的「輸出路徑」建議名要一律從這裡長出來。之前每一步各自猜自己的
+   *  基準（背鑽用 outputPath＝裁切的輸出），結果「裁切→換疊構→背鑽」產生的
+   *  檔名是 ..._Cutout_backdrill，把中間的疊構更換整個吃掉——檔名是這條加工鏈
+   *  唯一的紀錄，漏一環之後就分不出哪個檔套過疊構。 */
+  const [workingPath, setWorkingPath] = useState('')
+  // 疊構更換屬於「準備」階段（載入的子項），必須在裁切之前就能用——換疊構會
+  // 改變層厚與層數，裁切與 Port 都得建立在最終疊構上。因此它的門檻是「板子
+  // 載入了」，不是「裁切完成了」。
+  const boardLoaded = !!fullScene || allNets.length > 0
 
   // ── UI 狀態 ──
   const [logs, setLogs] = useState<string[]>([])
@@ -675,7 +726,7 @@ export default function App() {
       const data = await api('/api/browse_input')
       if (data.path) {
         setInputPath(data.path)
-        setOutputPath(data.path.replace(/\.[^/.]+$/, '') + '_Cutout.aedb')
+        setOutputPath(stripExtension(data.path) + '_Cutout.aedb')
       }
     } catch (e) { console.error(e) }
   }
@@ -684,6 +735,68 @@ export default function App() {
     try {
       const data = await api('/api/browse_output')
       if (data.path) setOutputPath(data.path)
+    } catch (e) { console.error(e) }
+  }
+
+  // 分隔線位置：讀一次當初始值，之後每次拖曳就記起來當下次的預設。
+  // useState 的初值只在第一次 render 取用，所以不需要 useMemo。
+  const [splitSizes] = useState(loadMainSplit)
+  const [logSplitSizes] = useState(loadLogSplit)
+  const saveSplitSizes = (sizes: number[]) => saveMainSplit(sizes)
+  const saveLogSplitSizes = (sizes: number[]) => saveLogSplit(sizes)
+
+  /** 上一次自動填進各輸出路徑欄位的建議值；用來分辨「使用者自己改過」。 */
+  const autoSuggested = useRef<Record<string, string>>({})
+
+  /** 去掉副檔名——只動檔名那一段，不會咬到目錄。
+   *
+   *  常見寫法 `path.replace(/\.[^/.]+$/, '')` 在 Windows 路徑上會出事：
+   *  `[^/.]` 允許反斜線，所以 `D:\v1.2\board`（目錄名含小數點、檔名沒有
+   *  副檔名）會被整段吃成 `D:\v1`。
+   */
+  const stripExtension = (path: string) => {
+    const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+    return path.slice(0, cut + 1) + path.slice(cut + 1).replace(/\.[^.]+$/, '')
+  }
+
+  /** 依目前工作檔重算某個步驟的輸出路徑建議。
+   *
+   *  只有欄位是空的、或仍等於上一次的建議時才覆寫——使用者自己打過的路徑
+   *  不能被工作檔一變就洗掉。
+   */
+  const suggestOutputPath = (
+    key: string, suffix: string,
+    current: string, setter: (value: string) => void,
+  ) => {
+    const base = workingPath || inputPath
+    if (!base) return
+    const next = stripExtension(base) + suffix
+    if (current && current !== autoSuggested.current[key]) return
+    if (current === next) return
+    autoSuggested.current[key] = next
+    setter(next)
+  }
+
+  // 工作檔一換（裁切／疊構／背鑽／清理／Port 任一步完成），所有還沒被使用者
+  // 動過的輸出路徑建議都要跟著長出新的一節，檔名才完整記錄做過哪些加工。
+  useEffect(() => {
+    if (!workingPath) return
+    suggestOutputPath('stackup', '_stackup.aedb', stackupOutputPath, setStackupOutputPath)
+    suggestOutputPath('backdrill', '_backdrill.aedb', bdOutputPath, setBdOutputPath)
+    suggestOutputPath('cleanup', '_cleaned.aedb', cleanupOutputPath, setCleanupOutputPath)
+    suggestOutputPath('ports', '_ports.aedb', portsOutputPath, setPortsOutputPath)
+    // 分段輸出資料夾走同一套規則。之前它是每個步驟各自無條件覆寫，而輸出路徑
+    // 又受「使用者改過就不動」保護——兩種政策並存，於是同一畫面上「設 Port 的
+    // 輸出」與「分段輸出資料夾」會少掉不同的加工節，看起來像壞掉。
+    suggestOutputPath('segments', '_segments', segOutputDir, setSegOutputDir)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workingPath])
+
+  const handleBrowseStackup = async () => {
+    try {
+      const data = await api('/api/browse_stackup')
+      // 換了疊構檔，舊的差異分析就不作數了。
+      if (data.path) { setStackupFilePath(data.path); setStackupDiff(null) }
     } catch (e) { console.error(e) }
   }
 
@@ -704,21 +817,18 @@ export default function App() {
     setCleanupAfterScene(null)
     setSegAnalysis(null)
     setSegRun(null)
-    setFidelityPrep(null)
-    setFidelityPairs([])
-    setFidelityStatus(null)
     setActiveView('full')
     if (path) {
       setInputPath(path)
       setCleanupOutputPath(path.replace(/\.aedb$/i, '') + '_cleaned.aedb')
-      if (!outputPath) setOutputPath(path.replace(/\.[^/.]+$/, '') + '_Cutout.aedb')
+      if (!outputPath) setOutputPath(stripExtension(path) + '_Cutout.aedb')
     }
   }
 
   const handleLoadFile = async () => {
     if (!inputPath) { alert('請輸入檔案路徑'); return }
     setLoadingMsg(directSegmentMode
-      ? '載入檔案中（直接分段模式，跳過裁切）…'
+      ? '載入檔案中（不裁切，直接作為通道）…'
       : '載入 EDB 檔案中，大型檔案可能需要數分鐘…')
     setIsLoading(true)
     try {
@@ -742,14 +852,14 @@ export default function App() {
       }
       applyLoadResult(data, data.path || inputPath)
       const normalized = data.path || inputPath
+      setWorkingPath(normalized)
       if (directSegmentMode) {
         // 直接分段模式：預設清理與分段輸出路徑，載入後可直接到「Layout 清理」／8
         setCleanupOutputPath(normalized.replace(/\.aedb$/i, '') + '_cleaned.aedb')
-        setSegOutputDir(normalized.replace(/\.aedb$/i, '') + '_segments')
-        // 「設定 Port 與求解器」的輸出（另存新檔，不覆寫使用者自己裁切好的來源）
+          // 「設定 Port 與求解器」的輸出（另存新檔，不覆寫使用者自己裁切好的來源）
         setPortsOutputPath(normalized.replace(/\.aedb$/i, '') + '_ports.aedb')
       } else {
-        setOutputPath(normalized.replace(/\.[^/.]+$/, '') + '_Cutout.aedb')
+        setOutputPath(stripExtension(normalized) + '_Cutout.aedb')
       }
       // Preview 已在同一個背景工作內完成，避免第二個長 HTTP 請求再次逾時。
       setFullScene(data.preview)
@@ -798,9 +908,11 @@ export default function App() {
         extent_type: extentType,
         port_components: comps,
         port_type: portType,
-        // 入口沒勾「設定 Port 與求解器」＝這次只要裁切；後端會跳過建 Port
-        // 與套用 Setup，之後可再用「設定 Port 與求解器」單獨補上。
-        create_ports: show.ports,
+        // 裁切一律不兼建 Port。Port 必須建立在**最終幾何**上，而背鑽與
+        // Layout 清理都排在裁切之後、也都會移除銅箔與 Via——先建好的 Port
+        // 參考可能因此默默失效（實測 SIwave 會整批判為 invalid port）。
+        // 建 Port 改由「分析」區的〈設定 Port 與求解器〉負責。
+        create_ports: false,
         output_path: outputPath,
         overwrite_existing: overwriteExisting,
         solution_freq: parseFloat(solutionFreq) || 25,
@@ -859,14 +971,13 @@ export default function App() {
           + String(data.fallback_reason || ''))
       }
       setActiveView('cut')
+      setWorkingPath(data.output_path)
       setCleanupAnalysis(null)
       setCleanupBeforeScene(null)
       setCleanupAfterScene(null)
-      setCleanupOutputPath(data.output_path.replace(/\.aedb$/i, '') + '_cleaned.aedb')
       // 分段狀態重置與預設輸出資料夾
       setSegAnalysis(null)
       setSegRun(null)
-      setSegOutputDir(outputPath.replace(/\.aedb$/i, '') + '_segments')
     } catch (e) {
       alert('裁切失敗: ' + String(e))
     } finally {
@@ -942,13 +1053,12 @@ export default function App() {
       setCutScene(data.preview)
       setCompletedBoundary(null)
       setActiveView('cut')
+      setWorkingPath(data.output_path)
       setCleanupAnalysis(null)
       setCleanupBeforeScene(null)
       setCleanupAfterScene(null)
-      setCleanupOutputPath(data.output_path.replace(/\.aedb$/i, '') + '_cleaned.aedb')
       setSegAnalysis(null)
       setSegRun(null)
-      setSegOutputDir(data.output_path.replace(/\.aedb$/i, '') + '_segments')
       const names: string[] = data.component_port_names || []
       alert(
         `已建立 ${names.length} 個元件端 Port（元件 ${data.port_component_count} 個）。\n`
@@ -967,7 +1077,7 @@ export default function App() {
   // ── 6c 疊構更換 ─────────────────────────────────────
   const handleStackupExport = async () => {
     if (allNets.length === 0) { alert('請先載入 EDB'); return }
-    const suggested = (inputPath || 'stackup').replace(/\.[^/.]+$/, '')
+    const suggested = stripExtension(inputPath || 'stackup')
       + `_stackup.${stackupExportFormat}`
     setIsLoading(true); setLoadingMsg('匯出疊構…')
     try {
@@ -988,10 +1098,8 @@ ${data.output_path}`)
       const data = await api('/api/stackup/analyze', { file_path: stackupFilePath })
       setStackupDiff(data)
       setStackupConfirmRemoval(false)
-      const base = outputPath || inputPath
-      if (!stackupOutputPath && base) {
-        setStackupOutputPath(base.replace(/\.[^/.]+$/, '') + '_stackup.aedb')
-      }
+      suggestOutputPath('stackup', '_stackup.aedb',
+                        stackupOutputPath, setStackupOutputPath)
     } catch (e) {
       setStackupDiff(null)
       alert('疊構分析失敗: ' + String(e))
@@ -1035,9 +1143,9 @@ ${state.error}` : ''}`)
       }
       setCutScene(data.preview)
       setActiveView('cut')
+      setWorkingPath(data.output_path)
       setStackupDiff(null)
       setSegAnalysis(null); setSegRun(null)
-      setSegOutputDir(data.output_path.replace(/\.aedb$/i, '') + '_segments')
       alert(`疊構更換完成：${data.layer_count_before} 層 → ${data.layer_count_after} 層
 `
         + `輸出：${data.output_path}
@@ -1060,10 +1168,8 @@ ${state.error}` : ''}`)
         diameter_increment_mil: parseFloat(bdDiameterIncMil) || 8,
       })
       setBdResult(data)
-      const base = outputPath || inputPath
-      if (!bdOutputPath && base) {
-        setBdOutputPath(base.replace(/\.[^/.]+$/, '') + '_backdrill.aedb')
-      }
+      suggestOutputPath('backdrill', '_backdrill.aedb',
+                        bdOutputPath, setBdOutputPath)
     } catch (e) {
       setBdResult(null)
       alert('背鑽分析失敗: ' + String(e))
@@ -1114,9 +1220,9 @@ ${state.error}` : ''}`)
       }
       setCutScene(data.preview)
       setActiveView('cut')
+      setWorkingPath(data.output_path)
       setBdResult(null)
       setSegAnalysis(null); setSegRun(null)
-      setSegOutputDir(data.output_path.replace(/\.aedb$/i, '') + '_segments')
       alert(`背鑽完成：成功 ${data.applied_count} 段、失敗 ${data.failed_count} 段\n`
         + `輸出：${data.output_path}\n報告：${data.report_path}`)
     } catch (e) {
@@ -1149,7 +1255,7 @@ ${state.error}` : ''}`)
   }
 
   const handleCleanupAnalyze = async () => {
-    if (!canSegment) { alert('請先完成裁切，或以直接分段模式載入通道檔案'); return }
+    if (!canSegment) { alert('請先完成裁切，或在入口不勾「局部裁切」直接載入通道檔案'); return }
     if (signalNets.length === 0 || refNets.length === 0) {
       alert('請先選擇訊號與參考網路'); return
     }
@@ -1203,9 +1309,9 @@ ${state.error}` : ''}`)
       setCleanupDiffKind('all')
       setCleanupDiffLayer('')
       setCleanupFocusRegion(null)
+      setWorkingPath(data.output_path)
       setSegAnalysis(null)
       setSegRun(null)
-      setSegOutputDir(data.output_path.replace(/\.aedb$/i, '') + '_segments')
       setActiveView('cleanup')
     } catch (e) {
       alert('Layout 清理失敗: ' + String(e))
@@ -1215,6 +1321,50 @@ ${state.error}` : ''}`)
   }
 
   // ── N 段分割 ───────────────────────────────────
+  /** manualCuts 為空＝用自動位置（「回到自動刀線」走的就是這條路）。 */
+  const runComplexityAnalyze = async (
+    manualCuts?: { axis: number; position_mm: number }[],
+  ) => {
+    if (!canSegment) { alert('請先完成裁切，或直接載入通道檔案'); return }
+    if (signalNets.length === 0) { alert('請先於「選擇網路」選擇訊號網路'); return }
+    setLoadingMsg(manualCuts?.length
+      ? '依新的刀線位置重新評分中…'
+      : '偵測 3D 複雜區並規劃切割位置中…')
+    setIsLoading(true)
+    try {
+      const data: ComplexityAnalysis = await api(
+        '/api/segment/analyze-complexity', {
+          signal_nets: signalNets,
+          reference_nets: refNets,
+          quality_threshold: segmentQuality,
+          cuts: manualCuts || [],
+        })
+      setComplexityAnalysis(data)
+      setSegAnalysis(null)          // 兩種分析互斥，避免畫面同時出現兩組刀
+      setActiveView('segments')
+      // 拖曳時不彈視窗——面板上的紅字已經說明白了，每拖一次跳一個 modal
+      // 只會讓人沒辦法連續微調。
+      if (!data.feasible && !manualCuts?.length) {
+        alert('無法產生可執行的分段：' + data.reason)
+      }
+    } catch (e) {
+      alert('複雜度分段分析失敗: ' + String(e))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleComplexityAnalyze = () => runComplexityAnalyze()
+
+  /** 在預覽圖上把某把刀拖到新位置：整份重算，等級與分段都會跟著更新。 */
+  const handleCutDrag = (cutIndex: number, positionMm: number) => {
+    if (!complexityAnalysis) return
+    runComplexityAnalyze(complexityAnalysis.cuts.map((cut, index) => ({
+      axis: cut.axis,
+      position_mm: index === cutIndex ? positionMm : cut.position_mm,
+    })))
+  }
+
   const handleSegmentAnalyze = async () => {
     const n = parseInt(nSegments, 10)
     if (!canSegment) { alert('請先執行「局部裁切」，或勾選「直接匯入分段」後載入檔案'); return }
@@ -1231,6 +1381,7 @@ ${state.error}` : ''}`)
         hfss_mesh_method: hfssMeshMethod,
       })
       setSegAnalysis(data)
+      setComplexityAnalysis(null)
       setShowSegmentSafetyOverlay(true)
       setSegRun(null)
       setActiveView('segments')
@@ -1291,7 +1442,7 @@ ${state.error}` : ''}`)
   }
 
   // 收回求解包結果：驗證 Port 數與格式後寫回 segments.json，
-  // 之後串接、分段對照、眼圖都能直接用，不必再走「外部 S 參數檔」。
+  // 之後串接與眼圖都能直接用，不必再走「外部 S 參數檔」。
   const handleIngestResults = async () => {
     const metadataPath = normalizeUserPath(schedMetaPath)
     if (!metadataPath) { alert('請先執行 N 段分割，或輸入 segments.json 路徑'); return }
@@ -1517,9 +1668,6 @@ ${state.error}` : ''}`)
     try {
       const data = await api('/api/cascade/run', { metadata_path: metadataPath, output_path: '' })
       setCascadeResult(data)
-      setFidelityPrep(null)
-      setFidelityPairs([])
-      setFidelityStatus(null)
       setCascSeries([])
       if (data.port_names?.length >= 2) {
         setCascPortA(data.port_names[0])
@@ -1529,6 +1677,60 @@ ${state.error}` : ''}`)
       alert('電路串接失敗: ' + String(e))
     } finally {
       setCascadeBusy(false)
+    }
+  }
+
+  /** 單一外部 .sNp 直接當結果看，不接線。
+   *
+   *  整片板子一次解完拿到的檔就是這種——沒有段可接，但要看的東西（差動
+   *  IL／RL／NEXT／FEXT）與串接結果完全相同。 */
+  const handleLoadExternalSparam = async (path: string) => {
+    if (!path) { alert('請先加入一個 S 參數檔'); return }
+    setCascadeBusy(true)
+    try {
+      const data = await api('/api/cascade/load_external', { path })
+      setCascadeResult(data)
+      setCascSeries([])
+      if (data.port_names?.length >= 2) {
+        setCascPortA(data.port_names[0])
+        setCascPortB(data.port_names[1])
+      }
+      setActiveView('sparam')
+      if (!data.auto.ok) {
+        alert('已載入，但無法自動判定 Port 角色：' + data.auto.reason
+          + '\n\n單端檢視仍可用；差動自動曲線需要檔頭有「! Port[n] = 名稱」'
+          + '註解，且正負端命名對稱（例如 …TXP… / …TXN…）。')
+      }
+    } catch (e) {
+      alert('載入 S 參數檔失敗: ' + String(e))
+    } finally {
+      setCascadeBusy(false)
+    }
+  }
+
+  const [spExporting, setSpExporting] = useState(false)
+
+  /** 匯出目前圖上顯示的那幾條曲線成 .xlsx。
+   *
+   *  資料由前端送上去而不是後端重算：使用者可能關掉某幾類、或手動加了指定
+   *  Port 的曲線，重算會匯出跟畫面不一樣的東西。 */
+  const handleExportSparamExcel = async (curves: SParamSeries[]) => {
+    if (!curves.length) { alert('圖上沒有曲線可以匯出'); return }
+    setSpExporting(true)
+    try {
+      const data = await api('/api/cascade/export_excel', {
+        series: curves.map(c => ({ label: c.label, freq: c.freq, db: c.db })),
+        mode: spMode,
+        near: spData?.near || '',
+        far: spData?.far || '',
+        source: cascadeResult?.output_path || '',
+      })
+      alert(`已匯出 ${data.series_count} 條曲線：
+${data.output_path}`)
+    } catch (e) {
+      alert('匯出 Excel 失敗: ' + String(e))
+    } finally {
+      setSpExporting(false)
     }
   }
 
@@ -1544,9 +1746,6 @@ ${state.error}` : ''}`)
         output_path: selected.path,
       })
       setCascadeResult(data)
-      setFidelityPrep(null)
-      setFidelityPairs([])
-      setFidelityStatus(null)
       alert(`完整 Touchstone 已輸出：\n${data.output_path}\n\n串接摘要：\n${data.summary_path}`)
     } catch (e) {
       alert('Touchstone 輸出失敗: ' + String(e))
@@ -1741,9 +1940,6 @@ ${state.error}` : ''}`)
         output_path: '',
       })
       setCascadeResult(data)
-      setFidelityPrep(null)
-      setFidelityPairs([])
-      setFidelityStatus(null)
       setCascSeries([])
       if (data.port_names?.length >= 2) {
         setCascPortA(data.port_names[0])
@@ -1790,101 +1986,6 @@ ${state.error}` : ''}`)
       alert('取得曲線失敗: ' + String(e))
     }
   }
-
-  const handleFidelityPrepare = async () => {
-    const metadataPath = normalizeUserPath(schedMetaPath)
-    if (!metadataPath || !cascadeResult?.output_path) {
-      alert('請先完成本工具分段串接，並保留 segments.json 路徑。')
-      return
-    }
-    if (!fidelityAllSegmentsSiwave) {
-      alert('完整板對照只支援全部 Segment 均以 SIwave 求解的結果。請先將每段求解器切換為 SIwave。')
-      return
-    }
-    setFidelityBusy(true)
-    try {
-      const data = await api('/api/fidelity/prepare', {
-        metadata_path: metadataPath,
-        segmented_touchstone: cascadeResult.output_path,
-      }) as FidelityPreparation
-      setFidelityPrep(data)
-      setFidelityPairs(data.pair_suggestion.pairs)
-      setFidelityThresholds({
-        valid_band_floor_db: String(data.thresholds.valid_band_floor_db ?? -30),
-      })
-      setFidelityStatus(null)
-    } catch (e) {
-      alert('分段對照準備失敗：' + String(e))
-    } finally {
-      setFidelityBusy(false)
-    }
-  }
-
-  const handleFidelityStart = async () => {
-    if (!fidelityPrep || fidelityPairs.length === 0) {
-      alert('請先分析完整板基準與 Port 配對。')
-      return
-    }
-    if (fidelityPrep.pair_suggestion.requires_confirmation && !confirm(
-      'Port 名稱不足以可靠自動配對。請確認畫面中的主通道配對正確；是否依目前配對繼續？',
-    )) return
-    setFidelityBusy(true)
-    try {
-      const state = await api('/api/fidelity/start', {
-        metadata_path: normalizeUserPath(schedMetaPath),
-        segmented_touchstone: cascadeResult.output_path,
-        sweeps,
-        sweep_type: sweepType,
-        error_tolerance_pct: parseFloat(errorTolerance) || 0.1,
-        siwave_num_interp_points: 150,
-        num_cores: parseInt(solverCores, 10) || 4,
-        pairs: fidelityPairs,
-        thresholds: {
-          valid_band_floor_db: parseFloat(fidelityThresholds.valid_band_floor_db) || -30,
-        },
-      })
-      setFidelityStatus(state)
-    } catch (e) {
-      alert('分段對照啟動失敗：' + String(e))
-    } finally {
-      setFidelityBusy(false)
-    }
-  }
-
-  const handleFidelityStop = async () => {
-    try {
-      setFidelityStatus(await api('/api/fidelity/stop', {}))
-    } catch (e) {
-      alert('停止分段對照失敗：' + String(e))
-    }
-  }
-
-  // 排程執行中每 3 秒輪詢一次狀態
-  useEffect(() => {
-    if (!schedStatus?.running) return
-    const t = window.setInterval(async () => {
-      try {
-        const s = await api('/api/schedule/status')
-        setSchedStatus(s)
-      } catch { /* 後端未啟動時忽略 */ }
-    }, 3000)
-    return () => window.clearInterval(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schedStatus?.running])
-
-  // 完整板基準可能需要數分鐘；背景求解期間輪詢，不佔住長 HTTP 連線。
-  useEffect(() => {
-    if (!fidelityStatus?.running) return
-    const timer = window.setInterval(async () => {
-      try {
-        const state = await api('/api/fidelity/status')
-        setFidelityStatus(state)
-        if (state.status === 'done') setActiveView('fidelity')
-      } catch { /* 後端暫時忙碌時保留上次狀態 */ }
-    }, 2500)
-    return () => window.clearInterval(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fidelityStatus?.running])
 
   // 一鍵眼圖：啟動後輪詢背景工作，完成或失敗時解除忙碌旗標並更新圖片
   useEffect(() => {
@@ -1969,6 +2070,74 @@ ${state.error}` : ''}`)
     const t = window.setInterval(() => setNowTick(Date.now() / 1000), 1000)
     return () => window.clearInterval(t)
   }, [schedStatus?.running])
+
+  // 開頁（或求解中重新整理）時先問一次：排程是後端在跑的，前端沒有這一下
+  // 就接不上下面的輪詢，進度會整個消失。已經停掉或跑完的也照樣接管——那份
+  // 快照裡有各段的結果與待重新匯出的項目，重新整理後不該憑空消失；jobs 為
+  // 空時面板本來就不會顯示，不會有殘影。
+  useEffect(() => {
+    let cancelled = false
+    api('/api/schedule/status')
+      .then(s => { if (!cancelled && s) setSchedStatus(s) })
+      .catch(() => { /* 後端還沒起來，忽略 */ })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 段的狀態要靠輪詢才會更新：setSchedStatus 原本只在啟動、停止與重新匯出
+  // 時被呼叫，畫面因此一直停在啟動當下的快照（每一段都「等待中」），要按了
+  // 停止才看到真正的進度——看起來就像求解沒動或已經失敗。跑完時也是靠這裡
+  // 把 running 收掉，否則會一直卡在「執行中…」。
+  useEffect(() => {
+    if (!schedStatus?.running) return
+    let cancelled = false
+    let inFlight = false
+    const poll = async () => {
+      if (inFlight) return          // 後端忙的時候不要疊加請求
+      inFlight = true
+      try {
+        const s = await api('/api/schedule/status')
+        if (!cancelled) setSchedStatus(s)
+      } catch {
+        /* 後端暫時忙碌時保留上次狀態，下一輪再試 */
+      } finally {
+        inFlight = false
+      }
+    }
+    poll()
+    const timer = window.setInterval(poll, 2000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schedStatus?.running])
+
+  const handleComplexityRun = async () => {
+    if (!complexityAnalysis?.feasible) {
+      alert('請先完成可執行的複雜度分析'); return
+    }
+    if (!segOutputDir) { alert('請設定分段輸出資料夾'); return }
+    setLoadingMsg(
+      `執行 ${complexityAnalysis.segments.length} 段分割中，每段需要重新裁切…`)
+    setIsLoading(true)
+    try {
+      const data = await api('/api/segment/run', {
+        signal_nets: signalNets,
+        reference_nets: refNets,
+        cuts: complexityAnalysis.cuts.map(cut => ({
+          axis: cut.axis, position_mm: cut.position_mm,
+        })),
+        output_dir: segOutputDir,
+        quality_threshold: segmentQuality,
+      })
+      setSegRun(data)
+      setActiveSegIdx(-1)
+      setActiveView('segments')
+      setSchedMetaPath(data.metadata_path || '')
+    } catch (e) {
+      alert('依複雜度分段執行失敗: ' + String(e))
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   const handleSegmentRun = async () => {
     if (!segAnalysis) { alert('請先分析切割位置'); return }
@@ -2109,8 +2278,8 @@ ${state.error}` : ''}`)
       { label: '重新載入原始檔', action: handleReloadOriginal, disabled: allNets.length === 0 },
     ],
     '執行': [
-      { label: show.ports ? '執行裁切並建立 Port' : '執行裁切',
-        action: handleCutout, disabled: signalNets.length === 0 },
+      { label: '執行裁切', action: handleCutout,
+        disabled: signalNets.length === 0 },
       { label: '分析 N 段切割位置', action: handleSegmentAnalyze, disabled: !cutScene },
       { label: '執行 N 段分割', action: handleSegmentRun, disabled: !segAnalysis },
       { label: 'S 參數串接', action: () => {}, disabled: true },
@@ -2123,7 +2292,7 @@ ${state.error}` : ''}`)
       { label: '一鍵 HTML 報告中心', action: () => setActiveView('report') },
     ],
     '說明': [
-      { label: '關於本工具', action: () => alert('PCB SI 3D 模擬分析工具\n\n電路板裁切與 Port 自動建立\n疊構更換、背鑽與 Layout 清理\nN 段分割與 HFSS／SIwave 混合求解\n遠端求解包（求解機不需安裝 Python）\nS 參數串接、分段對照與眼圖\n\n此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供') },
+      { label: '關於本工具', action: () => alert('PCB SI 3D 模擬分析工具\n\n電路板裁切與 Port 自動建立\n疊構更換、背鑽與 Layout 清理\nN 段分割與 HFSS／SIwave 混合求解\n遠端求解包（求解機不需安裝 Python）\nS 參數串接與眼圖\n\n此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供') },
     ],
   }
 
@@ -2136,9 +2305,15 @@ ${state.error}` : ''}`)
   const scene = activeView === 'cut' ? cutScene
     : activeView === 'cleanup' ? cleanupAfterScene
     : activeView === 'segments' ? segScene : fullScene
+  // 哪些分頁真的在畫 Layout。上方那條「左鍵平移、滾輪縮放…」提示與「請先載入
+  // 電路板」浮水印都只對這些成立——原本兩處各自用「不是 A 也不是 B 也不是 C」
+  // 的排除清單，新增分頁時必然漏掉：S 參數分頁就同時吃到了那條 Layout 提示
+  // （疊在自己的標題上）與浮水印（壓在曲線圖中央）。
+  const isLayoutView = (['full', 'cut', 'segments'] as ViewMode[])
+    .includes(activeView)
+
   const sceneLabel = activeView === 'cut' ? '裁切後 Layout'
     : activeView === 'cleanup' ? 'Layout 清理前後對比'
-    : activeView === 'fidelity' ? '完整板與分段串接 S 參數對照'
     : activeView === 'sparam' ? '串接後 S 參數 · 單端／差動可切換 · 兩端與差動對由 Port 名稱自動判斷'
     : activeView === 'schematic' ? '串接電路示意圖 · 黃點 = 短路節點（stripline T+B）· 虛線框 = 尚未解算'
     : activeView === 'segments'
@@ -2151,7 +2326,31 @@ ${state.error}` : ''}`)
   // 切割線疊圖：執行前（!segRun，此時無論 activeSegIdx 是什麼都要顯示）
   // 或執行後切回「整體視圖」時都要顯示
   const segCutsOverlay: SegmentCutsInfo | null =
-    activeView === 'segments' && segAnalysis && (!segRun || isOverviewMode)
+    activeView === 'segments' && complexityAnalysis && (!segRun || isOverviewMode)
+      ? {
+          // 依複雜度分段：逐刀帶軸向、每段是矩形，Preview2D 會走新路徑。
+          direction: complexityAnalysis.cuts[0]?.direction || 'x',
+          positions_mm: complexityAnalysis.cuts.map(c => c.position_mm),
+          cuts: complexityAnalysis.cuts.map(c => ({
+            direction: c.direction,
+            position_mm: c.position_mm,
+            quality_grade: c.quality_grade,
+            region: c.region,
+            manual: c.manual,
+            auto_position_mm: c.auto_position_mm,
+          })),
+          segment_boxes: complexityAnalysis.segments.map(seg => ({
+            index: seg.index,
+            bounds_mm: seg.bounds_mm,
+            solver: seg.solver,
+          })),
+          complexity_regions: complexityAnalysis.regions.map(region => ({
+            index: region.index,
+            bounds_mm: region.bounds_mm,
+            feature_count: region.feature_count,
+          })),
+        }
+    : activeView === 'segments' && segAnalysis && (!segRun || isOverviewMode)
       ? {
           direction: segAnalysis.direction,
           positions_mm: segAnalysis.cuts.map(c => c.position_mm),
@@ -2188,30 +2387,34 @@ ${state.error}` : ''}`)
     : null
   // 報告工作區優先跟隨分段輸出，其次為裁切輸出與原始板路徑。
   // 後端會確保 .aedb 不被當成一般資料夾而寫入內部。
-  const reportBasePath = segOutputDir || outputPath || inputPath
-  const reportProjectName = (inputPath.split(/[\\/]/).pop() || 'PCB SI 分析專案')
-    .replace(/\.(aedb|brd|tgz)$/i, '')
+  // 報告工作區要跟著「使用者現在在看的東西」放，不要落到 C 槽的家目錄。
+  // 依序取：分段輸出資料夾 → 裁切輸出 → 目前結果的 S 參數檔 → 輸入檔。
+  // cascadeResult 那一項是為了「只載入一個外部 .sNp 來看曲線」的情形——那時
+  // 前三項都是空的，但那個 .sNp 就在使用者的專案目錄裡，正是該放報告的地方。
+  const reportBasePath = segOutputDir || outputPath
+    || cascadeResult?.output_path || inputPath
+  const reportProjectName = (
+    (inputPath || cascadeResult?.output_path || '').split(/[\/]/).pop()
+    || 'PCB SI 分析專案'
+  ).replace(/\.(aedb|brd|tgz|s\d+p)$/i, '')
   const reportSectionByView: Record<ViewMode, string> = {
     full: 'board', cut: 'cutout', cleanup: 'cleanup', segments: 'segments',
-    schematic: 'schematic', sparam: 'sparam', fidelity: 'fidelity', eye: 'eye',
+    schematic: 'schematic', sparam: 'sparam', eye: 'eye',
     report: 'results',
   }
   const reportSourceRevision = activeView === 'segments'
     ? (schedMetaPath || segOutputDir)
     : activeView === 'schematic' || activeView === 'sparam'
       ? String(cascadeResult?.output_path || schedMetaPath || '')
-      : activeView === 'fidelity'
-        ? String(fidelityStatus?.result?.report_path || '')
-        : activeView === 'eye'
-          ? String(eyeJob?.result?.image_path || '')
-          : activeView === 'cut' || activeView === 'cleanup'
-            ? outputPath
-            : inputPath
+      : activeView === 'eye'
+        ? String(eyeJob?.result?.image_path || '')
+        : activeView === 'cut' || activeView === 'cleanup'
+          ? outputPath
+          : inputPath
   const reportSnapshotAvailable = activeView !== 'report' && Boolean(
     scene
     || (activeView === 'schematic' && schematicGraph)
     || (activeView === 'sparam' && cascadeResult)
-    || (activeView === 'fidelity' && fidelityStatus?.result)
     || (activeView === 'eye' && eyeJob?.status === 'done'),
   )
   useReportStaleRevision(reportWorkspace, ['board'], fullScene, '完整板資料已重新載入')
@@ -2219,7 +2422,6 @@ ${state.error}` : ''}`)
   useReportStaleRevision(reportWorkspace, ['cleanup'], cleanupAfterScene, 'Layout 清理結果已更新')
   useReportStaleRevision(reportWorkspace, ['segments'], segRun, 'N 段分割結果已更新')
   useReportStaleRevision(reportWorkspace, ['schematic', 'sparam'], cascadeResult, '電路串接結果已更新')
-  useReportStaleRevision(reportWorkspace, ['fidelity'], fidelityStatus?.result, '可信度結果已更新')
   useReportStaleRevision(reportWorkspace, ['eye'], eyeJob?.result, '眼圖結果已更新')
   const formatBytes = (value: number) => {
     if (value < 1024) return `${value} B`
@@ -2241,7 +2443,6 @@ ${state.error}` : ''}`)
   // 被隱藏但仍在執行的工作：不提示的話，長時間求解會變成黑箱。
   const hiddenRunning: string[] = []
   if (!show.schedule && schedStatus?.running) hiddenRunning.push('排程求解')
-  if (!show.fidelity && fidelityStatus?.running) hiddenRunning.push('分段對照')
   if (!show.eye && eyeJob?.running) hiddenRunning.push('眼圖')
 
   return (
@@ -2281,7 +2482,9 @@ ${state.error}` : ''}`)
           {cutoutJobId && (
             <button className="btn" onClick={handleStopCutout} disabled={cutoutStopping}
               style={{ minWidth: 150, borderColor: 'var(--danger)', color: 'var(--danger)', background: '#fff' }}>
-              {cutoutStopping ? '停止中…' : '停止裁切工作'}
+              {/* 這個背景工作機制裁切、疊構更換、背鑽都共用，寫死「裁切」
+                  在套用疊構時會變成錯的字。 */}
+              {cutoutStopping ? '停止中…' : '停止目前工作'}
             </button>
           )}
           {/* 遮罩擋住操作的期間，系統日誌本體也被蓋在下面看不到；這裡直接秀
@@ -2298,10 +2501,7 @@ ${state.error}` : ''}`)
             }}
           >
             {logs.slice(-60).map((l, i) => (
-              <div key={i} style={{
-                color: /錯誤|失敗|error|fail/i.test(l) ? 'var(--danger)'
-                  : /警告|warn/i.test(l) ? 'var(--warn)' : undefined,
-              }}>{l}</div>
+              <div key={i} style={{ color: logColor(l) }}>{l}</div>
             ))}
             {logs.length === 0 && <div style={{ color: 'var(--faint)' }}>目前無日誌…</div>}
           </div>
@@ -2370,9 +2570,9 @@ ${state.error}` : ''}`)
       </nav>
 
       <main style={{ flex: 1, minHeight: 0 }}>
-        <Allotment>
+        <Allotment defaultSizes={splitSizes} onChange={saveSplitSizes}>
           {/* 左側：設定面板 */}
-          <Allotment.Pane preferredSize={400} minSize={320}>
+          <Allotment.Pane minSize={320}>
             <div style={{ paddingRight: 7, height: '100%' }}>
               <div className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', height: '100%', gap: '12px', overflowY: 'auto' }}>
 
@@ -2415,7 +2615,7 @@ ${state.error}` : ''}`)
                       : '入口已勾「局部裁切」，載入後可設定裁切範圍。'}
                   </div>
                   <button className="btn--primary" onClick={handleLoadFile} style={{ marginTop: 6 }}>
-                    {directSegmentMode ? '載入檔案（直接分段）' : '載入電路板'}
+                    {directSegmentMode ? '載入檔案（不裁切）' : '載入電路板'}
                   </button>
                 </div>
 
@@ -2527,8 +2727,353 @@ ${state.error}` : ''}`)
                   </div>
                 </div>
 
-                {/* 「Port 設定」：Port 設定（直接分段模式不需要） */}
-                <div hidden={!show.ports} style={directSegmentMode ? { opacity: 0.4, pointerEvents: 'none' } : undefined}>
+                {/* 「執行裁切」：輸出與執行（直接分段模式不需要） */}
+                <div hidden={!(show.cutout)} style={directSegmentMode ? { opacity: 0.4, pointerEvents: 'none' } : undefined}>
+                  <h3 className="panel-title">執行裁切</h3>
+                  <p className="panel-hint">
+                    這一步只裁出通道，不建立 Port。元件端 Port 要建立在最終幾何上，
+                    所以排在背鑽與 Layout 清理之後——見下方〈設定 Port 與求解器〉。
+                  </p>
+                  <div className="field-row" style={{ marginTop: 6 }}>
+                    <input
+                      type="text"
+                      className="input"
+                      value={outputPath}
+                      onChange={e => setOutputPath(e.target.value)}
+                      placeholder="輸出路徑…"
+                    />
+                    <button className="btn" onClick={handleBrowseOutput}>瀏覽…</button>
+                  </div>
+                  <button
+                    className="btn--primary"
+                    onClick={handleCutout}
+                    disabled={signalNets.length === 0 || refNets.length === 0}
+                    style={{ marginTop: 6 }}
+                  >
+                    執行裁切
+                  </button>
+                </div>
+
+                {/* 「疊構更換」：疊構更換 */}
+                <div hidden={!(show.stackup)} style={{ opacity: boardLoaded ? 1 : 0.5, pointerEvents: boardLoaded ? undefined : 'none' }}>
+                  <h3 className="panel-title">疊構更換</h3>
+                  <p className="panel-hint">
+                    指定疊構檔即可直接分析並套用，支援 XML／CSV／JSON；XML 為 Ansys
+                    Control 格式。<b>套用前一定會先列出差異</b>，永遠另存新檔。
+                  </p>
+                  <p className="panel-hint">
+                    <b>排在裁切之後、背鑽與設定 Port 之前。</b>pyedb 換疊構時會把每一個
+                    padstack instance 的 layer_map 讀出再寫回，耗時與板上 Via 數量成
+                    正比——全板要十幾分鐘，裁完只剩通道範圍就快得多。但一定要在背鑽與
+                    Port 之前，那兩者都必須建立在最終疊構上。
+                  </p>
+
+                  <div className="field-label" style={{ marginTop: 6 }}>疊構檔</div>
+                  <div className="field-row">
+                    <input type="text" className="input" value={stackupFilePath}
+                      onChange={e => { setStackupFilePath(e.target.value); setStackupDiff(null) }}
+                      placeholder="疊構檔路徑…（.xml／.csv／.json）" />
+                    <button className="btn" onClick={handleBrowseStackup}>瀏覽…</button>
+                  </div>
+                  <button className="btn--primary" style={{ width: '100%', marginTop: 6 }}
+                    onClick={handleStackupAnalyze} disabled={!stackupFilePath}>
+                    分析差異
+                  </button>
+
+                  {/* 匯出是選用的輔助功能，不是流程的第一步——手上已經有疊構檔
+                      （例如來自其他工具）時完全不需要先匯出。
+                      全站的操作按鈕都不加步驟編號：按鈕本來就照順序排，後續動作
+                      也要前一步完成才會出現或啟用，編號沒有多給資訊，反而讓人以為
+                      自己漏了某個步驟、或誤以為選用步驟是必經的。 */}
+                  <div className="field-row" style={{ marginTop: 8 }}>
+                    <span className="panel-hint" style={{ flex: 1, margin: 0 }}>
+                      沒有現成檔案？可先匯出目前疊構當範本再編輯：
+                    </span>
+                    <select className="input" style={{ width: 76 }} value={stackupExportFormat}
+                      onChange={e => setStackupExportFormat(e.target.value as 'xml' | 'csv' | 'json')}>
+                      <option value="xml">XML</option>
+                      <option value="csv">CSV</option>
+                      <option value="json">JSON</option>
+                    </select>
+                    <button className="btn" onClick={handleStackupExport}>
+                      匯出
+                    </button>
+                  </div>
+
+                  <PortWarning warning={stackupDiff?.port_warning} />
+                  {stackupDiff && (
+                    <div className="status" style={{ marginTop: 6, fontSize: 11.5 }}>
+                      {stackupDiff.comparable === false ? (
+                        <span style={{ color: '#ffb347' }}>{stackupDiff.reason}</span>
+                      ) : (
+                        <>
+                          <div>
+                            導體層 {stackupDiff.signal_layer_count} → {stackupDiff.incoming_signal_layer_count}｜
+                            改名 {stackupDiff.renames?.length || 0}、
+                            介電層重建 {stackupDiff.dielectric_rebuilt ?? 0}、
+                            新增 {stackupDiff.added.length}、變更 {stackupDiff.changed.length}、
+                            材料異動 {stackupDiff.material_changes.length}
+                          </div>
+                          <div style={{ marginTop: 3, opacity: 0.8 }}>
+                            導體層依順序就地改名，銅箔保留；介電層一律移除重建
+                            （介電層不帶銅箔）。兩者都不是資料遺失。
+                          </div>
+                          {stackupDiff.signal_count_matches === false && (
+                            <div style={{ marginTop: 4, color: '#ff6b6b', fontWeight: 650 }}>
+                              ⚠ 導體層數對不上，pyedb 會直接拒絕套用。
+                            </div>
+                          )}
+                          {stackupDiff.renames?.length > 0 && (
+                            <div style={{ marginTop: 5 }}>
+                              <div style={{ fontWeight: 650 }}>
+                                導體層依「順序」改名（銅箔保留，不是刪除）
+                              </div>
+                              <div style={{ marginTop: 3, maxHeight: 132, overflowY: 'auto',
+                                            fontFamily: '"Calibri", monospace', fontSize: 11 }}>
+                                {stackupDiff.renames.map((item: any) => (
+                                  <div key={item.index}>
+                                    {String(item.index).padStart(2, '0')}　{item.from} → <b>{item.to}</b>
+                                  </div>
+                                ))}
+                              </div>
+                              <div style={{ marginTop: 3, color: '#ffb347' }}>
+                                請核對這個對應：順序若與預期不同，銅箔會落在錯的層上，
+                                而這是名字比對看不出來的。
+                              </div>
+                            </div>
+                          )}
+                          {stackupDiff.removed.length > 0 && (
+                            <div style={{ marginTop: 4, color: '#ff6b6b', fontWeight: 650 }}>
+                              ⚠ 套用後會刪除 {stackupDiff.removed.length} 層（連同其上的銅箔）：
+                              {stackupDiff.removed.slice(0, 8).join('、')}
+                              {stackupDiff.removed.length > 8 ? '…' : ''}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {stackupDiff?.requires_confirmation && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6,
+                                    marginTop: 6, fontSize: 11.5, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={stackupConfirmRemoval}
+                        onChange={e => setStackupConfirmRemoval(e.target.checked)} />
+                      {stackupDiff.signal_count_matches === false
+                        ? '我知道導體層數不符，仍要嘗試'
+                        : '我確認要刪除上列圖層'}
+                    </label>
+                  )}
+
+                  <div className="field-row" style={{ marginTop: 6 }}>
+                    <input type="text" className="input" value={stackupOutputPath}
+                      onChange={e => setStackupOutputPath(e.target.value)}
+                      placeholder="輸出路徑…（例如 xxx_stackup.aedb）" />
+                    <button className="btn" onClick={async () => {
+                      try {
+                        const data = await api('/api/browse_output')
+                        if (data.path) setStackupOutputPath(data.path)
+                      } catch (e) { console.error(e) }
+                    }}>瀏覽…</button>
+                  </div>
+                  <button className="btn--primary" style={{ width: '100%', marginTop: 6 }}
+                    onClick={handleStackupApply}
+                    disabled={!stackupDiff || stackupDiff.comparable === false
+                      || (stackupDiff.requires_confirmation && !stackupConfirmRemoval)}>
+                    套用疊構並另存
+                  </button>
+                </div>
+
+                {/* 「背鑽」：背鑽 */}
+                <div hidden={!(show.backdrill)} style={{ opacity: canSegment ? 1 : 0.5, pointerEvents: canSegment ? undefined : 'none' }}>
+                  <h3 className="panel-title">背鑽</h3>
+                  <p className="panel-hint">
+                    自動推導每顆訊號 Via 的連接層與應鑽側，確認後批次寫入。
+                    貫穿孔出線後剩下的殘樁會在四分之一波長處造成深陷波。
+                    永遠另存新檔，並輸出逐顆的設定報告。
+                  </p>
+
+                  <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
+                    <div className="field-label" style={{ minWidth: 66 }}>保留殘樁</div>
+                    <input type="number" className="input" style={{ width: 70 }} min="0" step="0.5"
+                      value={bdTargetStubMil} onChange={e => setBdTargetStubMil(e.target.value)} />
+                    <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>mil</span>
+                    <div className="field-label" style={{ minWidth: 66, marginLeft: 8 }}>鑽頭加大</div>
+                    <input type="number" className="input" style={{ width: 70 }} min="0" step="1"
+                      value={bdDiameterIncMil} onChange={e => setBdDiameterIncMil(e.target.value)}
+                      title="鑽頭直徑 = 原孔徑 + 此增量。回鑽鑽頭與原孔同徑會鑽不乾淨孔壁鍍銅，實際值請依板廠規格。" />
+                    <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>mil</span>
+                  </div>
+
+                  <button className="btn" style={{ width: '100%', marginTop: 6 }}
+                    onClick={handleBackdrillAnalyze} disabled={signalNets.length === 0}>
+                    分析殘樁
+                  </button>
+
+                  <PortWarning warning={bdResult?.port_warning} />
+                  {bdResult && (
+                    <>
+                      <div className="status" style={{ marginTop: 6, fontSize: 11.5 }}>
+                        訊號 Via {bdResult.via_count} 顆｜需背鑽 {bdResult.stub_count} 段｜
+                        共振預測取疊構平均 Dk {bdResult.dielectric_constant?.toFixed(2)}（指示值，約 ±10%）
+                      </div>
+                      <div style={{ maxHeight: 240, overflowY: 'auto', marginTop: 6,
+                                    border: '1px solid var(--border)', borderRadius: 6 }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                          <thead>
+                            <tr style={{ color: 'var(--faint)' }}>
+                              <th style={{ padding: '3px 5px' }}>鑽</th>
+                              <th style={{ padding: '3px 5px', textAlign: 'left' }}>Net</th>
+                              <th style={{ padding: '3px 5px' }}>連接層</th>
+                              <th style={{ padding: '3px 5px' }}>側</th>
+                              <th style={{ padding: '3px 5px' }}>To</th>
+                              <th style={{ padding: '3px 5px' }}>殘樁mm</th>
+                              <th style={{ padding: '3px 5px' }}>共振GHz</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {bdResult.entries.map((entry: any, i: number) => (
+                              entry.stubs.length === 0 ? (
+                                <tr key={`${entry.id}-none`} style={{ opacity: 0.5 }}>
+                                  <td style={{ padding: '3px 5px' }}>—</td>
+                                  <td style={{ padding: '3px 5px' }}>{entry.net.split('.')[0].slice(7)}</td>
+                                  <td style={{ padding: '3px 5px', textAlign: 'center' }}>
+                                    {entry.connected_layers.join(',') || '-'}</td>
+                                  <td colSpan={4} style={{ padding: '3px 5px' }}>{entry.note}</td>
+                                </tr>
+                              ) : entry.stubs.map((stub: any, j: number) => (
+                                <tr key={`${entry.id}-${j}`}>
+                                  <td style={{ padding: '3px 5px', textAlign: 'center' }}>
+                                    <input type="checkbox" checked={stub.selected !== false}
+                                      onChange={() => toggleBackdrillStub(i, j)} />
+                                  </td>
+                                  <td style={{ padding: '3px 5px' }}>{entry.net.split('.')[0].slice(7)}</td>
+                                  <td style={{ padding: '3px 5px', textAlign: 'center' }}>
+                                    {entry.connected_layers.join(',')}</td>
+                                  <td style={{ padding: '3px 5px', textAlign: 'center' }}>
+                                    {stub.side === 'top' ? '頂面' : '底面'}</td>
+                                  <td style={{ padding: '3px 5px', textAlign: 'center' }}>{stub.to_layer}</td>
+                                  <td style={{ padding: '3px 5px', textAlign: 'right' }}>
+                                    {stub.stub_mm?.toFixed(3)}</td>
+                                  <td style={{ padding: '3px 5px', textAlign: 'right' }}>
+                                    {stub.resonance_ghz ? stub.resonance_ghz.toFixed(1) : '-'}</td>
+                                </tr>
+                              ))
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="field-row" style={{ marginTop: 6 }}>
+                        <input type="text" className="input" value={bdOutputPath}
+                          onChange={e => setBdOutputPath(e.target.value)}
+                          placeholder="輸出路徑…（例如 xxx_backdrill.aedb）" />
+                      </div>
+                      <button className="btn--primary" style={{ width: '100%', marginTop: 6 }}
+                        onClick={handleBackdrillApply}>
+                        寫入背鑽並另存
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {/* 「Layout 清理」：Layout 清理 */}
+                <div hidden={!(show.cleanup)} style={{ opacity: canSegment ? 1 : 0.5 }}>
+                  <h3 className="panel-title">Layout 清理</h3>
+                  <p className="panel-hint">
+                    保留訊號、參考平面、元件 Pin 與 Port；可使用固定保護距離，或依 Stackup 電磁影響範圍判斷。
+                    永遠另存新檔，不覆寫目前 Layout。
+                  </p>
+                  <div className="field-label" style={{ marginTop: 6 }}>清理等級</div>
+                  <div className="field-row">
+                    <select className="input" value={cleanupMode}
+                      onChange={e => {
+                        const mode = e.target.value as 'conservative' | 'em_field'
+                        setCleanupMode(mode)
+                        setCleanupGuardMm(mode === 'em_field' ? '0.2' : '2')
+                        setCleanupAnalysis(null)
+                      }}
+                      disabled={!canSegment}>
+                      <option value="conservative">第一級：固定距離保守清理</option>
+                      <option value="em_field">第二級：依電磁影響範圍判斷</option>
+                    </select>
+                    <button className="btn cleanup-recommended-btn"
+                      onClick={applyCleanupRecommendedSettings}
+                      disabled={!canSegment}
+                      title="切換至第二級並帶入建議值：最小距離 0.2 mm、隔離度 40 dB">
+                      帶入建議設定
+                    </button>
+                  </div>
+                  {cleanupMode === 'em_field' && (
+                    <div className="status" style={{ marginTop: 6, fontSize: 11.5 }}>
+                      依訊號層到最近參考層的高度 h 與目標隔離度計算逐層保護半徑；參考 Net 仍完整保留。
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'flex-end' }}>
+                    <div style={{ width: 110 }}>
+                      <div className="field-label">{cleanupMode === 'em_field' ? '最小保護距離（mm）' : '保護距離（mm）'}</div>
+                      <input type="number" className="input" min="0.1" step="0.1"
+                        value={cleanupGuardMm} onChange={e => { setCleanupGuardMm(e.target.value); setCleanupAnalysis(null) }}
+                        disabled={!canSegment} />
+                    </div>
+                    {cleanupMode === 'em_field' && (
+                      <div style={{ width: 105 }}>
+                        <div className="field-label">目標隔離度（dB）</div>
+                        <input type="number" className="input" min="20" max="80" step="5"
+                          value={cleanupIsolationDb} onChange={e => { setCleanupIsolationDb(e.target.value); setCleanupAnalysis(null) }}
+                          disabled={!canSegment} />
+                      </div>
+                    )}
+                    <button className="btn" style={{ flex: 1 }} onClick={handleCleanupAnalyze} disabled={!canSegment}>
+                      分析與紅框預覽
+                    </button>
+                  </div>
+                  <PortWarning warning={(cleanupAnalysis as any)?.port_warning} />
+                  {cleanupAnalysis && !cleanupAnalysis.deleted && (
+                    <div className="status status--warn" style={{ marginTop: 6, fontSize: 11.5 }}>
+                      候選移除 {cleanupAnalysis.remove_count} 個：銅箔／走線
+                      {cleanupAnalysis.stats.primitive_remove || 0} 個、Via
+                      {cleanupAnalysis.stats.via_remove || 0} 個。
+                      {cleanupAnalysis.overlay.truncated ? ` 畫面僅顯示前 ${cleanupAnalysis.overlay.boxes.length} 個紅框。` : ''}
+                    </div>
+                  )}
+                  {cleanupAnalysis?.em_field && !cleanupAnalysis.deleted && (
+                    <div className="cleanup-em-rules">
+                      <div>電磁倍率：{cleanupAnalysis.em_field.field_factor.toFixed(2)} × h；Reference Layer：{cleanupAnalysis.em_field.reference_layers.join('、')}</div>
+                      {Object.entries(cleanupAnalysis.em_field.layer_rules).map(([layer, rule]) => (
+                        <div key={layer}>{layer}：h={rule.reference_height_mm.toFixed(3)} mm，保護半徑={rule.same_layer_radius_mm.toFixed(3)} mm</div>
+                      ))}
+                    </div>
+                  )}
+                  {cleanupAnalysis?.mode === 'conservative_fallback' && (
+                    <div className="status status--warn" style={{ marginTop: 6, fontSize: 11.5 }}>
+                      Stackup／參考層資料不足，本次分析已自動退回第一級固定距離模式。
+                    </div>
+                  )}
+                  {cleanupAnalysis?.deleted && (
+                    <div className="status status--ok" style={{ marginTop: 6, fontSize: 11.5 }}>
+                      清理完成：刪除銅箔／走線 {cleanupAnalysis.deleted.primitive} 個、Via
+                      {cleanupAnalysis.deleted.via} 個、失敗 {cleanupAnalysis.deleted.failed} 個。
+                      報告已輸出至 {cleanupAnalysis.report_path}。
+                    </div>
+                  )}
+                  <div className="field-row" style={{ marginTop: 6 }}>
+                    <input type="text" className="input" value={cleanupOutputPath}
+                      onChange={e => setCleanupOutputPath(e.target.value)}
+                      placeholder="清理後 .aedb 輸出路徑…" disabled={!canSegment} />
+                  </div>
+                  <button className="btn--primary" style={{ marginTop: 6 }}
+                    onClick={handleCleanupRun}
+                    disabled={!cleanupAnalysis || cleanupAnalysis.remove_count === 0 || !!cleanupAnalysis.deleted}>
+                    另存並執行{cleanupMode === 'em_field' ? '第二級清理' : '保守清理'}
+                  </button>
+                </div>
+
+                {/* 「Port 設定」：挑要建 Port 的端點元件與 Port 型別。
+                    這裡不再依 directSegmentMode 壓暗——裁切拆出 Port 之後，
+                    這一格是「設定 Port 與求解器」唯一的元件來源，壓暗它等於讓
+                    checkedComps 永遠是空的，下面那顆按鈕就再也按不下去。 */}
+                <div hidden={!show.ports}>
                   <h3 className="panel-title">Port 設定</h3>
                   <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1 }}>
@@ -2572,12 +3117,11 @@ ${state.error}` : ''}`)
 
                 {/* 「模擬設定」：裁切 Setup 與排程共用；直接分段模式仍可設定求解器 */}
                 <div hidden={!showSolverSetup}>
-                  <h3 className="panel-title">
-                    模擬設定（HFSS 3D Layout）
-                  </h3>
+                  <h3 className="panel-title">模擬設定</h3>
                   <p className="panel-hint" style={{ marginTop: 4 }}>
-                    掃頻設定同時供 SIwave 使用；Solution Frequency 與收斂條件僅 HFSS 適用。
-                    實際每段用哪一種求解器，由「排程求解」 的「混合求解區域」決定。
+                    <b>掃頻設定 SIwave 與 HFSS 共用</b>；Solution Frequency 與收斂條件
+                    只有 HFSS 會用到。實際每段用哪一種求解器，由「排程求解」的
+                    「混合求解區域」決定。
                   </p>
 
                   {/* Sweep Type & Solution Freq */}
@@ -2718,37 +3262,6 @@ ${state.error}` : ''}`)
                   </div>
                 </div>
 
-                {/* 「執行裁切並建立 Port」：輸出與執行（直接分段模式不需要） */}
-                <div hidden={!(show.cutout)} style={directSegmentMode ? { opacity: 0.4, pointerEvents: 'none' } : undefined}>
-                  <h3 className="panel-title">
-                    {show.ports ? '執行裁切並建立 Port' : '執行裁切'}
-                  </h3>
-                  {!show.ports && (
-                    <p className="panel-hint">
-                      入口未勾「設定 Port 與求解器」，這次只做裁切；輸出的通道還沒有
-                      元件端 Port 與 Setup，之後要排程求解前記得補上。
-                    </p>
-                  )}
-                  <div className="field-row" style={{ marginTop: 6 }}>
-                    <input
-                      type="text"
-                      className="input"
-                      value={outputPath}
-                      onChange={e => setOutputPath(e.target.value)}
-                      placeholder="輸出路徑…"
-                    />
-                    <button className="btn" onClick={handleBrowseOutput}>瀏覽…</button>
-                  </div>
-                  <button
-                    className="btn--primary"
-                    onClick={handleCutout}
-                    disabled={signalNets.length === 0 || refNets.length === 0}
-                    style={{ marginTop: 6 }}
-                  >
-                    {show.ports ? '執行裁切並建立 Port' : '執行裁切'}
-                  </button>
-                </div>
-
                 {/* 設定 Port 與求解器：對目前的工作檔建立 Port 與 Setup，不裁切。
                     啟用條件用 canSegment 而不是 directSegmentMode——拆分後
                     「先裁切、再單獨設 Port」也是合法路徑，那時 directSegmentMode
@@ -2768,14 +3281,17 @@ ${state.error}` : ''}`)
                       value={portsOutputPath}
                       onChange={e => setPortsOutputPath(e.target.value)}
                       placeholder="輸出路徑…（例如 xxx_ports.aedb）"
-                      disabled={!directSegmentMode}
+                      disabled={!canSegment}
                     />
                   </div>
                   <button
                     className="btn--primary"
                     onClick={handlePortsSetup}
                     disabled={
-                      !directSegmentMode
+                      // 條件與外層面板一致用 canSegment。「先裁切、再單獨設 Port」
+                      // 是主要路徑，那時 directSegmentMode 是 false——用它當條件
+                      // 會讓面板看起來可用、裡面的按鈕卻永遠是灰的。
+                      !canSegment
                       || signalNets.length === 0
                       || refNets.length === 0
                       || Object.keys(checkedComps).filter(c => checkedComps[c]).length === 0
@@ -2786,275 +3302,12 @@ ${state.error}` : ''}`)
                   </button>
                 </div>
 
-                {/* 「疊構更換」：疊構更換 */}
-                <div hidden={!(show.stackup)} style={{ opacity: canSegment ? 1 : 0.5, pointerEvents: canSegment ? undefined : 'none' }}>
-                  <h3 className="panel-title">疊構更換</h3>
-                  <p className="panel-hint">
-                    指定疊構檔即可直接分析並套用，支援 XML／CSV／JSON；XML 為 Ansys
-                    Control 格式。<b>套用前一定會先列出差異</b>，永遠另存新檔。
-                  </p>
-
-                  <div className="field-label" style={{ marginTop: 6 }}>疊構檔</div>
-                  <input type="text" className="input" value={stackupFilePath}
-                    onChange={e => { setStackupFilePath(e.target.value); setStackupDiff(null) }}
-                    placeholder="疊構檔路徑…（.xml／.csv／.json）" />
-                  <button className="btn--primary" style={{ width: '100%', marginTop: 6 }}
-                    onClick={handleStackupAnalyze} disabled={!stackupFilePath}>
-                    分析差異
-                  </button>
-
-                  {/* 匯出是選用的輔助功能，不是流程的第一步——手上已經有疊構檔
-                      （例如來自其他工具）時完全不需要先匯出。原本用「1）2）3）」
-                      編號，會讓人以為非得先匯出不可。 */}
-                  <div className="field-row" style={{ marginTop: 8 }}>
-                    <span className="panel-hint" style={{ flex: 1, margin: 0 }}>
-                      沒有現成檔案？可先匯出目前疊構當範本再編輯：
-                    </span>
-                    <select className="input" style={{ width: 76 }} value={stackupExportFormat}
-                      onChange={e => setStackupExportFormat(e.target.value as 'xml' | 'csv' | 'json')}>
-                      <option value="xml">XML</option>
-                      <option value="csv">CSV</option>
-                      <option value="json">JSON</option>
-                    </select>
-                    <button className="btn" onClick={handleStackupExport}>
-                      匯出
-                    </button>
-                  </div>
-
-                  {stackupDiff && (
-                    <div className="status" style={{ marginTop: 6, fontSize: 11.5 }}>
-                      {stackupDiff.comparable === false ? (
-                        <span style={{ color: '#ffb347' }}>{stackupDiff.reason}</span>
-                      ) : (
-                        <>
-                          <div>
-                            目前 {stackupDiff.current_layer_count} 層 → 檔案 {stackupDiff.incoming_layer_count} 層｜
-                            新增 {stackupDiff.added.length}、變更 {stackupDiff.changed.length}、
-                            材料異動 {stackupDiff.material_changes.length}
-                          </div>
-                          {stackupDiff.removed.length > 0 && (
-                            <div style={{ marginTop: 4, color: '#ff6b6b', fontWeight: 650 }}>
-                              ⚠ 套用後會刪除 {stackupDiff.removed.length} 層（連同其上的銅箔）：
-                              {stackupDiff.removed.slice(0, 8).join('、')}
-                              {stackupDiff.removed.length > 8 ? '…' : ''}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {stackupDiff?.requires_confirmation && (
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6,
-                                    marginTop: 6, fontSize: 11.5, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={stackupConfirmRemoval}
-                        onChange={e => setStackupConfirmRemoval(e.target.checked)} />
-                      我確認要刪除上列圖層
-                    </label>
-                  )}
-
-                  <div className="field-row" style={{ marginTop: 6 }}>
-                    <input type="text" className="input" value={stackupOutputPath}
-                      onChange={e => setStackupOutputPath(e.target.value)}
-                      placeholder="輸出路徑…（例如 xxx_stackup.aedb）" />
-                  </div>
-                  <button className="btn--primary" style={{ width: '100%', marginTop: 6 }}
-                    onClick={handleStackupApply}
-                    disabled={!stackupDiff || stackupDiff.comparable === false
-                      || (stackupDiff.requires_confirmation && !stackupConfirmRemoval)}>
-                    套用疊構並另存
-                  </button>
-                </div>
-
-                {/* 「背鑽」：背鑽 */}
-                <div hidden={!(show.backdrill)} style={{ opacity: canSegment ? 1 : 0.5, pointerEvents: canSegment ? undefined : 'none' }}>
-                  <h3 className="panel-title">背鑽</h3>
-                  <p className="panel-hint">
-                    自動推導每顆訊號 Via 的連接層與應鑽側，確認後批次寫入。
-                    貫穿孔出線後剩下的殘樁會在四分之一波長處造成深陷波。
-                    永遠另存新檔，並輸出逐顆的設定報告。
-                  </p>
-
-                  <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
-                    <div className="field-label" style={{ minWidth: 66 }}>保留殘樁</div>
-                    <input type="number" className="input" style={{ width: 70 }} min="0" step="0.5"
-                      value={bdTargetStubMil} onChange={e => setBdTargetStubMil(e.target.value)} />
-                    <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>mil</span>
-                    <div className="field-label" style={{ minWidth: 66, marginLeft: 8 }}>鑽頭加大</div>
-                    <input type="number" className="input" style={{ width: 70 }} min="0" step="1"
-                      value={bdDiameterIncMil} onChange={e => setBdDiameterIncMil(e.target.value)}
-                      title="鑽頭直徑 = 原孔徑 + 此增量。回鑽鑽頭與原孔同徑會鑽不乾淨孔壁鍍銅，實際值請依板廠規格。" />
-                    <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>mil</span>
-                  </div>
-
-                  <button className="btn" style={{ width: '100%', marginTop: 6 }}
-                    onClick={handleBackdrillAnalyze} disabled={signalNets.length === 0}>
-                    1）分析殘樁
-                  </button>
-
-                  {bdResult && (
-                    <>
-                      <div className="status" style={{ marginTop: 6, fontSize: 11.5 }}>
-                        訊號 Via {bdResult.via_count} 顆｜需背鑽 {bdResult.stub_count} 段｜
-                        共振預測取疊構平均 Dk {bdResult.dielectric_constant?.toFixed(2)}（指示值，約 ±10%）
-                      </div>
-                      <div style={{ maxHeight: 240, overflowY: 'auto', marginTop: 6,
-                                    border: '1px solid var(--border)', borderRadius: 6 }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-                          <thead>
-                            <tr style={{ color: 'var(--faint)' }}>
-                              <th style={{ padding: '3px 5px' }}>鑽</th>
-                              <th style={{ padding: '3px 5px', textAlign: 'left' }}>Net</th>
-                              <th style={{ padding: '3px 5px' }}>連接層</th>
-                              <th style={{ padding: '3px 5px' }}>側</th>
-                              <th style={{ padding: '3px 5px' }}>To</th>
-                              <th style={{ padding: '3px 5px' }}>殘樁mm</th>
-                              <th style={{ padding: '3px 5px' }}>共振GHz</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {bdResult.entries.map((entry: any, i: number) => (
-                              entry.stubs.length === 0 ? (
-                                <tr key={`${entry.id}-none`} style={{ opacity: 0.5 }}>
-                                  <td style={{ padding: '3px 5px' }}>—</td>
-                                  <td style={{ padding: '3px 5px' }}>{entry.net.split('.')[0].slice(7)}</td>
-                                  <td style={{ padding: '3px 5px', textAlign: 'center' }}>
-                                    {entry.connected_layers.join(',') || '-'}</td>
-                                  <td colSpan={4} style={{ padding: '3px 5px' }}>{entry.note}</td>
-                                </tr>
-                              ) : entry.stubs.map((stub: any, j: number) => (
-                                <tr key={`${entry.id}-${j}`}>
-                                  <td style={{ padding: '3px 5px', textAlign: 'center' }}>
-                                    <input type="checkbox" checked={stub.selected !== false}
-                                      onChange={() => toggleBackdrillStub(i, j)} />
-                                  </td>
-                                  <td style={{ padding: '3px 5px' }}>{entry.net.split('.')[0].slice(7)}</td>
-                                  <td style={{ padding: '3px 5px', textAlign: 'center' }}>
-                                    {entry.connected_layers.join(',')}</td>
-                                  <td style={{ padding: '3px 5px', textAlign: 'center' }}>
-                                    {stub.side === 'top' ? '頂面' : '底面'}</td>
-                                  <td style={{ padding: '3px 5px', textAlign: 'center' }}>{stub.to_layer}</td>
-                                  <td style={{ padding: '3px 5px', textAlign: 'right' }}>
-                                    {stub.stub_mm?.toFixed(3)}</td>
-                                  <td style={{ padding: '3px 5px', textAlign: 'right' }}>
-                                    {stub.resonance_ghz ? stub.resonance_ghz.toFixed(1) : '-'}</td>
-                                </tr>
-                              ))
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <div className="field-row" style={{ marginTop: 6 }}>
-                        <input type="text" className="input" value={bdOutputPath}
-                          onChange={e => setBdOutputPath(e.target.value)}
-                          placeholder="輸出路徑…（例如 xxx_backdrill.aedb）" />
-                      </div>
-                      <button className="btn--primary" style={{ width: '100%', marginTop: 6 }}
-                        onClick={handleBackdrillApply}>
-                        2）寫入背鑽並另存
-                      </button>
-                    </>
-                  )}
-                </div>
-
-                {/* 「Layout 清理」：Layout 清理 */}
-                <div hidden={!(show.cleanup)} style={{ opacity: canSegment ? 1 : 0.5 }}>
-                  <h3 className="panel-title">Layout 清理</h3>
-                  <p className="panel-hint">
-                    保留訊號、參考平面、元件 Pin 與 Port；可使用固定保護距離，或依 Stackup 電磁影響範圍判斷。
-                    永遠另存新檔，不覆寫目前 Layout。
-                  </p>
-                  <div className="field-label" style={{ marginTop: 6 }}>清理等級</div>
-                  <div className="field-row">
-                    <select className="input" value={cleanupMode}
-                      onChange={e => {
-                        const mode = e.target.value as 'conservative' | 'em_field'
-                        setCleanupMode(mode)
-                        setCleanupGuardMm(mode === 'em_field' ? '0.2' : '2')
-                        setCleanupAnalysis(null)
-                      }}
-                      disabled={!canSegment}>
-                      <option value="conservative">第一級：固定距離保守清理</option>
-                      <option value="em_field">第二級：依電磁影響範圍判斷</option>
-                    </select>
-                    <button className="btn cleanup-recommended-btn"
-                      onClick={applyCleanupRecommendedSettings}
-                      disabled={!canSegment}
-                      title="切換至第二級並帶入建議值：最小距離 0.2 mm、隔離度 40 dB">
-                      帶入建議設定
-                    </button>
-                  </div>
-                  {cleanupMode === 'em_field' && (
-                    <div className="status" style={{ marginTop: 6, fontSize: 11.5 }}>
-                      依訊號層到最近參考層的高度 h 與目標隔離度計算逐層保護半徑；參考 Net 仍完整保留。
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'flex-end' }}>
-                    <div style={{ width: 110 }}>
-                      <div className="field-label">{cleanupMode === 'em_field' ? '最小保護距離（mm）' : '保護距離（mm）'}</div>
-                      <input type="number" className="input" min="0.1" step="0.1"
-                        value={cleanupGuardMm} onChange={e => { setCleanupGuardMm(e.target.value); setCleanupAnalysis(null) }}
-                        disabled={!canSegment} />
-                    </div>
-                    {cleanupMode === 'em_field' && (
-                      <div style={{ width: 105 }}>
-                        <div className="field-label">目標隔離度（dB）</div>
-                        <input type="number" className="input" min="20" max="80" step="5"
-                          value={cleanupIsolationDb} onChange={e => { setCleanupIsolationDb(e.target.value); setCleanupAnalysis(null) }}
-                          disabled={!canSegment} />
-                      </div>
-                    )}
-                    <button className="btn" style={{ flex: 1 }} onClick={handleCleanupAnalyze} disabled={!canSegment}>
-                      1）分析與紅框預覽
-                    </button>
-                  </div>
-                  {cleanupAnalysis && !cleanupAnalysis.deleted && (
-                    <div className="status status--warn" style={{ marginTop: 6, fontSize: 11.5 }}>
-                      候選移除 {cleanupAnalysis.remove_count} 個：銅箔／走線
-                      {cleanupAnalysis.stats.primitive_remove || 0} 個、Via
-                      {cleanupAnalysis.stats.via_remove || 0} 個。
-                      {cleanupAnalysis.overlay.truncated ? ` 畫面僅顯示前 ${cleanupAnalysis.overlay.boxes.length} 個紅框。` : ''}
-                    </div>
-                  )}
-                  {cleanupAnalysis?.em_field && !cleanupAnalysis.deleted && (
-                    <div className="cleanup-em-rules">
-                      <div>電磁倍率：{cleanupAnalysis.em_field.field_factor.toFixed(2)} × h；Reference Layer：{cleanupAnalysis.em_field.reference_layers.join('、')}</div>
-                      {Object.entries(cleanupAnalysis.em_field.layer_rules).map(([layer, rule]) => (
-                        <div key={layer}>{layer}：h={rule.reference_height_mm.toFixed(3)} mm，保護半徑={rule.same_layer_radius_mm.toFixed(3)} mm</div>
-                      ))}
-                    </div>
-                  )}
-                  {cleanupAnalysis?.mode === 'conservative_fallback' && (
-                    <div className="status status--warn" style={{ marginTop: 6, fontSize: 11.5 }}>
-                      Stackup／參考層資料不足，本次分析已自動退回第一級固定距離模式。
-                    </div>
-                  )}
-                  {cleanupAnalysis?.deleted && (
-                    <div className="status status--ok" style={{ marginTop: 6, fontSize: 11.5 }}>
-                      清理完成：刪除銅箔／走線 {cleanupAnalysis.deleted.primitive} 個、Via
-                      {cleanupAnalysis.deleted.via} 個、失敗 {cleanupAnalysis.deleted.failed} 個。
-                      報告已輸出至 {cleanupAnalysis.report_path}。
-                    </div>
-                  )}
-                  <div className="field-row" style={{ marginTop: 6 }}>
-                    <input type="text" className="input" value={cleanupOutputPath}
-                      onChange={e => setCleanupOutputPath(e.target.value)}
-                      placeholder="清理後 .aedb 輸出路徑…" disabled={!canSegment} />
-                  </div>
-                  <button className="btn--primary" style={{ marginTop: 6 }}
-                    onClick={handleCleanupRun}
-                    disabled={!cleanupAnalysis || cleanupAnalysis.remove_count === 0 || !!cleanupAnalysis.deleted}>
-                    2）另存並執行{cleanupMode === 'em_field' ? '第二級清理' : '保守清理'}
-                  </button>
-                </div>
-
                 {/* 「N 段分割」：N 段分割 */}
                 <div hidden={!(show.segment)} style={{ opacity: canSegment ? 1 : 0.5 }}>
                   <h3 className="panel-title">N 段分割</h3>
                   <p className="panel-hint">
                     將裁切後的板子分成 N 段，切面自動截斷走線並建立 Gap Port。
-                    {directSegmentMode && <span style={{ color: 'var(--accent)' }}>（直接分段模式：已跳過裁切）</span>}
+                    {directSegmentMode && <span style={{ color: 'var(--accent)' }}>（載入的檔案已是通道，未經裁切）</span>}
                   </p>
                   <div style={{
                     display: 'grid', gridTemplateColumns: '80px 1fr',
@@ -3078,9 +3331,23 @@ ${state.error}` : ''}`)
                         <option value="C">C 級以上（最容易平分，需人工複核）</option>
                       </select>
                     </div>
-                    <button className="btn" style={{ gridColumn: '1 / -1' }} onClick={handleSegmentAnalyze} disabled={!canSegment}>
-                      1) 分析切割位置
+                    <button className="btn--primary" style={{ gridColumn: '1 / -1' }}
+                      onClick={handleSegmentAnalyze} disabled={!canSegment}>
+                      分析切割位置（等分）
                     </button>
+                    <div className="panel-hint" style={{ gridColumn: '1 / -1', marginTop: -2 }}>
+                      適合<b>全段都用 HFSS</b> 求解：各段大小相近，逐段求解的時間與
+                      記憶體才不會被某一段拖垮。段數由上面的 N 決定。
+                    </div>
+                    <button className="btn--primary" style={{ gridColumn: '1 / -1', marginTop: 4 }}
+                      onClick={handleComplexityAnalyze} disabled={!canSegment}>
+                      依 3D 複雜度分析切割位置
+                    </button>
+                    <div className="panel-hint" style={{ gridColumn: '1 / -1', marginTop: -2 }}>
+                      適合 <b>HFSS＋SIwave 混合求解</b>：把換層 Via 與元件端 launch
+                      所在的區域切成獨立分段交給 HFSS，中間的平面走線交給 SIwave
+                      ——那正是 SIwave 最擅長也最快的情形。段數是偵測結果，不需要填 N。
+                    </div>
                   </div>
                   <div className="status" style={{ marginTop: 5, fontSize: 11.5 }}>
                     工具會在這個評分之上，把各段長度盡可能平分——分段是逐段依序求解，
@@ -3091,6 +3358,92 @@ ${state.error}` : ''}`)
                       </b>
                     )}
                   </div>
+                  {complexityAnalysis && (
+                    <div className="segment-analysis">
+                      <div className="segment-analysis__summary">
+                        <strong>依 3D 複雜度分段</strong>
+                        <span>垂直結構 {complexityAnalysis.feature_count} 個</span>
+                        <span>複雜區 {complexityAnalysis.regions.length} 個</span>
+                        <span>{complexityAnalysis.segments.length} 段</span>
+                      </div>
+
+                      {!complexityAnalysis.feasible && (
+                        <strong className="segment-analysis__gate-error">
+                          {complexityAnalysis.reason}
+                        </strong>
+                      )}
+                      {complexityAnalysis.corner_crossings.length > 0 && (
+                        <strong className="segment-analysis__gate-error">
+                          {complexityAnalysis.corner_crossings.length} 條訊號從兩刀的
+                          交叉點附近穿過——那兩格只共用一個點，切面會退化成點而
+                          建不出 Port。
+                        </strong>
+                      )}
+
+                      <div className="segment-analysis__table-wrap">
+                        <table className="segment-analysis__table">
+                          <thead>
+                            <tr>
+                              <th>段</th><th>求解器</th><th>範圍</th>
+                              <th>走線</th><th>理由</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {complexityAnalysis.segments.map(seg => (
+                              <tr key={seg.index}>
+                                <td>S{seg.index}</td>
+                                <td style={{
+                                  color: seg.solver === 'hfss'
+                                    ? '#bea0ff' : '#5bf59a', fontWeight: 700,
+                                }}>{seg.solver.toUpperCase()}</td>
+                                <td>
+                                  x {seg.bounds_mm[0].toFixed(1)}～{seg.bounds_mm[2].toFixed(1)}
+                                  <br />
+                                  y {seg.bounds_mm[1].toFixed(1)}～{seg.bounds_mm[3].toFixed(1)}
+                                </td>
+                                <td>{seg.signal_length_mm.toFixed(1)} mm</td>
+                                <td style={{ fontSize: 11 }}>{seg.solver_reason}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="status" style={{ marginTop: 6, fontSize: 11.5 }}>
+                        刀：{complexityAnalysis.cuts.map(cut => (
+                          `${cut.manual ? '✋ ' : ''}`
+                          + `${cut.direction.toUpperCase()}=${cut.position_mm.toFixed(2)}mm`
+                          + `（${cut.quality_grade} 級，離最後一個 3D 結構 `
+                          + `${cut.margin_mm.toFixed(2)}mm）`
+                        )).join('　')}
+                      </div>
+                      <div className="status" style={{ marginTop: 4, fontSize: 11 }}>
+                        餘裕是「從最後一個垂直結構往外走到第一個符合評分門檻的位置」
+                        算出來的，尚未以雙求解器實測校準——這是目前最沒把握的一環，
+                        數值一併記進 segments.json 供日後回頭校準。
+                      </div>
+                      <div className="status" style={{ marginTop: 4, fontSize: 11 }}>
+                        自動位置不合意時，可在預覽圖上<b>直接拖曳刀線</b>。放開後會依
+                        新位置重新評分——拖到不好的地方就會看到等級掉下來，不會沿用
+                        舊分數。刀的把數與方向由偵測到的複雜區決定，拖曳不能增減。
+                      </div>
+
+                      {complexityAnalysis.cuts.some(cut => cut.manual) && (
+                        <button className="btn" style={{ width: '100%', marginTop: 6 }}
+                          onClick={handleComplexityAnalyze}>
+                          ↺ 回到自動刀線
+                        </button>
+                      )}
+
+                      {complexityAnalysis.feasible && (
+                        <button className="btn--primary" style={{ width: '100%', marginTop: 7 }}
+                          onClick={handleComplexityRun} disabled={!segOutputDir}>
+                          依複雜度執行分段（{complexityAnalysis.segments.length} 段）
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   {segAnalysis && (
                     <div className="segment-analysis">
                       <div className="segment-analysis__summary">
@@ -3235,7 +3588,7 @@ ${state.error}` : ''}`)
                     disabled={!segAnalysis || !segAnalysis.requested_safe || segAnalysis.cuts.some(c => c.hard_blocked)}
                     style={{ marginTop: 6 }}
                   >
-                    2) 執行 N 段分割
+                    執行 N 段分割
                   </button>
                   {segRun && (
                     <div className="status status--ok" style={{ marginTop: 6, fontSize: 11.5 }}>
@@ -3250,7 +3603,7 @@ ${state.error}` : ''}`)
                 <div hidden={!show.schedule}
                   style={{ opacity: (schedMetaPath || segRun) ? 1 : 0.5 }}>
                   <h3 className="panel-title">
-                    排程求解（{segmentSolverPlans.length > 0 ? '混合求解區域' : 'HFSS 3D Layout'}）
+                    排程求解{segmentSolverPlans.length > 0 ? '（混合求解區域）' : ''}
                   </h3>
                   <p className="panel-hint">
                     每個 Segment 為一個求解區域。工具會先完成工作副本與 Port 契約預檢，
@@ -3334,7 +3687,22 @@ ${state.error}` : ''}`)
                         setSchedMetaPath(path)
                         if (path) loadSegmentSolverPlan(path, false)
                       }}
-                      placeholder="segments.json 路徑（執行分段後自動帶入）…" />
+                      placeholder="segments.json 路徑（分段後自動帶入，也可指向既有的）…" />
+                    <button className="btn" onClick={async () => {
+                      try {
+                        const data = await api('/api/browse_segments_json')
+                        if (!data.path) return
+                        const path = normalizeUserPath(data.path)
+                        setSchedMetaPath(path)
+                        loadSegmentSolverPlan(path, false)
+                      } catch (e) { alert('選取失敗: ' + String(e)) }
+                    }}>瀏覽…</button>
+                  </div>
+                  {/* 分段一次要二十分鐘以上。換個求解器設定、改核心數或重打一次包
+                      都不該逼人整段重跑——指向既有的 segments.json 就能直接接上。 */}
+                  <div className="panel-hint" style={{ marginTop: 3, fontSize: 11 }}>
+                    <b>不必重跑分段</b>：指向先前產生的 segments.json（在分段輸出
+                    資料夾內）即可直接排程求解或打包，逐段的求解器指派會一併載入。
                   </div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                     <button
@@ -3345,7 +3713,9 @@ ${state.error}` : ''}`)
                     >
                       {schedStatus?.running
                         ? `${schedStatus.solver === 'mixed' ? '混合求解器' : schedStatus.solver === 'siwave' ? 'SIwave' : 'HFSS'} 排程執行中…`
-                        : `開始 ${segmentSolverPlans.length > 0 ? '混合求解器' : 'HFSS'} 排程模擬`}
+                        : segmentSolverPlans.length > 0
+                          ? '開始混合求解排程模擬'
+                          : '開始排程模擬'}
                     </button>
                     <button
                       className="btn"
@@ -3377,8 +3747,24 @@ ${state.error}` : ''}`)
                         </button>
                       </div>
                       <div className="panel-hint" style={{ marginTop: 4, fontSize: 11 }}>
-                        目前只打包 SIwave 段。複製到求解機後雙擊 run_all.bat，
-                        跑完把 results 複製回來；腳本會自動偵測求解機本地的 AEDT 版本。
+                        SIwave 與 HFSS 段可混在同一包。複製到求解機後雙擊
+                        run_all.bat，跑完把 results 複製回來；腳本會自動偵測求解機
+                        本地的 AEDT 版本。
+                      </div>
+                      <div className="panel-hint" style={{ marginTop: 3, fontSize: 11 }}>
+                        <b>上面的求解核心數兩種段都會套用</b>，用的是你填的值，不會被
+                        這台電腦的核心數夾住：SIwave 寫進 .exec 的 SetNumCpus，HFSS 以
+                        ansysedt 的 -batchoptions 傳入。
+                        <b style={{ color: 'var(--warn)' }}>但它受 HPC 授權限制</b>——
+                        HFSS 求解內含 4 核，超出的每一核要一張 anshpc 授權
+                        （12 核就佔 8 張）。授權不夠時求解包會明白寫出「只有 N 核
+                        可用」與建議值。
+                      </div>
+                      <div className="panel-hint" style={{ marginTop: 3, fontSize: 11 }}>
+                        HPC 授權型別不必設定：SIwave 段先試 Pack，取不到足夠授權就
+                        自動改用 Workgroup 重試；HFSS 段一律用 <b>Auto</b> 讓 AEDT
+                        自己挑當下取得到的授權——實測寫死 Pack 反而會落到 Parametric
+                        而只拿到 4 核。同一包在兩種機器上都跑得動。
                       </div>
                       <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                         <input className="input" style={{ flex: 1 }} value={ingestDir}
@@ -3391,7 +3777,7 @@ ${state.error}` : ''}`)
                       </div>
                       <div className="panel-hint" style={{ marginTop: 4, fontSize: 11 }}>
                         收回時會驗證 Port 數、頻點與格式，通過才寫入 segments.json；
-                        之後串接、分段對照與眼圖都能直接使用。
+                        之後串接與眼圖都能直接使用。
                       </div>
                     </div>
                   )}
@@ -3524,6 +3910,28 @@ ${state.error}` : ''}`)
                         </div>
                       )}
 
+                      {/* 只有一個檔就沒有線可接——整片板子一次解完的結果就是
+                          這種。直接載進檢視器，要看的東西完全一樣。 */}
+                      {extFiles.length === 1 && (
+                        <>
+                          <button className="btn--primary" style={{ width: '100%', marginTop: 6 }}
+                            disabled={cascadeBusy || circuitBusy}
+                            onClick={() => handleLoadExternalSparam(extFiles[0].path)}>
+                            {cascadeBusy ? '載入中…' : '直接檢視這個檔（不接線）'}
+                          </button>
+                          <div className="status" style={{ marginTop: 5, fontSize: 11.5 }}>
+                            單一檔案沒有段可接。整片板子一次解完的 .sNp 用這個
+                            按鈕直接進「S 參數」分頁，切到<b>差動</b>就會自動列出
+                            每一對的 Sdd21（IL）、Sdd11（RL）與 NEXT／FEXT——
+                            差動對由檔頭的 Port 名稱自動配（…TXP… ↔ …TXN…），
+                            遠近端由兩端的元件代號判定。
+                          </div>
+                          <div className="status" style={{ marginTop: 4, fontSize: 11 }}>
+                            要接線請再加入第二個檔。
+                          </div>
+                        </>
+                      )}
+
                       {extFiles.length >= 2 && (
                         <>
                           <button className="btn" style={{ width: '100%', marginTop: 6 }} onClick={handleExtSuggest}
@@ -3619,23 +4027,6 @@ ${state.error}` : ''}`)
                       )}
                     </div>
                   )}
-                  {show.fidelity && cascadeMode === 'tool' && !cascadeResult && (
-                    <div style={{
-                      marginTop: 8, padding: 8, border: '1px solid var(--border)',
-                      borderRadius: 7, background: 'rgba(34, 197, 94, 0.07)',
-                    }}>
-                      <div style={{ fontWeight: 700, fontSize: 12 }}>
-                        完整板對照（SIwave）
-                      </div>
-                      <div className="panel-hint" style={{ marginTop: 3 }}>
-                        此環節會在完成電路串接並產生完整 Touchstone 後開放。
-                        接著以相同掃頻求解未分段完整板，再與分段串接結果比較。
-                      </div>
-                      <button className="btn" style={{ width: '100%', marginTop: 6 }} disabled>
-                        1）分析基準與 Port 配對（請先完成串接）
-                      </button>
-                    </div>
-                  )}
                   {cascadeResult && (
                     <>
                       <div className="status status--ok" style={{ marginTop: 6, fontSize: 11.5 }}>
@@ -3657,109 +4048,6 @@ ${state.error}` : ''}`)
                           style={{ width: '100%', marginTop: 6 }}>
                           一鍵另存完整 Touchstone
                         </button>
-                      )}
-                      {show.fidelity && cascadeMode === 'tool' && (
-                        <div style={{
-                          marginTop: 8, padding: 8, border: '1px solid var(--border)',
-                          borderRadius: 7, background: 'rgba(34, 197, 94, 0.07)',
-                        }}>
-                          <div style={{ fontWeight: 700, fontSize: 12 }}>
-                            完整板對照（SIwave）
-                          </div>
-                          <div className="panel-hint" style={{ marginTop: 3 }}>
-                            以相同掃頻求解未分段完整板（排除 0 Hz），再和分段串接結果比對。
-                            此功能只接受全部 Segment 均使用 SIwave 的結果。
-                          </div>
-                          {!fidelityAllSegmentsSiwave ? (
-                            <div className="status status--warn" style={{ marginTop: 6, fontSize: 11 }}>
-                              目前分段結果包含 HFSS，無法執行 SIwave 完整板對照。
-                              請在「混合求解區域」將全部 Segment 設為 SIwave 並完成排程與串接。
-                            </div>
-                          ) : !fidelityPrep ? (
-                            <button className="btn" style={{ width: '100%', marginTop: 6 }}
-                              disabled={fidelityBusy || fidelityStatus?.running}
-                              onClick={handleFidelityPrepare}>
-                              {fidelityBusy ? '分析中…' : '1）分析基準與 Port 配對'}
-                            </button>
-                          ) : (
-                            <>
-                              <div className={`status ${
-                                fidelityPrep.pair_suggestion.requires_confirmation ? 'status--warn' : 'status--ok'
-                              }`} style={{ marginTop: 6, fontSize: 11 }}>
-                                配對信心：{fidelityPrep.pair_suggestion.confidence === 'high' ? '高' : '低'}
-                                {fidelityPrep.pair_suggestion.requires_confirmation ? '，執行前需要人工確認。' : '，可直接執行。'}
-                              </div>
-                              {fidelityPairs.map((pair, index) => (
-                                <div key={index} style={{ display: 'grid', gridTemplateColumns: '1fr 18px 1fr 28px', gap: 3, marginTop: 4, alignItems: 'center' }}>
-                                  <select className="input" value={pair.port_a}
-                                    onChange={event => setFidelityPairs(current => current.map((item, itemIndex) =>
-                                      itemIndex === index ? { ...item, port_a: event.target.value, confidence: 'confirmed' } : item))}>
-                                    {fidelityPrep.port_names.map(name => <option key={name} value={name}>{name}</option>)}
-                                  </select>
-                                  <span style={{ textAlign: 'center' }}>↔</span>
-                                  <select className="input" value={pair.port_b}
-                                    onChange={event => setFidelityPairs(current => current.map((item, itemIndex) =>
-                                      itemIndex === index ? { ...item, port_b: event.target.value, confidence: 'confirmed' } : item))}>
-                                    {fidelityPrep.port_names.map(name => <option key={name} value={name}>{name}</option>)}
-                                  </select>
-                                  <button className="btn" style={{ padding: '2px 5px' }}
-                                    onClick={() => setFidelityPairs(current => current.filter((_, itemIndex) => itemIndex !== index))}>✕</button>
-                                </div>
-                              ))}
-                              <button className="btn" style={{ width: '100%', marginTop: 4, fontSize: 11 }}
-                                onClick={() => setFidelityPairs(current => [...current, {
-                                  port_a: fidelityPrep.port_names[0] || '',
-                                  port_b: fidelityPrep.port_names[1] || '',
-                                  label: `通道 ${current.length + 1}`,
-                                  confidence: 'confirmed',
-                                }])}>
-                                ＋新增主通道配對
-                              </button>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, marginTop: 6 }}>
-                                {([
-                                  ['valid_band_floor_db', '比較頻段下限（dB）', undefined],
-                                ] as const).map(([key, label, min]) => (
-                                  <div key={key}
-                                    title={key === 'valid_band_floor_db'
-                                      ? '自 DC 起算，直到完整板主通道插入損耗首次跌破此值為止才計分。深止帶的相位與振幅差異屬雜訊，納入計分會量到雜訊而非分段誤差。'
-                                      : undefined}>
-                                    <div className="field-label">{label}</div>
-                                    <input className="input" type="number" min={min} step="0.1"
-                                      value={fidelityThresholds[key]}
-                                      onChange={event => setFidelityThresholds(current => ({
-                                        ...current, [key]: event.target.value,
-                                      }))} />
-                                  </div>
-                                ))}
-                              </div>
-                              <div style={{ display: 'flex', gap: 5, marginTop: 6 }}>
-                                <button className="btn--primary" style={{ flex: 2 }}
-                                  disabled={fidelityBusy || fidelityStatus?.running || fidelityPairs.length === 0}
-                                  onClick={handleFidelityStart}>
-                                  {fidelityStatus?.running ? '完整板 SIwave 求解中…' : '2）執行完整板對照'}
-                                </button>
-                                <button className="btn" style={{ flex: 1 }}
-                                  disabled={!fidelityStatus?.running}
-                                  onClick={handleFidelityStop}>停止</button>
-                              </div>
-                            </>
-                          )}
-                          {fidelityStatus && (
-                            <div className={`status ${
-                              fidelityStatus.status === 'failed' ? 'status--warn'
-                                : fidelityStatus.status === 'done' ? 'status--ok' : ''
-                            }`} style={{ marginTop: 6, fontSize: 11 }}>
-                              {fidelityStatus.phase}（{fidelityStatus.progress || 0}%）
-                              {fidelityStatus.error && <div>{fidelityStatus.error}</div>}
-                              {fidelityStatus.status === 'done' && (
-                                <button className="btn" style={{ width: '100%', marginTop: 5 }}
-                                  onClick={() => setActiveView('fidelity')}>
-                                  開啟對照報告
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
                       )}
                       <div hidden={!show.eye} style={{
                         marginTop: 8, padding: 8, border: '1px solid var(--border)',
@@ -3975,12 +4263,6 @@ ${state.error}` : ''}`)
                   disabled={!cascadeResult}
                 >S 參數</button>
                 <button
-                  hidden={!(show.fidelity)}
-                  className={'viewtab' + (activeView === 'fidelity' ? ' viewtab--active' : '')}
-                  onClick={() => setActiveView('fidelity')}
-                  disabled={!fidelityStatus?.result}
-                >分段對照</button>
-                <button
                   hidden={!(show.eye)}
                   className={'viewtab' + (activeView === 'eye' ? ' viewtab--active' : '')}
                   onClick={() => setActiveView('eye')}
@@ -3991,15 +4273,36 @@ ${state.error}` : ''}`)
                   className={'viewtab' + (activeView === 'report' ? ' viewtab--active' : '')}
                   onClick={() => setActiveView('report')}
                 >報告</button>
+                {show.report && reportSnapshotAvailable && (
+                  <div style={{ marginLeft: 'auto', alignSelf: 'center' }}>
+                    <ReportSnapshotButton
+                      basePath={reportBasePath}
+                      projectName={reportProjectName}
+                      targetId="report-result-capture"
+                      kind={activeView === 'segments' && segRun && !isOverviewMode
+                        ? `segments-${activeSegIdx + 1}` : activeView}
+                      title={sceneLabel}
+                      section={reportSectionByView[activeView]}
+                      sourceRevision={reportSourceRevision}
+                      sourceMetadata={{
+                        signal_net_count: signalNets.length,
+                        reference_net_count: refNets.length,
+                        segment_count: segRun?.segments?.length || segAnalysis?.n_segments || 0,
+                      }}
+                      onSaved={setReportWorkspace}
+                    />
+                  </div>
+                )}
               </div>
 
               <div style={{ flex: 1, minHeight: 0 }}>
-                <Allotment vertical>
+                <Allotment vertical defaultSizes={logSplitSizes}
+                  onChange={saveLogSplitSizes}>
                   {/* 2D 預覽 */}
                   <Allotment.Pane minSize={200}>
                     <div style={{ paddingBottom: showLogs ? 7 : 0, height: '100%' }}>
                       <div id="report-result-capture" className="panel" style={{ overflow: 'hidden', position: 'relative', height: '100%', background: '#0c0e12', borderTopLeftRadius: 0 }}>
-                        {activeView !== 'cleanup' && activeView !== 'fidelity' && activeView !== 'eye' && activeView !== 'report' && <div style={{ position: 'absolute', top: 12, left: 16, zIndex: 1, fontSize: 12.5, fontWeight: 700, color: activeView === 'cut' ? '#7ee787' : '#9fb0c3', pointerEvents: 'none' }}>
+                        {(isLayoutView || activeView === 'schematic') && <div style={{ position: 'absolute', top: 12, left: 16, zIndex: 1, fontSize: 12.5, fontWeight: 700, color: activeView === 'cut' ? '#7ee787' : '#9fb0c3', pointerEvents: 'none' }}>
                           {sceneLabel}
                           {scene?.preview_mode === 'coarse' ? ' · 大板快速預覽（實際 EDB 未簡化）' : ''}
                           {activeView !== 'schematic' ? ' · 左鍵平移、滾輪縮放 · 右側 ◀▶ 展開圖層面板' : ''}
@@ -4007,24 +4310,6 @@ ${state.error}` : ''}`)
                             ? ` · 外框最大差異 ${completedBoundary.comparison.max_boundary_error_mm?.toFixed(3)} mm`
                             : ''}
                         </div>}
-                        {show.report && reportSnapshotAvailable && (
-                          <ReportSnapshotButton
-                            basePath={reportBasePath}
-                            projectName={reportProjectName}
-                            targetId="report-result-capture"
-                            kind={activeView === 'segments' && segRun && !isOverviewMode
-                              ? `segments-${activeSegIdx + 1}` : activeView}
-                            title={sceneLabel}
-                            section={reportSectionByView[activeView]}
-                            sourceRevision={reportSourceRevision}
-                            sourceMetadata={{
-                              signal_net_count: signalNets.length,
-                              reference_net_count: refNets.length,
-                              segment_count: segRun?.segments?.length || segAnalysis?.n_segments || 0,
-                            }}
-                            onSaved={setReportWorkspace}
-                          />
-                        )}
                         {activeView === 'report' ? (
                           <ReportCenter basePath={reportBasePath} projectName={reportProjectName}
                             onWorkspaceChange={setReportWorkspace} />
@@ -4167,9 +4452,11 @@ ${state.error}` : ''}`)
                               <div style={{ fontSize: 11, color: '#ffb347' }}>{spError}</div>
                             )}
 
+                            {/* 內距拿掉：圖例與軸控制都收進圖表自己的側邊
+                                抽屜了，這一格的空間全部留給曲線。 */}
                             <div ref={spChartRef} style={{
                               flex: 1, minHeight: 0, border: '1px solid #303a48',
-                              borderRadius: 8, padding: 6, background: '#0c0e12',
+                              borderRadius: 8, background: '#0c0e12',
                               overflow: 'hidden',
                             }}>
                               <SParamChart
@@ -4185,12 +4472,16 @@ ${state.error}` : ''}`)
                                     freq: c.freq_ghz,
                                     db: c.db,
                                   }))}
-                                height={Math.max(160, spChartHeight - 12)}
+                                height={Math.max(160, spChartHeight)}
                                 interactive
+                                onExport={handleExportSparamExcel}
+                                exporting={spExporting}
                               />
                             </div>
 
-                            <div className="fidelity-paths">
+                            {/* 兩段說明置中：靠左靠右各一段時，中間那段大空白
+                                看起來像少了什麼東西。 */}
+                            <div className="result-paths result-paths--center">
                               <span>來源：{cascadeResult.output_path}</span>
                               <span>
                                 {spMode === 'diff'
@@ -4198,78 +4489,6 @@ ${state.error}` : ''}`)
                                   : '單端模式：IL＝近端至遠端、RL＝近端反射'}
                               </span>
                             </div>
-                          </div>
-                        ) : activeView === 'fidelity' && fidelityStatus?.result ? (
-                          <div style={{
-                            height: '100%', overflow: 'hidden', padding: 10,
-                            display: 'flex', flexDirection: 'column', gap: 6,
-                            fontFamily: '"Calibri", "Microsoft JhengHei", sans-serif',
-                            color: '#d8e1ec',
-                          }}>
-                            {/* 標題與所有指標集中在上方橫排，下方讓 S 參數圖獨佔全寬。
-                                字級刻意壓小，換取圖表面積；整頁維持不需捲動。 */}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
-                              <h2 style={{ margin: 0, fontSize: 15 }}>完整板與分段串接 S 參數對照</h2>
-                              <div style={{ color: '#8fa1b5', fontSize: 10.5 }}>
-                                相同掃頻、排除 0 Hz；只呈現客觀差異，是否可接受由使用者判斷。
-                              </div>
-                            </div>
-                            {fidelityStatus.result.scorable === false ? (
-                              <div className="status status--warn" style={{ marginTop: 10 }}>
-                                無法比較：{fidelityStatus.result.reason}
-                              </div>
-                            ) : (
-                              <>
-                                {/* 只有物理定律被違反才示警——那代表基準模型本身不可用 */}
-                                {fidelityStatus.result.baseline_health?.physics_ok === false && (
-                                  <div className="status status--warn" style={{ fontSize: 11 }}>
-                                    完整板基準違反物理條件（
-                                    {(fidelityStatus.result.baseline_health?.violations || []).join('、')}
-                                    ），基準本身不可用，請優先檢查元件端 Port／參考端後重新求解。
-                                  </div>
-                                )}
-                                {/* 指標橫排：差異值 + 比較頻段 + 分段結構。分段結構是解釋差異來源的
-                                    關鍵——切越多段就有越多切面 Gap Port，不連續性會累積。 */}
-                                <div className="fidelity-chips">
-                                  {([
-                                    ['平均 IL 差', `${Number(fidelityStatus.result.main_metrics?.mean_il_db).toFixed(3)} dB`],
-                                    ['P95 IL 差', `${Number(fidelityStatus.result.main_metrics?.p95_il_db).toFixed(3)} dB`],
-                                    ['比較頻段', `${Number(fidelityStatus.result.valid_band?.min_ghz ?? 0).toFixed(2)}～${Number(fidelityStatus.result.valid_band?.max_ghz ?? 0).toFixed(2)} GHz`],
-                                    ['分段數', `${fidelityStatus.result.segmentation?.segment_count ?? '—'} 段`],
-                                    ['切面數', `${fidelityStatus.result.segmentation?.cut_count ?? '—'} 刀`],
-                                    ['切面 Port', `${fidelityStatus.result.segmentation?.cut_port_count ?? '—'} 個`],
-                                  ] as [string, string][]).map(([label, value]) => (
-                                    <div key={label} className="fidelity-chip">
-                                      <div className="fidelity-chip__label">{label}</div>
-                                      <div className="fidelity-chip__value">{value}</div>
-                                    </div>
-                                  ))}
-                                </div>
-                                <div style={{ color: '#718096', fontSize: 10, lineHeight: 1.45 }}>
-                                  比較頻段自 DC 至主通道跌破 {fidelityStatus.result.valid_band?.floor_db} dB 為止
-                                  （{fidelityStatus.result.valid_band?.points}/{fidelityStatus.result.valid_band?.total_points} 點；全掃頻至
-                                  {Number(fidelityStatus.result.valid_band?.full_max_ghz ?? 0).toFixed(1)} GHz）
-                                  ｜完整板基準參考值：最大奇異值 {fidelityStatus.result.baseline_health?.max_singular_value?.toFixed(4)}、
-                                  互易誤差 {fidelityStatus.result.baseline_health?.max_reciprocity_error?.toExponential(2)}、
-                                  低頻主通道中位數 {fidelityStatus.result.baseline_health?.low_band_median_through_db?.toFixed(2)} dB
-                                </div>
-                                {/* S 參數圖獨佔全寬，並吃滿剩餘高度 */}
-                                <div ref={fidelityChartRef} style={{
-                                  flex: 1, minHeight: 0, border: '1px solid #303a48', borderRadius: 8,
-                                  padding: 6, background: '#0c0e12', overflow: 'hidden',
-                                }}>
-                                  <SParamChart series={fidelityStatus.result.curves || []}
-                                    height={Math.max(160, fidelityChartHeight - 12)} interactive />
-                                </div>
-                                <div className="fidelity-paths">
-                                  <span>完整板基準：{fidelityStatus.result.baseline_touchstone}</span>
-                                  <span>分段串接：{fidelityStatus.result.segmented_touchstone}</span>
-                                  <span>快取：{fidelityStatus.result.cache_hit ? '命中，未重新求解' : '本次重新求解'}
-                                    ｜指紋：{String(fidelityStatus.result.fingerprint || '').slice(0, 16)}…</span>
-                                  <span>報告：{fidelityStatus.result.report_path}</span>
-                                </div>
-                              </>
-                            )}
                           </div>
                         ) : activeView === 'cleanup' && cleanupBeforeScene && cleanupAfterScene ? (
                           <div className="cleanup-compare">
@@ -4392,6 +4611,8 @@ ${state.error}` : ''}`)
                                 )
                               }
                             : undefined}
+                          onCutDrag={activeView === 'segments' && complexityAnalysis && !segRun
+                            ? handleCutDrag : undefined}
                           cleanupOverlay={cleanupOverlay}
                         />
                         )}
@@ -4427,7 +4648,7 @@ ${state.error}` : ''}`)
                           </div>
                         )}
 
-                        {!scene && activeView !== 'schematic' && activeView !== 'report' && (
+                        {!scene && isLayoutView && (
                           <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: '#5c677d', fontSize: 14, pointerEvents: 'none' }}>
                             請先於左側載入電路板檔案
                           </div>
@@ -4438,7 +4659,7 @@ ${state.error}` : ''}`)
 
                   {/* 日誌面板 */}
                   {showLogs && (
-                    <Allotment.Pane preferredSize={190} minSize={90}>
+                    <Allotment.Pane minSize={90}>
                       <div style={{ paddingTop: 7, height: '100%' }}>
                         <div className="panel" style={{ height: '100%', padding: 14, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -4452,7 +4673,7 @@ ${state.error}` : ''}`)
                           </div>
                           <div ref={logBoxRef} style={{ flex: 1, overflowY: 'auto', fontSize: '12px', fontFamily: '"Cascadia Mono", monospace', color: 'var(--muted)', background: 'rgba(255,255,255,0.5)', padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
                             {logs.map((l, i) => (
-                              <div key={i} style={{ color: /錯誤|失敗|error|fail/i.test(l) ? 'var(--danger)' : /警告|warn/i.test(l) ? 'var(--warn)' : undefined }}>{l}</div>
+                              <div key={i} style={{ color: logColor(l) }}>{l}</div>
                             ))}
                             {logs.length === 0 && <div style={{ color: 'var(--faint)' }}>目前無日誌…</div>}
                           </div>

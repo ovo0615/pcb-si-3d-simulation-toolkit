@@ -98,7 +98,6 @@ export const REPORT_SECTION_LABELS: Record<string, string> = {
   solver: '求解狀態與設定',
   schematic: '電路串接',
   sparam: 'S 參數結果',
-  fidelity: '完整板與分段可信度',
   eye: '眼圖結果',
   results: '模擬結果',
   external: '補充證據',

@@ -935,36 +935,8 @@ select.input {
    讓四項指標與 S 參數圖同時落在一屏內，不需捲動就能看清曲線。
    視窗較窄時自動改回上下堆疊，避免圖表被壓到無法判讀。 */
 /* 指標壓成上方一排小卡，把整個寬度讓給 S 參數圖 */
-.fidelity-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.fidelity-chip {
-  flex: 1 1 auto;
-  min-width: 104px;
-  border: 1px solid #303a48;
-  border-radius: 6px;
-  background: #131820;
-  padding: 4px 9px;
-}
-
-.fidelity-chip__label {
-  color: #93a4b8;
-  font-size: 10px;
-  line-height: 1.3;
-}
-
-.fidelity-chip__value {
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1.35;
-  white-space: nowrap;
-}
-
 /* 檔案路徑：最小字級、單行截斷，不佔圖表高度 */
-.fidelity-paths {
+.result-paths {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 2px 14px;
@@ -973,7 +945,16 @@ select.input {
   line-height: 1.5;
 }
 
-.fidelity-paths > span {
+/* S 參數頁尾：兩段說明置中，不要一段貼左一段貼右中間開一個大洞。 */
+.result-paths--center {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 20px;
+  text-align: center;
+}
+
+.result-paths > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -95,11 +95,8 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange 
     onWorkspaceChange?.(result.workspace)
   }
 
+  /** 手動切換到別的工作區。留空＝回到預設目錄。 */
   const openWorkspace = async () => {
-    if (!workspaceInput.trim()) {
-      setMessage('請輸入分析輸出目錄或既有 report_workspace。')
-      return
-    }
     setBusy(true)
     try {
       const result = await openReportWorkspace(workspaceInput, projectName || 'PCB SI 分析專案')
@@ -120,8 +117,11 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange 
   }
 
   useEffect(() => {
-    if (basePath && !workspace) {
-      setWorkspaceInput(basePath)
+    if (!workspace) {
+      // basePath 為空也要開：只載入一個外部 .sNp 來看曲線時，分段輸出、裁切
+      // 輸出、輸入檔全都是空的，但那時候一樣會想存快照。後端收到空字串會退到
+      // 預設目錄（Documents/PCB_SI_報告），使用者不必自己指定。
+      if (basePath) setWorkspaceInput(basePath)
       void openReportWorkspace(basePath, projectName || 'PCB SI 分析專案').then(result => {
         setWorkspace(result.workspace)
         setManifest(result.manifest)
@@ -130,6 +130,7 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange 
           setLogoDataUrl(result.brand_profile.logo_data_url)
         }
         setSettings(normalizedSettings(result.manifest.settings))
+        setWorkspaceInput(result.workspace)
         onWorkspaceChange?.(result.workspace)
       }).catch(() => undefined)
     }
@@ -294,8 +295,8 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange 
         <div><h2>一鍵 HTML 報告中心</h2><div>各結果畫面的最新作用中快照會自動帶入報告。</div></div>
         <div className="report-workspace-open">
           <input value={workspaceInput} onChange={event => setWorkspaceInput(event.target.value)}
-            placeholder="分析輸出目錄或 report_workspace" />
-          <button className="btn" disabled={busy} onClick={openWorkspace}>開啟工作區</button>
+            placeholder="留空＝預設目錄；或指定分析輸出目錄／既有 report_workspace" />
+          <button className="btn" disabled={busy} onClick={openWorkspace}>切換工作區</button>
         </div>
       </div>
       <div className="report-summary-strip">
@@ -393,7 +394,6 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange 
               <label>頻率範圍<input value={String(settings.acceptance_criteria.frequency_range || '')} onChange={event => setCriteria('frequency_range', event.target.value)} placeholder="例如 0.1～50 GHz" /></label>
               <label>插入損耗門檻<input value={String(settings.acceptance_criteria.insertion_loss || '')} onChange={event => setCriteria('insertion_loss', event.target.value)} placeholder="例如 ≥ −12 dB @ 28 GHz" /></label>
               <label>回波損耗門檻<input value={String(settings.acceptance_criteria.return_loss || '')} onChange={event => setCriteria('return_loss', event.target.value)} placeholder="例如 ≤ −10 dB" /></label>
-              <label>可信度門檻<input value={String(settings.acceptance_criteria.fidelity || '')} onChange={event => setCriteria('fidelity', event.target.value)} placeholder="例如 P95 誤差 ≤ 1 dB" /></label>
               <label>眼高／眼寬門檻<input value={String(settings.acceptance_criteria.eye || '')} onChange={event => setCriteria('eye', event.target.value)} /></label>
               <div className="report-muted">未填門檻時只呈現數值，不自動宣稱合格。</div>
             </div>

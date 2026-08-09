@@ -8,7 +8,7 @@
 //  * 任務與面板**不是一對一**：「模擬設定」面板被設定 Port 與求解器、
 //    N 段分割、排程求解共用，任一個勾了就得顯示。
 //  * 有三個任務不是獨立面板，而是別的面板裡的區塊（遠端求解包在排程面板內、
-//    分段對照與眼圖在串接面板內）。
+//    眼圖在串接面板內）。
 
 export type TaskKey =
   | 'load'
@@ -22,7 +22,6 @@ export type TaskKey =
   | 'remotepack'
   | 'cascade'
   | 'sparam'
-  | 'fidelity'
   | 'eye'
   | 'report'
 
@@ -68,10 +67,16 @@ export const TASK_GROUPS: TaskGroup[] = [
             requires: ['load'],
           },
           {
-            key: 'ports',
-            label: '設定 Port 與求解器',
-            hint: '在通道上建立元件端 Port 與 HFSS Setup／掃頻。',
+            key: 'stackup',
+            label: '疊構更換',
+            hint: '以外部疊構檔取代現有 Stackup，可比對差異後再套用。'
+                + '建議在裁切之後做，快非常多。',
             requires: ['load'],
+            requiresNote:
+              '排在裁切之後：pyedb 換疊構時會把每一個 padstack instance 的 '
+              + 'layer_map 讀出再寫回（每個兩次 gRPC 往返），耗時與板上 Via '
+              + '數量成正比。全板要十幾分鐘，裁完只剩通道範圍就快得多。'
+              + '但一定要在背鑽與設定 Port 之前——那兩件事都必須建立在最終疊構上。',
           },
         ],
       },
@@ -80,12 +85,6 @@ export const TASK_GROUPS: TaskGroup[] = [
   {
     title: '前處理（選用）',
     tasks: [
-      {
-        key: 'stackup',
-        label: '疊構更換',
-        hint: '以外部疊構檔取代現有 Stackup，可比對差異後再套用。',
-        requires: ['load'],
-      },
       {
         key: 'backdrill',
         label: '背鑽',
@@ -101,8 +100,15 @@ export const TASK_GROUPS: TaskGroup[] = [
     ],
   },
   {
-    title: '分段與求解',
+    title: '分析',
     tasks: [
+      {
+        key: 'ports',
+        label: '設定 Port 與求解器',
+        hint: '在通道上建立元件端 Port 與 HFSS Setup／掃頻。',
+        requires: ['load'],
+        requiresNote: '排在疊構、背鑽、清理之後——Port 要建立在最終幾何上。',
+      },
       {
         key: 'segment',
         label: 'N 段分割',
@@ -114,6 +120,9 @@ export const TASK_GROUPS: TaskGroup[] = [
         label: '排程求解',
         hint: '逐段指定 HFSS／SIwave 並依序求解，完成後匯出 Touchstone。',
         requires: ['segment'],
+        requiresNote:
+          '或直接指向先前產生的 segments.json——分段一次要二十分鐘以上，'
+          + '換求解器設定、改核心數或重打一次包都不需要重跑分段。',
       },
       {
         key: 'remotepack',
@@ -137,12 +146,6 @@ export const TASK_GROUPS: TaskGroup[] = [
         key: 'sparam',
         label: 'S 參數檢視',
         hint: '串接結果的插入／回波損耗與串音，可切換單端與差動。',
-        requires: ['cascade'],
-      },
-      {
-        key: 'fidelity',
-        label: '分段對照',
-        hint: '另求解一次完整板作為基準，與分段串接結果並列比較。',
         requires: ['cascade'],
       },
       {
@@ -174,7 +177,9 @@ export const ALL_TASKS: TaskDef[] = flatten(
  *  否則預設組會隨版本越長越大而失去意義。
  */
 export const DEFAULT_TASKS: TaskKey[] = [
-  'load', 'cutout', 'segment', 'schedule', 'cascade', 'sparam',
+  // 'ports' 必須在預設組裡：沒有元件端 Port，排程求解與電路串接都做不了。
+  // 當初把裁切與 Port 拆成兩個項目時漏掉了它，等於預設走完流程也拿不到結果。
+  'load', 'cutout', 'ports', 'segment', 'schedule', 'cascade', 'sparam',
 ]
 
 export type TaskFlags = Record<TaskKey, boolean>

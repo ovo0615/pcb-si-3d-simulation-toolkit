@@ -24,6 +24,10 @@ const PIXEL_RATIO: Record<ReportQuality, number> = {
   high: 3,
 }
 
+// 快照一律用最高品質，不開放選。報告裡的圖是拿來看細節的，沒有人會刻意要
+// 低解析度的版本；多一個選項只是多一個選錯、事後才發現要重拍的機會。
+const SNAPSHOT_QUALITY: ReportQuality = 'high'
+
 export default function ReportSnapshotButton({
   basePath, projectName, targetId, kind, title, section,
   sourceRevision = '', sourceMetadata = {}, onSaved,
@@ -31,15 +35,14 @@ export default function ReportSnapshotButton({
   const [open, setOpen] = useState(false)
   const [caption, setCaption] = useState('')
   const [status, setStatus] = useState<SnapshotStatus>('display')
-  const [quality, setQuality] = useState<ReportQuality>('standard')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
 
   const capture = async () => {
-    if (!basePath.trim()) {
-      setMessage('請先設定分析輸出路徑，才能建立報告工作區。')
-      return
-    }
+    // 不再要求 basePath：只載入一個外部 .sNp 來看曲線時，分段輸出、裁切輸出、
+    // 輸入檔全是空的，但那時候一樣會想存快照。後端收到空字串會退到預設目錄
+    // （Documents/PCB_SI_報告），使用者不必先去某個地方設定路徑——訊息叫人
+    // 「先設定分析輸出路徑」卻沒說在哪設定，等於把人擋死。
     const target = document.getElementById(targetId)
     if (!target) {
       setMessage('找不到目前結果畫面，請重新切換分頁後再試。')
@@ -51,7 +54,7 @@ export default function ReportSnapshotButton({
       const workspaceResult = await openReportWorkspace(basePath, projectName || 'PCB SI 分析專案')
       const dataUrl = await toPng(target, {
         cacheBust: true,
-        pixelRatio: PIXEL_RATIO[quality],
+        pixelRatio: PIXEL_RATIO[SNAPSHOT_QUALITY],
         backgroundColor: '#0c0e12',
         filter: node => !(node instanceof HTMLElement && node.dataset.reportIgnore === 'true'),
       })
@@ -64,7 +67,7 @@ export default function ReportSnapshotButton({
         engineering_status: status,
         section,
         source_revision: sourceRevision,
-        source_metadata: { ...sourceMetadata, quality },
+        source_metadata: { ...sourceMetadata, quality: SNAPSHOT_QUALITY },
       }
       try {
         await createReportSnapshot(payload)
@@ -110,20 +113,15 @@ export default function ReportSnapshotButton({
                 <option value="fail">失敗</option>
               </select>
             </label>
-            <label>快照品質
-              <select value={quality} onChange={event => setQuality(event.target.value as ReportQuality)}>
-                <option value="compact">精簡（1280 px 級）</option>
-                <option value="standard">標準（1920 px 級）</option>
-                <option value="high">高品質（3840 px 級）</option>
-              </select>
-            </label>
             <label>圖說／工程備註
               <textarea rows={4} value={caption} onChange={event => setCaption(event.target.value)}
                 placeholder="這張圖要證明什麼？可稍後在報告中心修改。" />
             </label>
             {message && <div className={message.includes('失敗') ? 'report-message report-message--error' : 'report-message'}>{message}</div>}
             <div className="report-modal-actions">
-              <button className="btn" type="button" disabled={busy} onClick={() => setOpen(false)}>取消</button>
+              <button className="btn" type="button" disabled={busy}
+                style={{ whiteSpace: 'nowrap' }}
+                onClick={() => setOpen(false)}>取消</button>
               <button className="btn btn--primary" type="button" disabled={busy} onClick={capture}>
                 {busy ? '建立快照中…' : '確認並保存'}
               </button>
