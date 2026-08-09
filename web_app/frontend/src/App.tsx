@@ -2312,17 +2312,26 @@ ${data.output_path}`)
   const isLayoutView = (['full', 'cut', 'segments'] as ViewMode[])
     .includes(activeView)
 
-  const sceneLabel = activeView === 'cut' ? '裁切後 Layout'
-    : activeView === 'cleanup' ? 'Layout 清理前後對比'
-    : activeView === 'sparam' ? '串接後 S 參數 · 單端／差動可切換 · 兩端與差動對由 Port 名稱自動判斷'
-    : activeView === 'schematic' ? '串接電路示意圖 · 黃點 = 短路節點（stripline T+B）· 虛線框 = 尚未解算'
-    : activeView === 'segments'
-      ? (segRun
-          ? (isOverviewMode
-              ? `整體 Layout（切割線，共 ${segRun.segments.length} 段）`
-              : `第 ${activeSegIdx + 1} 段 Layout（共 ${segRun.segments.length} 段）`)
-          : 'N 段分割預覽')
-      : '完整電路板 Layout'
+  // 每個分頁都要明確給一個標題，這裡刻意用 Record<ViewMode, string> 而不是
+  // 一串 `? :`。原本最後落到「完整電路板 Layout」當預設，新增的「眼圖」分頁
+  // 沒有自己的分支就掉進那個預設，報告快照因此被存成「完整電路板 Layout」
+  // ——上面那段註解講的正是同一個坑，隔幾行就又踩一次。改成 Record 之後，
+  // 漏掉任何一個分頁 TypeScript 會直接編不過。
+  const sceneLabels: Record<ViewMode, string> = {
+    full: '完整電路板 Layout',
+    cut: '裁切後 Layout',
+    cleanup: 'Layout 清理前後對比',
+    segments: segRun
+      ? (isOverviewMode
+          ? `整體 Layout（切割線，共 ${segRun.segments.length} 段）`
+          : `第 ${activeSegIdx + 1} 段 Layout（共 ${segRun.segments.length} 段）`)
+      : 'N 段分割預覽',
+    schematic: '串接電路示意圖 · 黃點 = 短路節點（stripline T+B）· 虛線框 = 尚未解算',
+    sparam: '串接後 S 參數 · 單端／差動可切換 · 兩端與差動對由 Port 名稱自動判斷',
+    eye: 'QuickEye 眼圖 · 眼高與眼寬由 AEDT 量測',
+    report: '一鍵 HTML 報告中心',
+  }
+  const sceneLabel = sceneLabels[activeView]
   // 切割線疊圖：執行前（!segRun，此時無論 activeSegIdx 是什麼都要顯示）
   // 或執行後切回「整體視圖」時都要顯示
   const segCutsOverlay: SegmentCutsInfo | null =
