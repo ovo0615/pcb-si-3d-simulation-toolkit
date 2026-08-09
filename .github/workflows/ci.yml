@@ -65,6 +65,36 @@ jobs:
           fi
           echo "OK: no customer references outside the report feature."
 
+      # 上面那條敏感掃描把 AGENTS.md、兩份 README 與 docs/visual-assets.md 排除
+      # 掉了——那是為了讓它們能寫出 `graph/…` 這類相對路徑與範例。但排除的代價
+      # 是「本機絕對路徑」在這四個檔裡完全沒有防線，實際也發生過：一張截圖與
+      # README 的說明同時把 D:\ 開頭的開發路徑帶了出去。
+      #
+      # 因此對這四個檔單獨補一條規則，只擋磁碟機代號開頭的絕對路徑與 UNC，
+      # 不管其他關鍵字，兩邊互不干擾。
+      - name: Reject absolute local paths in the docs excluded above
+        run: |
+          set -e
+          export LC_ALL=C
+          DOCS="AGENTS.md README.en.md README.zh-TW.md docs/visual-assets.md"
+          pattern='(^|[^A-Za-z])[A-Za-z]:[\\/]|\\\\[A-Za-z0-9_.-]+\\'
+          matches=$(git grep -I -n -E "$pattern" -- $DOCS || true)
+          if [ -n "$matches" ]; then
+            echo "Absolute local paths found in docs that the main scan excludes:"
+            echo "$matches"
+            echo "Replace them with a relative path or an elided form such as ...\\Example\\file.aedb"
+            exit 1
+          fi
+          echo "OK: no absolute local paths in the excluded docs."
+
+      # 圖片掃不到，只能提醒。截圖裡的路徑是這個 repo 實際外洩過的來源。
+      - name: Remind that screenshots are never scanned
+        run: |
+          echo "NOTE: image files are binary and are never scanned by any rule above."
+          echo "Before committing a screenshot, check it for local paths, customer"
+          echo "names, and license info. Redact into a *-public.png variant and do"
+          echo "not commit the unredacted original."
+
       - name: Reject .env / key files and report workspaces
         run: |
           set -e
