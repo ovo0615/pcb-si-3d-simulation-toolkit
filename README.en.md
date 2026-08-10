@@ -83,6 +83,8 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 ![QuickEye diagram with eye height/width](./graph/QuickEye眼圖_20260809-public.png)
 
+![TDR impedance localization: discontinuities mapped back onto the layout traces, with peak table and Z(distance) curve](./graph/TDR_20260810.png)
+
 ![One-click HTML report: company branding, purpose, and result summary](./graph/一鍵產出HTML報告_1_20260810.png)
 
 ## 6. Technical Architecture

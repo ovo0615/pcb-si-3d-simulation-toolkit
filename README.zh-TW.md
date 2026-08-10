@@ -83,6 +83,8 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 ![QuickEye 眼圖與眼高、眼寬量測](./graph/QuickEye眼圖_20260809-public.png)
 
+![TDR 阻抗定位：劇變位置標回 Layout 走線，附劇變表與 Z(距離) 曲線](./graph/TDR_20260810.png)
+
 ![一鍵產出的 HTML 報告：公司品牌、分析目的與結果摘要](./graph/一鍵產出HTML報告_1_20260810.png)
 
 ## 6. 技術架構
