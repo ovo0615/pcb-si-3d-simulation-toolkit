@@ -41,6 +41,9 @@ High-frequency PCB signal-integrity analysis usually requires engineers to repea
 | Automatic S-parameter cascading | Cascades segments using the stitching info to reconstruct the full-channel S-parameters | ✅ Done |
 | QuickEye diagram | Solves eye height/width directly from the cascaded Touchstone | ✅ Done |
 | External Touchstone cascading | Loads existing `.sNp` files with auto-suggested or manual port stitching | ✅ Done |
+| Whole-channel solve | Solves the channel as a single piece with no splitting, as a baseline for the segmented result | ✅ Done |
+| Remote solve pack | Packs the job into a folder the solver machine runs directly; no Python needed there | ✅ Done |
+| One-click HTML report | Captures each result view, adds branding, captions, and acceptance criteria, and emits one self-contained HTML | ✅ Done |
 
 ### Segmentation Color Language
 
@@ -59,6 +62,8 @@ The segmentation view overlays the engineering decision directly on the complete
 
 Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
+![Task picker: tick what this run needs; the UI shows only those panels](./graph/入口畫面_20260810.png)
+
 ![Full board layout with the layer panel](./graph/完整板Layout_20260809.png)
 
 ![Cutout layout: only the target channel and its component-side ports remain](./graph/裁切後Layout_20260809.png)
@@ -76,6 +81,8 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 ![Cascaded S-parameters: single-ended/differential toggle, cursor reads every trace at once](./graph/串接後S參數_20260809-public.png)
 
 ![QuickEye diagram with eye height/width](./graph/QuickEye眼圖_20260809-public.png)
+
+![One-click HTML report: company branding, purpose, and result summary](./graph/一鍵產出HTML報告_1_20260810.png)
 
 ## 6. Technical Architecture
 

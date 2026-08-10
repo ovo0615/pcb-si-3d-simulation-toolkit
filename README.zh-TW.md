@@ -41,6 +41,9 @@ Taiwan Auto-Design Co. (TADC)｜虎門科技股份有限公司
 | S 參數自動串接 | 依分段對接資訊自動串接，還原完整通道 S 參數 | ✅ 已完成 |
 | QuickEye 眼圖 | 以串接後 Touchstone 直接背景求解眼高、眼寬 | ✅ 已完成 |
 | 外部 Touchstone 串接 | 載入既有 `.sNp` 檔案，自動建議或手動指定接線 | ✅ 已完成 |
+| 不分割整片求解 | 通道不切割、整片當成一段求解，可作為分段結果的對照基準 | ✅ 已完成 |
+| 遠端求解包 | 打包成資料夾送到求解機執行，求解機不需安裝 Python | ✅ 已完成 |
+| 一鍵 HTML 報告 | 保存各結果畫面的快照，加入品牌、圖說與驗收規格後產生單一自包含 HTML | ✅ 已完成 |
 
 ### 切板顏色設計
 
@@ -59,6 +62,8 @@ Taiwan Auto-Design Co. (TADC)｜虎門科技股份有限公司
 
 Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
+![入口畫面：勾選這次要用的項目，介面只顯示對應面板](./graph/入口畫面_20260810.png)
+
 ![完整電路板 Layout 與右側圖層面板](./graph/完整板Layout_20260809.png)
 
 ![裁切後 Layout：只留下目標通道與元件端 Port](./graph/裁切後Layout_20260809.png)
@@ -76,6 +81,8 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 ![串接後 S 參數：單端／差動可切換，游標可同時讀取所有曲線](./graph/串接後S參數_20260809-public.png)
 
 ![QuickEye 眼圖與眼高、眼寬量測](./graph/QuickEye眼圖_20260809-public.png)
+
+![一鍵產出的 HTML 報告：公司品牌、分析目的與結果摘要](./graph/一鍵產出HTML報告_1_20260810.png)
 
 ## 6. 技術架構
 
