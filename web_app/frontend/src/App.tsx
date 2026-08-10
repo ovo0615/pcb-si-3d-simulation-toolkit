@@ -4830,8 +4830,10 @@ ${data.output_path}`)
                             )}
                           </div>
                         ) : activeView === 'tdr' ? (
+                          // overflow 用 hidden 不用 auto：整頁必須塞進視窗，
+                          // 一出現捲軸，報告快照就截不到下半部的曲線圖。
                           <div style={{
-                            height: '100%', overflow: 'auto', padding: 14,
+                            height: '100%', overflow: 'hidden', padding: 14,
                             display: 'flex', flexDirection: 'column', gap: 8,
                             fontFamily: '"Calibri", "Microsoft JhengHei", sans-serif',
                             color: '#d8e1ec',
@@ -4927,7 +4929,7 @@ ${data.output_path}`)
                                     </div>
                                   )}
 
-                                  <div style={{ display: 'flex', gap: 8, minHeight: 300, flex: 1 }}>
+                                  <div style={{ display: 'flex', gap: 8, minHeight: 0, flex: 1 }}>
                                     {tdrScene && (
                                       <div style={{
                                         flex: 1.5, minWidth: 0, border: '1px solid #303a48',
@@ -5006,7 +5008,8 @@ ${data.output_path}`)
                                       distanceMm={analysis.distance_mm || []}
                                       impedanceOhm={tdrJob.result.impedance_ohm || []}
                                       markers={chartMarkers}
-                                      pathLengthMm={tdrJob.result.path_length_mm} />
+                                      pathLengthMm={tdrJob.result.path_length_mm}
+                                      height={230} />
                                   </div>
                                   <div className="result-paths result-paths--center">
                                     <span>Circuit 專案：{tdrJob.result.project_path}</span>
