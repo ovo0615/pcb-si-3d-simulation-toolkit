@@ -604,6 +604,41 @@ export default function App() {
   const [fullScene, setFullScene] = useState<PreviewData | null>(null)
   const [cutScene, setCutScene] = useState<PreviewData | null>(null)
   const [activeView, setActiveView] = useState<ViewMode>('full')
+  // AEDT 版本：整條流程共用一個版本，載入電路板之後就鎖住。
+  // 求解機只有舊版時，要在載入前先把版本對齊過去——用新版 EDB 去撞舊版
+  // 求解器不會失敗，只會讓疊構被誤讀，S 參數靜默出錯。
+  const [aedtVersion, setAedtVersion] = useState('')
+  const [aedtVersions, setAedtVersions] = useState<
+    { version: string; installed: boolean; path: string }[]>([])
+  const [aedtLocked, setAedtLocked] = useState(false)
+
+  const refreshAedtVersion = async () => {
+    try {
+      const d = await api('/api/aedt-version')
+      setAedtVersion(d.current || '')
+      setAedtVersions(d.supported || [])
+      setAedtLocked(Boolean(d.locked))
+    } catch { /* 後端還沒起來，稍後由其他動作帶出 */ }
+  }
+  useEffect(() => { void refreshAedtVersion() // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleSetAedtVersion = async (value: string) => {
+    if (!value || value === aedtVersion) return
+    try {
+      const d = await api('/api/aedt-version', { version: value })
+      setAedtVersion(d.current)
+      setAedtVersions(d.supported || [])
+      alert(`已切換為 AEDT ${d.current}。
+
+`
+        + '請從「匯入原始板檔」重新開始——先前用其他版本產生的 .aedb 未必打得開。')
+    } catch (e) {
+      alert('切換版本失敗：' + String(e))
+      void refreshAedtVersion()
+    }
+  }
+
   // 報告工作區一旦定下來就固定，並記住到下一次開啟。
   //
   // 它原本每次都由「目前載入的檔案」重新推導，於是同一個案子只要換個匯入來源
@@ -874,6 +909,8 @@ export default function App() {
       }
       // Preview 已在同一個背景工作內完成，避免第二個長 HTTP 請求再次逾時。
       setFullScene(data.preview)
+      // 載入之後版本就鎖住了，把選單狀態同步過來，免得它看起來還能改。
+      setAedtLocked(true)
     } catch (e) {
       alert('載入失敗: ' + String(e))
     } finally {
@@ -2657,6 +2694,30 @@ ${data.output_path}`)
                 {/* 輸入檔案 */}
                 <div hidden={!(show.load)}>
                   <h3 className="panel-title">輸入檔案（.aedb / .brd / .tgz）</h3>
+                  {/* 版本選擇放在載入之前——載入之後就不能換了 */}
+                  <div className="field-row" style={{ marginTop: 6 }}>
+                    <span className="field-label" style={{ margin: 0, minWidth: 78 }}>
+                      AEDT 版本
+                    </span>
+                    <select className="input" value={aedtVersion}
+                      disabled={aedtLocked}
+                      onChange={e => void handleSetAedtVersion(e.target.value)}>
+                      {aedtVersions.map(v => (
+                        <option key={v.version} value={v.version} disabled={!v.installed}>
+                          {v.version.replace('.', ' R')}
+                          {v.installed ? '' : '（未安裝）'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="panel-hint" style={{ marginTop: 3, fontSize: 11 }}>
+                    {aedtLocked
+                      ? '已載入電路板，無法切換版本。要換版本請先「重新載入原始檔」，'
+                        + '再從匯入原始板檔開始。'
+                      : '整條流程（匯入、裁切、分段、求解、匯出）都會使用這個版本。'
+                        + '求解機只有舊版時，把版本對齊到求解機也有的那一版——'
+                        + '用新版 EDB 去撞舊版求解器不會失敗，只會讓疊構被誤讀。'}
+                  </div>
                   <div className="field-row" style={{ marginTop: 6 }}>
                     <input
                       type="text"
