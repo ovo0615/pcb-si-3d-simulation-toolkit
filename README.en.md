@@ -78,7 +78,7 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 ![Automatic S-parameter cascade circuit](./graph/串接電路示意圖_20260809.png)
 
-![Cascaded S-parameters: single-ended/differential toggle, cursor reads every trace at once](./graph/串接後S參數_20260809-public.png)
+![Cascaded S-parameters: single-ended/differential, insertion/return loss, and near/far-end crosstalk](./graph/S參數展現_20260810.png)
 
 ![QuickEye diagram with eye height/width](./graph/QuickEye眼圖_20260809-public.png)
 

@@ -78,7 +78,7 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 ![分段 S 參數自動串接電路示意](./graph/串接電路示意圖_20260809.png)
 
-![串接後 S 參數：單端／差動可切換，游標可同時讀取所有曲線](./graph/串接後S參數_20260809-public.png)
+![串接後 S 參數：單端／差動可切換，插入／回波損耗與近遠端串音](./graph/S參數展現_20260810.png)
 
 ![QuickEye 眼圖與眼高、眼寬量測](./graph/QuickEye眼圖_20260809-public.png)
 
