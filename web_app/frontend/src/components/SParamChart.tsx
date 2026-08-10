@@ -46,6 +46,12 @@ interface HoverState {
 // 容器就是留一段空白。（不能用 preserveAspectRatio="none" 硬拉：那會連文字與
 // 線寬一起變形。）
 const DEFAULT_W = 920
+
+/** 右側抽屜的寬度。繪圖區的 padding 與把手的位置都由它算出來——
+ *  三處各寫一個數字的話，改寬度時一定會漏掉其中一處。 */
+const PANEL_WIDTH = 244
+/** 把手與抽屜之間的間距。 */
+const PANEL_GAP = 6
 const PAD = { left: 72, right: 18, top: 12, bottom: 42 }
 
 function normalizedRange(min: number, max: number, fallbackSpan: number): [number, number] {
@@ -268,16 +274,30 @@ export default function SParamChart({
       position: 'relative', height: '100%',
       display: interactive ? 'flex' : undefined,
       flexDirection: interactive ? 'column' : undefined,
+      // 抽屜展開時把繪圖區往內收，而不是讓抽屜蓋在圖上。
+      //
+      // 原本是覆蓋式，理由是「開合不會讓曲線跳動」。但實際用起來，被蓋住的
+      // 永遠是最右邊——也就是最高頻那一段，而那正是最常要看的地方（50 GHz
+      // 的通道，蓋掉 244px 大約吃掉 16 GHz 以上）。要看高頻就得先收起抽屜，
+      // 等於圖例與高頻不能同時看，這比曲線位移惱人得多。
+      //
+      // 抽屜是絕對定位貼右緣，而絕對定位的參考是容器的 padding box，所以
+      // padding 讓出來的空間剛好就是抽屜的位置，兩者不會打架。SVG 是
+      // width:100%，內容盒一縮它就跟著縮，ResizeObserver 會量到新寬度並更新
+      // viewBox——不需要另外算。
+      paddingRight: interactive && panelOpen ? PANEL_WIDTH : 0,
+      transition: 'padding-right 140ms ease',
+      boxSizing: 'border-box',
     }}>
       {/* 圖例與軸控制收進右側抽屜——留給曲線的空間才是這一格的重點。
-          收合時只剩一條把手，圖佔滿整格；展開時覆蓋在圖上而不是把圖推小，
-          所以開合不會讓曲線跳動。 */}
+          收合時只剩一條把手，圖佔滿整格。 */}
       {interactive && (
         <>
           <button type="button" onClick={() => setPanelOpen(open => !open)}
             title={panelOpen ? '收起圖例與軸控制' : '展開圖例與軸控制'}
             style={{
-              position: 'absolute', top: 6, right: panelOpen ? 250 : 6, zIndex: 3,
+              position: 'absolute', top: 6, zIndex: 3,
+              right: panelOpen ? PANEL_WIDTH + PANEL_GAP : PANEL_GAP,
               background: 'rgba(20,24,30,0.92)', color: 'var(--accent)',
               border: '1px solid var(--border)', borderRadius: 6,
               padding: '3px 9px', fontSize: 12, cursor: 'pointer',
@@ -288,7 +308,7 @@ export default function SParamChart({
 
           {panelOpen && (
             <div style={{
-              position: 'absolute', top: 0, right: 0, bottom: 0, width: 244,
+              position: 'absolute', top: 0, right: 0, bottom: 0, width: PANEL_WIDTH,
               zIndex: 2, overflowY: 'auto', padding: '34px 10px 10px',
               background: 'rgba(14,17,22,0.94)', backdropFilter: 'blur(3px)',
               border: '1px solid var(--border)', borderRadius: 8,
