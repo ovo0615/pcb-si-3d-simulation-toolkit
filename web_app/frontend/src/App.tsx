@@ -9,8 +9,9 @@ import {
 } from './splitLayout'
 import { logColor } from './logLevel'
 import 'allotment/dist/style.css'
-import Preview2D, { CleanupOverlay, CleanupRemovedGeometry, PreviewData, SegmentCutsInfo } from './components/Preview2D'
+import Preview2D, { CleanupOverlay, CleanupRemovedGeometry, PreviewData, SegmentCutsInfo, TdrMarkerSpan } from './components/Preview2D'
 import SParamChart, { SParamSeries } from './components/SParamChart'
+import TdrChart from './components/TdrChart'
 import TaskPicker from './components/TaskPicker'
 import {
   DEFAULT_TASKS,
@@ -254,7 +255,7 @@ interface ComponentInfo {
   pin_count: number
 }
 
-type ViewMode = 'full' | 'cut' | 'cleanup' | 'segments' | 'schematic' | 'sparam' | 'eye' | 'report'
+type ViewMode = 'full' | 'cut' | 'cleanup' | 'segments' | 'schematic' | 'sparam' | 'eye' | 'tdr' | 'report'
 
 /** 量測容器實際高度，讓圖表填滿剩餘空間而不需捲動。
  *  分頁高度會隨視窗與 Allotment 分隔線改變，因此以 ResizeObserver 追蹤，
@@ -580,6 +581,21 @@ export default function App() {
   // 一鍵眼圖背景工作：輪詢狀態，完成後在「眼圖」分頁顯示 AEDT 產的 JPG
   const [eyeJob, setEyeJob] = useState<any | null>(null)
   const [eyeImageRevision, setEyeImageRevision] = useState(0)
+  // TDR 阻抗定位：背景求解 + 劇變位置映射到 Layout
+  const [tdrSuggestion, setTdrSuggestion] = useState<any | null>(null)
+  const [tdrMode, setTdrMode] = useState<'single' | 'differential'>('single')
+  const [tdrInputP, setTdrInputP] = useState('')
+  const [tdrInputN, setTdrInputN] = useState('')
+  const [tdrOutputP, setTdrOutputP] = useState('')
+  const [tdrOutputN, setTdrOutputN] = useState('')
+  const [tdrDkHint, setTdrDkHint] = useState('')
+  const [tdrNet, setTdrNet] = useState('')          // 被探測的訊號網路（路徑長度與標記映射用）
+  const [tdrFlipStart, setTdrFlipStart] = useState(false) // 起點在走線的另一端
+  const [tdrPath, setTdrPath] = useState<any | null>(null) // /api/tdr/path 結果
+  const [tdrJob, setTdrJob] = useState<any | null>(null)
+  const [tdrAnalysisIdx, setTdrAnalysisIdx] = useState(0)  // A 法／B 法切換
+  const [tdrMarkers, setTdrMarkers] = useState<TdrMarkerSpan[] | null>(null)
+  const [tdrMapError, setTdrMapError] = useState('')
   const [spChartRef, spChartHeight] = useMeasuredHeight<HTMLDivElement>()
   // 外部檔案接線模式
   const [extFiles, setExtFiles] = useState<ExtFileInfo[]>([])
@@ -2112,6 +2128,207 @@ ${data.output_path}`)
     }
   }, [cascadeMode])
 
+  // ── TDR 阻抗定位 ─────────────────────────────────────
+  // 從 2D 場景取出被探測 Net 的走線 polylines（mm）。標記映射與路徑長度
+  // 都用這份資料，不需要為了 TDR 重開 EDB。
+  const buildTdrPolylines = (data: PreviewData | null, net: string) => {
+    if (!data || !net) return []
+    const result: { net: string; layer: string; points_mm: number[][] }[] = []
+    for (const [layerName, items] of Object.entries(data.layers)) {
+      if (layerName === 'Ports' || layerName === 'Board') continue
+      for (const item of items as any[]) {
+        if (item.kind === 'path' && item.net === net
+            && Array.isArray(item.points) && item.points.length >= 2) {
+          result.push({ net, layer: layerName, points_mm: item.points })
+        }
+      }
+    }
+    return result
+  }
+  const tdrScene = cutScene || fullScene
+  // 分段切面位置 → 排除區輸入（axis 0 = X 座標上的縱切）
+  const tdrCuts = complexityAnalysis
+    ? complexityAnalysis.cuts.map(c => ({
+        axis: c.direction === 'x' ? 0 : 1, position_mm: c.position_mm }))
+    : segAnalysis
+      ? segAnalysis.cuts.map(c => ({
+          axis: segAnalysis.direction === 'x' ? 0 : 1,
+          position_mm: c.position_mm }))
+      : []
+
+  // 串接結果一變就重取 TDR 建議（上升時間、Port 清單與配對）
+  useEffect(() => {
+    const touchstonePath = cascadeResult?.output_path
+    setTdrSuggestion(null)
+    setTdrJob(null)
+    setTdrMarkers(null)
+    setTdrMapError('')
+    setTdrAnalysisIdx(0)
+    if (!touchstonePath || !show.tdr) return
+    let cancelled = false
+    api('/api/tdr/suggest', { touchstone_path: touchstonePath })
+      .then(suggestion => {
+        if (cancelled) return
+        setTdrSuggestion(suggestion)
+        if (suggestion.suggested_mode === 'single'
+            || suggestion.suggested_mode === 'differential') {
+          setTdrMode(suggestion.suggested_mode)
+        }
+        setTdrInputP(suggestion.suggested_mapping?.input_p || '')
+        setTdrInputN(suggestion.suggested_mapping?.input_n || '')
+        setTdrOutputP(suggestion.suggested_mapping?.output_p || '')
+        setTdrOutputN(suggestion.suggested_mapping?.output_n || '')
+      })
+      .catch(() => { if (!cancelled) setTdrSuggestion(null) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cascadeResult, show.tdr])
+
+  // 預設探測第一條訊號網路
+  useEffect(() => {
+    if (!tdrNet && signalNets.length > 0) setTdrNet(signalNets[0])
+    if (tdrNet && signalNets.length > 0 && !signalNets.includes(tdrNet)) {
+      setTdrNet(signalNets[0])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signalNets.join(',')])
+
+  // 通道實體長度：群延遲法（A 法）的必要輸入，也決定標記的起點端
+  useEffect(() => {
+    setTdrPath(null)
+    if (!show.tdr || !tdrNet || !tdrScene) return
+    const polylines = buildTdrPolylines(tdrScene, tdrNet)
+    if (polylines.length === 0) return
+    let cancelled = false
+    const fetchPath = async () => {
+      try {
+        const canonical = await api('/api/tdr/path', {
+          polylines, net: tdrNet, start_xy_mm: [0, 0] })
+        if (cancelled) return
+        if (tdrFlipStart) {
+          const flipped = await api('/api/tdr/path', {
+            polylines, net: tdrNet, start_xy_mm: canonical.end_mm })
+          if (!cancelled) setTdrPath(flipped)
+        } else {
+          setTdrPath(canonical)
+        }
+      } catch { /* 走線資料不足時不顯示長度 */ }
+    }
+    fetchPath()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show.tdr, tdrNet, tdrFlipStart, tdrScene])
+
+  // TDR 背景工作輪詢（仿眼圖）
+  useEffect(() => {
+    if (!show.tdr) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const state = await api('/api/tdr/status')
+        if (!cancelled) setTdrJob(state)
+      } catch { /* 後端暫時忙碌時保留上次狀態 */ }
+    }
+    poll()
+    const timer = window.setInterval(() => {
+      if (tdrJob?.running) poll()
+    }, 2500)
+    return () => { cancelled = true; window.clearInterval(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show.tdr, tdrJob?.running])
+
+  // 求解完成後把選定分析法的劇變位置映射到 Layout
+  useEffect(() => {
+    setTdrMarkers(null)
+    setTdrMapError('')
+    const analysis = tdrJob?.result?.analyses?.[tdrAnalysisIdx]
+    if (tdrJob?.status !== 'done' || !analysis || !tdrPath || !tdrScene) return
+    const polylines = buildTdrPolylines(tdrScene, tdrNet)
+    if (polylines.length === 0) return
+    const distances = (analysis.discontinuities || [])
+      .slice(0, 8)                          // 只標最強的前幾個，畫面才讀得懂
+      .map((d: any) => d.distance_mm)
+      .filter((d: number) => d <= (tdrPath.length_mm || Infinity) * 1.05)
+    if (distances.length === 0) return
+    let cancelled = false
+    api('/api/tdr/map', {
+      polylines, net: tdrNet,
+      start_xy_mm: tdrPath.start_mm,
+      resolution_mm: analysis.resolution_mm,
+      marker_distances_mm: distances,
+      cuts: tdrCuts,
+    })
+      .then(result => {
+        if (cancelled) return
+        const methodTag = analysis.method === 'group_delay' ? 'A' : 'B'
+        setTdrMarkers(result.markers.map((m: any, i: number): TdrMarkerSpan => ({
+          points: m.points,
+          distance_mm: m.distance_mm,
+          excluded: m.excluded,
+          label: `${methodTag}${i + 1}　${m.distance_mm.toFixed(1)}mm`
+            + (m.excluded ? '（切面接縫）' : ''),
+        })))
+      })
+      .catch(e => { if (!cancelled) setTdrMapError(String(e)) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tdrJob?.status, tdrAnalysisIdx, tdrPath, tdrScene, tdrNet])
+
+  const handleTdrRun = async () => {
+    if (!cascadeResult?.output_path || !tdrSuggestion?.supported) {
+      alert(tdrSuggestion?.note || '請先完成電路串接（2-Port 或 4-Port）。')
+      return
+    }
+    const selected = tdrMode === 'differential'
+      ? [tdrInputP, tdrInputN, tdrOutputP, tdrOutputN]
+      : [tdrInputP, tdrOutputP]
+    if (selected.some(name => !name) || new Set(selected).size !== selected.length) {
+      alert('TDR 的輸入／輸出 Port 必須完整且不可重複。')
+      return
+    }
+    const dk = tdrDkHint.trim() ? Number(tdrDkHint) : null
+    if (dk !== null && (!Number.isFinite(dk) || dk <= 0)) {
+      alert('介電常數必須是正數。')
+      return
+    }
+    const lengthMm = tdrPath?.length_mm || null
+    if (!lengthMm && dk === null) {
+      alert('無法決定傳播速度：請載入電路板讓工具取得通道長度（A 法），'
+        + '或填入疊構介電常數（B 法）。兩者至少提供一個。')
+      return
+    }
+    const mapping = tdrMode === 'differential'
+      ? `${tdrInputP}／${tdrInputN} → ${tdrOutputP}／${tdrOutputN}`
+      : `${tdrInputP} → ${tdrOutputP}`
+    const ok = window.confirm(
+      `請確認 TDR 設定：\n` +
+      `模式：${tdrMode === 'differential' ? '差動' : '單端'}\n` +
+      `探棒：${mapping}\n` +
+      `上升時間：${Number(tdrSuggestion.rise_time_ps).toFixed(2)} ps（由頻寬自動決定）\n` +
+      (lengthMm ? `通道長度：${Number(lengthMm).toFixed(2)} mm（A 法：群延遲）\n` : '') +
+      (dk !== null ? `介電常數：${dk}（B 法：疊構 Dk）\n` : '') +
+      `確定要開始背景求解嗎？`)
+    if (!ok) return
+    try {
+      const snapshot = await api('/api/tdr/start', {
+        touchstone_path: cascadeResult.output_path,
+        mode: tdrMode,
+        input_p: tdrInputP,
+        output_p: tdrOutputP,
+        input_n: tdrInputN,
+        output_n: tdrOutputN,
+        dk_hint: dk,
+        path_length_mm: lengthMm,
+        confirmed: true,
+      })
+      setTdrJob(snapshot)
+      setTdrMarkers(null)
+      setActiveView('tdr')
+    } catch (e) {
+      alert('TDR 啟動失敗：' + String(e))
+    }
+  }
+
   // 排程執行中每秒觸發重繪，讓「求解中」的段耗時平滑跳動（不打 API）
   useEffect(() => {
     if (!schedStatus?.running) return
@@ -2412,6 +2629,7 @@ ${data.output_path}`)
     schematic: '串接電路示意圖 · 黃點 = 短路節點（stripline T+B）· 虛線框 = 尚未解算',
     sparam: '串接後 S 參數 · 單端／差動可切換 · 兩端與差動對由 Port 名稱自動判斷',
     eye: 'QuickEye 眼圖 · 眼高與眼寬由 AEDT 量測',
+    tdr: 'TDR 阻抗定位 · 劇變位置以解析度寬度標在 Layout 上',
     report: '一鍵 HTML 報告中心',
   }
   const sceneLabel = sceneLabels[activeView]
@@ -2497,7 +2715,7 @@ ${data.output_path}`)
   ).replace(/\.(aedb|brd|tgz|s\d+p)$/i, '')
   const reportSectionByView: Record<ViewMode, string> = {
     full: 'board', cut: 'cutout', cleanup: 'cleanup', segments: 'segments',
-    schematic: 'schematic', sparam: 'sparam', eye: 'eye',
+    schematic: 'schematic', sparam: 'sparam', eye: 'eye', tdr: 'tdr',
     report: 'results',
   }
   const reportSourceRevision = activeView === 'segments'
@@ -2506,14 +2724,17 @@ ${data.output_path}`)
       ? String(cascadeResult?.output_path || schedMetaPath || '')
       : activeView === 'eye'
         ? String(eyeJob?.result?.image_path || '')
-        : activeView === 'cut' || activeView === 'cleanup'
-          ? outputPath
-          : inputPath
+        : activeView === 'tdr'
+          ? String(tdrJob?.result?.project_path || '')
+          : activeView === 'cut' || activeView === 'cleanup'
+            ? outputPath
+            : inputPath
   const reportSnapshotAvailable = activeView !== 'report' && Boolean(
     scene
     || (activeView === 'schematic' && schematicGraph)
     || (activeView === 'sparam' && cascadeResult)
-    || (activeView === 'eye' && eyeJob?.status === 'done'),
+    || (activeView === 'eye' && eyeJob?.status === 'done')
+    || (activeView === 'tdr' && tdrJob?.status === 'done'),
   )
   useReportStaleRevision(reportWorkspace, ['board'], fullScene, '完整板資料已重新載入')
   useReportStaleRevision(reportWorkspace, ['cutout'], cutScene, '裁切結果已更新')
@@ -2521,6 +2742,7 @@ ${data.output_path}`)
   useReportStaleRevision(reportWorkspace, ['segments'], segRun, 'N 段分割結果已更新')
   useReportStaleRevision(reportWorkspace, ['schematic', 'sparam'], cascadeResult, '電路串接結果已更新')
   useReportStaleRevision(reportWorkspace, ['eye'], eyeJob?.result, '眼圖結果已更新')
+  useReportStaleRevision(reportWorkspace, ['tdr'], tdrJob?.result, 'TDR 結果已更新')
   const formatBytes = (value: number) => {
     if (value < 1024) return `${value} B`
     if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
@@ -2542,6 +2764,7 @@ ${data.output_path}`)
   const hiddenRunning: string[] = []
   if (!show.schedule && schedStatus?.running) hiddenRunning.push('排程求解')
   if (!show.eye && eyeJob?.running) hiddenRunning.push('眼圖')
+  if (!show.tdr && tdrJob?.running) hiddenRunning.push('TDR')
 
   return (
     <div className="app-shell" onClick={() => setOpenMenu(null)}>
@@ -4329,6 +4552,121 @@ ${data.output_path}`)
                           </div>
                         )}
                       </div>
+                      <div hidden={!show.tdr} style={{
+                        marginTop: 8, padding: 8, border: '1px solid var(--border)',
+                        borderRadius: 7, background: 'rgba(110, 40, 70, 0.08)',
+                      }}>
+                        <div style={{ fontWeight: 700, fontSize: 12 }}>TDR 阻抗定位</div>
+                        <div className="panel-hint" style={{ marginTop: 3 }}>
+                          以串接後 Touchstone 求解 TDR，把阻抗劇變換算成 Layout 位置。
+                          上升時間由頻寬自動決定（0.35/f_max），不需輸入。
+                        </div>
+                        {tdrSuggestion && (
+                          <>
+                            <div className={`status ${tdrSuggestion.supported ? '' : 'status--warn'}`}
+                              style={{ marginTop: 6, fontSize: 11 }}>
+                              頻寬 {Number(tdrSuggestion.f_max_ghz).toFixed(1)} GHz →
+                              上升時間 {Number(tdrSuggestion.rise_time_ps).toFixed(2)} ps。
+                              {tdrSuggestion.note}
+                            </div>
+                            <div className="field-row" style={{ marginTop: 6 }}>
+                              <div style={{ flex: 1 }}>
+                                <div className="field-label">模式</div>
+                                <select className="input" value={tdrMode}
+                                  onChange={event => setTdrMode(event.target.value as 'single' | 'differential')}>
+                                  <option value="single" disabled={cascadeResult.n_ports !== 2}>單端（2-Port）</option>
+                                  <option value="differential" disabled={cascadeResult.n_ports !== 4}>差動（4-Port）</option>
+                                </select>
+                              </div>
+                              <div style={{ flex: 1 }}
+                                title="B 法（疊構 Dk）用：整條通道的等效介電常數。留空則只用 A 法（群延遲，需載入電路板取得通道長度）。">
+                                <div className="field-label">介電常數（選填）</div>
+                                <input className="input" type="number" min="1" step="0.1"
+                                  placeholder="例：3.8"
+                                  value={tdrDkHint} onChange={event => setTdrDkHint(event.target.value)} />
+                              </div>
+                            </div>
+                            <div className="field-row" style={{ marginTop: 5 }}>
+                              <div style={{ flex: 1 }}>
+                                <div className="field-label">探棒（輸入）P</div>
+                                <select className="input" value={tdrInputP}
+                                  onChange={event => setTdrInputP(event.target.value)}>
+                                  {cascadeResult.port_names.map((name: string) =>
+                                    <option key={name} value={name}>{name}</option>)}
+                                </select>
+                              </div>
+                              {tdrMode === 'differential' && (
+                                <div style={{ flex: 1 }}>
+                                  <div className="field-label">輸入 N</div>
+                                  <select className="input" value={tdrInputN}
+                                    onChange={event => setTdrInputN(event.target.value)}>
+                                    {cascadeResult.port_names.map((name: string) =>
+                                      <option key={name} value={name}>{name}</option>)}
+                                  </select>
+                                </div>
+                              )}
+                              <div style={{ flex: 1 }}>
+                                <div className="field-label">遠端 P</div>
+                                <select className="input" value={tdrOutputP}
+                                  onChange={event => setTdrOutputP(event.target.value)}>
+                                  {cascadeResult.port_names.map((name: string) =>
+                                    <option key={name} value={name}>{name}</option>)}
+                                </select>
+                              </div>
+                              {tdrMode === 'differential' && (
+                                <div style={{ flex: 1 }}>
+                                  <div className="field-label">遠端 N</div>
+                                  <select className="input" value={tdrOutputN}
+                                    onChange={event => setTdrOutputN(event.target.value)}>
+                                    {cascadeResult.port_names.map((name: string) =>
+                                      <option key={name} value={name}>{name}</option>)}
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+                            {signalNets.length > 0 && (
+                              <div className="field-row" style={{ marginTop: 5 }}>
+                                <div style={{ flex: 2 }}>
+                                  <div className="field-label">被探測的訊號網路（Layout 標記）</div>
+                                  <select className="input" value={tdrNet}
+                                    onChange={event => setTdrNet(event.target.value)}>
+                                    {signalNets.map(net =>
+                                      <option key={net} value={net}>{net}</option>)}
+                                  </select>
+                                </div>
+                                <label style={{
+                                  flex: 1, display: 'flex', alignItems: 'center', gap: 4,
+                                  fontSize: 11, cursor: 'pointer', marginTop: 14,
+                                }}
+                                  title="TDR 距離從探棒端起算。若標記位置像是從走線另一端量的，勾這裡翻轉起點。">
+                                  <input type="checkbox" checked={tdrFlipStart}
+                                    onChange={event => setTdrFlipStart(event.target.checked)} />
+                                  起點在另一端
+                                </label>
+                              </div>
+                            )}
+                            {tdrPath && (
+                              <div className="panel-hint" style={{ marginTop: 4 }}>
+                                通道實體長度 {Number(tdrPath.length_mm).toFixed(2)} mm
+                                （起點 {tdrPath.start_mm.map((v: number) => v.toFixed(1)).join(', ')}）
+                                {tdrPath.unchained > 0
+                                  ? `　⚠ 有 ${tdrPath.unchained} 段走線未能串入路徑` : ''}
+                              </div>
+                            )}
+                            <button className="btn btn--primary" style={{ width: '100%', marginTop: 6 }}
+                              disabled={tdrJob?.running || cascadeBusy || !tdrSuggestion.supported}
+                              onClick={handleTdrRun}>
+                              {tdrJob?.running ? 'TDR 求解中…（背景執行）' : '執行 TDR'}
+                            </button>
+                          </>
+                        )}
+                        {tdrJob?.status === 'error' && (
+                          <div className="status status--warn"
+                            style={{ marginTop: 6, fontSize: 11, wordBreak: 'break-all' }}>
+                            上次 TDR 執行失敗：{tdrJob.error}
+                          </div>
+                        )}
+                      </div>
                       {/* S 參數曲線檢視 */}
                       <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'flex-end' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -4416,6 +4754,12 @@ ${data.output_path}`)
                   onClick={() => setActiveView('eye')}
                   disabled={!eyeJob || eyeJob.status === 'idle'}
                 >眼圖</button>
+                <button
+                  hidden={!(show.tdr)}
+                  className={'viewtab' + (activeView === 'tdr' ? ' viewtab--active' : '')}
+                  onClick={() => setActiveView('tdr')}
+                  disabled={!tdrJob || tdrJob.status === 'idle'}
+                >TDR</button>
                 <button
                   hidden={!(show.report)}
                   className={'viewtab' + (activeView === 'report' ? ' viewtab--active' : '')}
@@ -4554,6 +4898,197 @@ ${data.output_path}`)
                             {!eyeJob?.running && eyeJob?.status !== 'done' && eyeJob?.status !== 'error' && (
                               <div className="status" style={{ marginTop: 14 }}>
                                 尚未執行眼圖。請先完成「電路串接」後按「執行眼圖」。
+                              </div>
+                            )}
+                          </div>
+                        ) : activeView === 'tdr' ? (
+                          <div style={{
+                            height: '100%', overflow: 'auto', padding: 14,
+                            display: 'flex', flexDirection: 'column', gap: 8,
+                            fontFamily: '"Calibri", "Microsoft JhengHei", sans-serif',
+                            color: '#d8e1ec',
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                              <div>
+                                <h2 style={{ margin: 0, fontSize: 20 }}>TDR 阻抗定位</h2>
+                                <div style={{ color: '#8fa1b5', fontSize: 12, marginTop: 4 }}>
+                                  阻抗劇變依 |dZ/dx| 峰值排序；標記畫成空間解析度的寬度，那是物理極限而非誤差。
+                                </div>
+                              </div>
+                              {tdrJob?.result && (
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                  {(() => {
+                                    const analysis = tdrJob.result.analyses?.[tdrAnalysisIdx]
+                                    const chips: [string, string][] = [
+                                      ['上升時間', `${Number(tdrJob.result.rise_time_ps).toFixed(2)} ps`],
+                                    ]
+                                    if (analysis) {
+                                      chips.push(['傳播速度', `${(analysis.velocity_m_s / 1e8).toFixed(3)}×10⁸ m/s`])
+                                      chips.push(['空間解析度', `${Number(analysis.resolution_mm).toFixed(2)} mm`])
+                                      if (analysis.effective_dk) chips.push(['等效 Dk', Number(analysis.effective_dk).toFixed(2)])
+                                    }
+                                    return chips.map(([label, value]) => (
+                                      <div key={label} style={{
+                                        minWidth: 100, border: '1px solid #303a48', borderRadius: 8,
+                                        padding: '8px 11px', background: '#131820',
+                                      }}>
+                                        <div style={{ fontSize: 11, color: '#9fb0c3' }}>{label}</div>
+                                        <div style={{ fontWeight: 800, fontSize: 14 }}>{value}</div>
+                                      </div>
+                                    ))
+                                  })()}
+                                </div>
+                              )}
+                            </div>
+
+                            {tdrJob?.running && (
+                              <div className="status" style={{ marginTop: 14 }}>
+                                {tdrJob.phase}…　已耗時 {tdrJob.started_at
+                                  ? Math.max(0, Math.round(nowTick - tdrJob.started_at))
+                                  : 0} 秒（背景求解，可切換到其他分頁）
+                              </div>
+                            )}
+                            {tdrJob?.status === 'error' && (
+                              <div className="status status--warn" style={{ marginTop: 14 }}>
+                                TDR 求解失敗：{tdrJob.error}
+                              </div>
+                            )}
+
+                            {tdrJob?.status === 'done' && tdrJob.result && (() => {
+                              const analyses = tdrJob.result.analyses || []
+                              const analysis = analyses[tdrAnalysisIdx] || analyses[0]
+                              if (!analysis) return null
+                              const methodTag = analysis.method === 'group_delay' ? 'A' : 'B'
+                              const peaks = (analysis.discontinuities || []).slice(0, 8)
+                              const chartMarkers = tdrMarkers
+                                ? tdrMarkers.map(m => ({
+                                    distance_mm: m.distance_mm,
+                                    label: (m.label || '').split('　')[0],
+                                    excluded: m.excluded,
+                                  }))
+                                : peaks.map((d: any, i: number) => ({
+                                    distance_mm: d.distance_mm,
+                                    label: `${methodTag}${i + 1}`,
+                                    excluded: false,
+                                  }))
+                              return (
+                                <>
+                                  {analyses.length > 1 && (
+                                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                      {analyses.map((item: any, index: number) => (
+                                        <button key={item.method}
+                                          className={'btn' + (index === tdrAnalysisIdx ? ' btn--primary' : '')}
+                                          style={{ padding: '3px 12px', fontSize: 11.5 }}
+                                          onClick={() => setTdrAnalysisIdx(index)}>
+                                          {item.method === 'group_delay' ? 'A 法：群延遲' : 'B 法：疊構 Dk'}
+                                        </button>
+                                      ))}
+                                      <span style={{ fontSize: 11, color: '#8fa1b5', marginLeft: 6 }}>
+                                        兩法並行：位置差距反映速度的不確定性
+                                      </span>
+                                    </div>
+                                  )}
+                                  {(tdrJob.result.warnings || []).map((warning: string) => (
+                                    <div key={warning} className="status status--warn" style={{ fontSize: 11 }}>
+                                      {warning}
+                                    </div>
+                                  ))}
+                                  {tdrMapError && (
+                                    <div className="status status--warn" style={{ fontSize: 11 }}>
+                                      Layout 標記映射失敗：{tdrMapError}
+                                    </div>
+                                  )}
+
+                                  <div style={{ display: 'flex', gap: 8, minHeight: 300, flex: 1 }}>
+                                    {tdrScene && (
+                                      <div style={{
+                                        flex: 1.5, minWidth: 0, border: '1px solid #303a48',
+                                        borderRadius: 8, overflow: 'hidden', position: 'relative',
+                                      }}>
+                                        <Preview2D data={tdrScene}
+                                          fitKey={`tdr-${tdrNet}`}
+                                          signalNets={signalNets} refNets={refNets}
+                                          highlightNets={[...signalNets, ...refNets]}
+                                          tdrMarkers={tdrMarkers}
+                                          layerPanelEnabled={false} />
+                                        {!tdrMarkers && !tdrMapError && (
+                                          <div style={{
+                                            position: 'absolute', top: 10, left: 12, fontSize: 11,
+                                            color: '#8fa1b5', pointerEvents: 'none',
+                                          }}>
+                                            標記映射中…（或此分析沒有超過門檻的劇變）
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                    <div style={{
+                                      flex: 1, minWidth: 260, border: '1px solid #303a48',
+                                      borderRadius: 8, background: '#131820',
+                                      padding: 10, overflow: 'auto',
+                                    }}>
+                                      <div style={{ fontWeight: 700, fontSize: 12.5, marginBottom: 6 }}>
+                                        阻抗劇變（{methodTag} 法，依反射強度排序）
+                                      </div>
+                                      {peaks.length === 0 ? (
+                                        <div style={{ fontSize: 12, color: '#8fa1b5' }}>
+                                          沒有超過門檻的阻抗劇變——這條通道的阻抗相當連續。
+                                        </div>
+                                      ) : (
+                                        <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse' }}>
+                                          <thead>
+                                            <tr style={{ color: '#9fb0c3', textAlign: 'left' }}>
+                                              <th style={{ padding: '3px 6px' }}>#</th>
+                                              <th style={{ padding: '3px 6px' }}>距離</th>
+                                              <th style={{ padding: '3px 6px' }}>阻抗</th>
+                                              <th style={{ padding: '3px 6px' }}>ΔZ</th>
+                                              <th style={{ padding: '3px 6px' }}>|Γ|</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {peaks.map((peak: any, index: number) => {
+                                              const marker = tdrMarkers?.[index]
+                                              return (
+                                                <tr key={index} style={{
+                                                  borderTop: '1px solid #232b36',
+                                                  color: marker?.excluded ? '#8b95a2' : '#d8e1ec',
+                                                }}>
+                                                  <td style={{ padding: '4px 6px', fontWeight: 700 }}>
+                                                    {methodTag}{index + 1}{marker?.excluded ? ' ⚠' : ''}
+                                                  </td>
+                                                  <td style={{ padding: '4px 6px' }}>{peak.distance_mm.toFixed(1)} mm</td>
+                                                  <td style={{ padding: '4px 6px' }}>{peak.impedance_ohm.toFixed(1)} Ω</td>
+                                                  <td style={{ padding: '4px 6px' }}>{peak.delta_z_ohm > 0 ? '+' : ''}{peak.delta_z_ohm.toFixed(1)} Ω</td>
+                                                  <td style={{ padding: '4px 6px' }}>{peak.reflection_mag.toFixed(3)}</td>
+                                                </tr>
+                                              )
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      )}
+                                      {tdrMarkers?.some(m => m.excluded) && (
+                                        <div style={{ fontSize: 10.5, color: '#8fa1b5', marginTop: 6 }}>
+                                          ⚠＝落在分段切面的排除區內——多半是接縫假象，不是板上真實的劇變。
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div style={{ border: '1px solid #303a48', borderRadius: 8, overflow: 'hidden', flexShrink: 0 }}>
+                                    <TdrChart
+                                      distanceMm={analysis.distance_mm || []}
+                                      impedanceOhm={tdrJob.result.impedance_ohm || []}
+                                      markers={chartMarkers}
+                                      pathLengthMm={tdrJob.result.path_length_mm} />
+                                  </div>
+                                  <div className="result-paths result-paths--center">
+                                    <span>Circuit 專案：{tdrJob.result.project_path}</span>
+                                  </div>
+                                </>
+                              )
+                            })()}
+                            {!tdrJob?.running && tdrJob?.status !== 'done' && tdrJob?.status !== 'error' && (
+                              <div className="status" style={{ marginTop: 14 }}>
+                                尚未執行 TDR。請先完成「電路串接」後按「執行 TDR」。
                               </div>
                             )}
                           </div>

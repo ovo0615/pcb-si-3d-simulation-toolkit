@@ -23,6 +23,7 @@ export type TaskKey =
   | 'cascade'
   | 'sparam'
   | 'eye'
+  | 'tdr'
   | 'report'
 
 export interface TaskDef {
@@ -154,6 +155,13 @@ export const TASK_GROUPS: TaskGroup[] = [
         key: 'eye',
         label: '眼圖',
         hint: '以串接後 Touchstone 直接求解 QuickEye 眼圖。',
+        requires: ['cascade'],
+      },
+      {
+        key: 'tdr',
+        label: 'TDR 阻抗定位',
+        hint: '以串接後 Touchstone 求解 TDR 阻抗曲線，'
+          + '把阻抗劇變換算成 Layout 上的位置標記。',
         requires: ['cascade'],
       },
       {

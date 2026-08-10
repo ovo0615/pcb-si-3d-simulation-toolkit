@@ -65,6 +65,17 @@ export interface SegmentCutsInfo {
   } | null
 }
 
+/** TDR 阻抗劇變在 Layout 上的位置標記：一段解析度寬度的走線片段。 */
+export interface TdrMarkerSpan {
+  /** 沿走線的座標點（mm），已由後端依弧長裁出。 */
+  points: [number, number][]
+  distance_mm: number
+  /** 位於切面接縫排除區內——接縫假象，不是板上真實的劇變。 */
+  excluded: boolean
+  /** 顯示用標籤（例如「A① 37.2mm」）。 */
+  label?: string
+}
+
 export interface CleanupBox {
   x: number
   y: number
@@ -112,6 +123,7 @@ interface Preview2DProps {
   differenceKind?: 'all' | 'primitive' | 'via'
   differenceLayer?: string
   focusBounds?: { min: [number, number]; max: [number, number] } | null
+  tdrMarkers?: TdrMarkerSpan[] | null // TDR 阻抗劇變位置標記（mm）
   estimatedCutoutBoundary?: number[][] | null // PyEDB 唯讀預檢外框（mm）
   actualCutoutBoundary?: number[][] | null // 正式裁切回傳外框（mm）
   showBoundaryDifferenceFill?: boolean // 正式裁切比對：是否顯示橘／藍／綠半透明差異填色
@@ -192,6 +204,7 @@ export default function Preview2D({
   differenceKind = 'all',
   differenceLayer = '',
   focusBounds = null,
+  tdrMarkers = null,
   estimatedCutoutBoundary = null,
   actualCutoutBoundary = null,
   showBoundaryDifferenceFill = true,
@@ -821,6 +834,56 @@ export default function Preview2D({
       ctx.restore()
     }
 
+    // ── TDR 阻抗劇變位置標記 ─────────────────────────
+    // 每個標記是一段「解析度寬度」的走線片段而不是一個點——TDR 的空間解析度
+    // 是物理極限（v·Tr/2），畫成點會暗示不存在的精度。
+    if (tdrMarkers && tdrMarkers.length > 0) {
+      ctx.save()
+      ctx.translate(transform.x, transform.y + rect.height)
+      ctx.scale(transform.scale, -transform.scale)
+      const px2 = (n: number) => n / transform.scale
+      tdrMarkers.forEach(marker => {
+        if (!marker.points || marker.points.length < 2) return
+        const tracePath = () => {
+          ctx.beginPath()
+          marker.points.forEach((point, index) => {
+            if (index === 0) ctx.moveTo(point[0], point[1])
+            else ctx.lineTo(point[0], point[1])
+          })
+        }
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+        // 外圈光暈 + 內圈實線；排除區（切面接縫假象）用灰色與虛線區隔。
+        tracePath()
+        ctx.strokeStyle = marker.excluded
+          ? 'rgba(158, 168, 180, 0.25)' : 'rgba(255, 64, 129, 0.30)'
+        ctx.lineWidth = px2(11)
+        ctx.setLineDash([])
+        ctx.stroke()
+        tracePath()
+        ctx.strokeStyle = marker.excluded
+          ? 'rgba(176, 186, 198, 0.9)' : 'rgba(255, 82, 137, 0.98)'
+        ctx.lineWidth = px2(2.6)
+        ctx.setLineDash(marker.excluded ? [px2(4), px2(4)] : [])
+        ctx.stroke()
+        ctx.setLineDash([])
+        if (marker.label) {
+          const mid = marker.points[Math.floor(marker.points.length / 2)]
+          ctx.save()
+          ctx.translate(mid[0], mid[1])
+          ctx.scale(1 / transform.scale, -1 / transform.scale)
+          ctx.font = 'bold 12px "Calibri","Microsoft JhengHei",sans-serif'
+          ctx.fillStyle = marker.excluded ? 'rgba(186, 196, 208, 0.95)' : '#ff8ab0'
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)'
+          ctx.lineWidth = 3
+          ctx.strokeText(marker.label, 8, -8)
+          ctx.fillText(marker.label, 8, -8)
+          ctx.restore()
+        }
+      })
+      ctx.restore()
+    }
+
     // ── 裁切外框：PyEDB 精確預估／正式裁切比對 ──────
     // 先前這裡還有一種「快速估算」：直接拿 2D 預覽的圖元在前端算凸包或
     // 外接矩形。那份資料本身是為了畫面顯示而降階過的，算出來的外框與正式
@@ -928,7 +991,7 @@ export default function Preview2D({
         ctx.restore()
       }
     }
-  }, [data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, actualCutoutBoundary, showBoundaryDifferenceFill, boundaryComparison, segmentCuts, draggingCut, showSegmentSafetyOverlay, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, getLayerColor, getStackupLayers, computeContentBounds])
+  }, [data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, actualCutoutBoundary, showBoundaryDifferenceFill, boundaryComparison, segmentCuts, draggingCut, showSegmentSafetyOverlay, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, tdrMarkers, getLayerColor, getStackupLayers, computeContentBounds])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 

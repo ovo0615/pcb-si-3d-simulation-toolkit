@@ -40,6 +40,7 @@ High-frequency PCB signal-integrity analysis usually requires engineers to repea
 | Scheduled solving | Starts an isolated solver process for each segment and exports Touchstone | ✅ Done |
 | Automatic S-parameter cascading | Cascades segments using the stitching info to reconstruct the full-channel S-parameters | ✅ Done |
 | QuickEye diagram | Solves eye height/width directly from the cascaded Touchstone | ✅ Done |
+| TDR impedance localization | Solves the TDR impedance profile and maps discontinuities back onto the layout traces | ✅ Done |
 | External Touchstone cascading | Loads existing `.sNp` files with auto-suggested or manual port stitching | ✅ Done |
 | Whole-channel solve | Solves the channel as a single piece with no splitting, as a baseline for the segmented result | ✅ Done |
 | Remote solve pack | Packs the job into a folder the solver machine runs directly; no Python needed there | ✅ Done |

@@ -99,6 +99,7 @@ export const REPORT_SECTION_LABELS: Record<string, string> = {
   schematic: '電路串接',
   sparam: 'S 參數結果',
   eye: '眼圖結果',
+  tdr: 'TDR 阻抗定位',
   results: '模擬結果',
   external: '補充證據',
 }
