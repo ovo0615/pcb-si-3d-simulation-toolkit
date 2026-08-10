@@ -557,10 +557,6 @@ export default function App() {
   // ── 電路串接 ──
   const [cascadeResult, setCascadeResult] = useState<any | null>(null)
   const [cascadeBusy, setCascadeBusy] = useState(false)
-  const [cascPortA, setCascPortA] = useState('')
-  const [cascPortB, setCascPortB] = useState('')
-  const [cascSeries, setCascSeries] = useState<SParamSeries[]>([])
-  const [chartExpanded, setChartExpanded] = useState(false)
   const [cascadeMode, setCascadeMode] = useState<'tool' | 'external'>('tool')
   const [schematicGraph, setSchematicGraph] = useState<CascadeGraph | null>(null)
   const [circuitBusy, setCircuitBusy] = useState(false)
@@ -1732,11 +1728,6 @@ ${state.error}` : ''}`)
     try {
       const data = await api('/api/cascade/run', { metadata_path: metadataPath, output_path: '' })
       setCascadeResult(data)
-      setCascSeries([])
-      if (data.port_names?.length >= 2) {
-        setCascPortA(data.port_names[0])
-        setCascPortB(data.port_names[1])
-      }
     } catch (e) {
       alert('電路串接失敗: ' + String(e))
     } finally {
@@ -1754,11 +1745,6 @@ ${state.error}` : ''}`)
     try {
       const data = await api('/api/cascade/load_external', { path })
       setCascadeResult(data)
-      setCascSeries([])
-      if (data.port_names?.length >= 2) {
-        setCascPortA(data.port_names[0])
-        setCascPortB(data.port_names[1])
-      }
       setActiveView('sparam')
       if (!data.auto.ok) {
         alert('已載入，但無法自動判定 Port 角色：' + data.auto.reason
@@ -1925,7 +1911,6 @@ ${data.output_path}`)
     setCascadeMode(mode)
     setCascadeResult(null)
     setSchematicGraph(null)
-    setCascSeries([])
     setCircuitResult(null)
     setCircuitError('')
     setEyeSuggestion(null)
@@ -2004,11 +1989,6 @@ ${data.output_path}`)
         output_path: '',
       })
       setCascadeResult(data)
-      setCascSeries([])
-      if (data.port_names?.length >= 2) {
-        setCascPortA(data.port_names[0])
-        setCascPortB(data.port_names[1])
-      }
     } catch (e) {
       alert('電路串接失敗: ' + String(e))
     } finally {
@@ -2037,20 +2017,6 @@ ${data.output_path}`)
     loadSparamCurves(spMode)
   }, [activeView, spMode, cascadeResult])
 
-  const handleCascadeAddCurve = async () => {
-    if (!cascPortA || !cascPortB) return
-    try {
-      const data = await api('/api/cascade/plot', { port_a: cascPortA, port_b: cascPortB })
-      setCascSeries(prev => {
-        if (prev.some(s => s.label === data.label)) return prev
-        const color = CASC_COLORS[prev.length % CASC_COLORS.length]
-        return [...prev, { label: data.label, color, freq: data.freq_ghz, db: data.db }]
-      })
-    } catch (e) {
-      alert('取得曲線失敗: ' + String(e))
-    }
-  }
-
   // 一鍵眼圖：啟動後輪詢背景工作，完成或失敗時解除忙碌旗標並更新圖片
   useEffect(() => {
     let cancelled = false
@@ -2078,15 +2044,6 @@ ${data.output_path}`)
     return () => { cancelled = true; window.clearInterval(timer) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eyeJob?.running, circuitBusy])
-
-  useEffect(() => {
-    if (!chartExpanded) return
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setChartExpanded(false)
-    }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [chartExpanded])
 
   useEffect(() => {
     const touchstonePath = cascadeResult?.output_path
@@ -2183,6 +2140,22 @@ ${data.output_path}`)
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cascadeResult, show.tdr])
+
+  // 介電常數由疊構自動取得（厚度加權平均），不讓使用者填——
+  // 填錯的 Dk 會給出看起來很篤定、位置卻整段平移的標記。
+  useEffect(() => {
+    if (!show.tdr) return
+    if (!fullScene) { setTdrDkHint(''); return }
+    let cancelled = false
+    api('/api/tdr/dk')
+      .then(data => {
+        if (cancelled) return
+        setTdrDkHint(data?.available && data?.dk ? String(data.dk) : '')
+      })
+      .catch(() => { if (!cancelled) setTdrDkHint('') })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show.tdr, fullScene])
 
   // 預設探測第一條訊號網路
   useEffect(() => {
@@ -2293,8 +2266,8 @@ ${data.output_path}`)
     }
     const lengthMm = tdrPath?.length_mm || null
     if (!lengthMm && dk === null) {
-      alert('無法決定傳播速度：請載入電路板讓工具取得通道長度（A 法），'
-        + '或填入疊構介電常數（B 法）。兩者至少提供一個。')
+      alert('無法決定傳播速度：請先載入電路板——工具會自動由走線取得'
+        + '通道長度（A 法），並由疊構取得介電常數（B 法）。')
       return
     }
     const mapping = tdrMode === 'differential'
@@ -2828,27 +2801,6 @@ ${data.output_path}`)
           </div>
         </div>
       )}
-      {chartExpanded && (
-        <div onClick={() => setChartExpanded(false)} style={{
-          position: 'fixed', inset: 0, zIndex: 10000,
-          background: 'rgba(0,0,0,0.78)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', padding: '4vh 4vw',
-        }}>
-          <div onClick={event => event.stopPropagation()} style={{
-            width: '92vw', height: '84vh', background: '#11151c',
-            border: '1px solid var(--border)', borderRadius: 10,
-            padding: 18, position: 'relative', overflow: 'auto',
-          }}>
-            <button className="btn" onClick={() => setChartExpanded(false)}
-              style={{ position: 'absolute', right: 14, top: 12, zIndex: 1 }}>關閉（Esc）</button>
-            <div style={{ paddingTop: 36 }}>
-              <SParamChart series={cascSeries} height={Math.max(520, window.innerHeight * 0.7)}
-                interactive />
-            </div>
-          </div>
-        </div>
-      )}
-
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 className="app-title">PCB SI 3D 模擬分析工具</h1>
@@ -4574,16 +4526,23 @@ ${data.output_path}`)
                                 <div className="field-label">模式</div>
                                 <select className="input" value={tdrMode}
                                   onChange={event => setTdrMode(event.target.value as 'single' | 'differential')}>
-                                  <option value="single" disabled={cascadeResult.n_ports !== 2}>單端（2-Port）</option>
-                                  <option value="differential" disabled={cascadeResult.n_ports !== 4}>差動（4-Port）</option>
+                                  {/* 單端不限 Port 數：4-Port 檔也常要探單一條線
+                                      （其餘 Port 自動 50Ω 端接）。 */}
+                                  <option value="single">單端（探單一條線）</option>
+                                  <option value="differential" disabled={cascadeResult.n_ports < 4}>差動（P／N 一對）</option>
                                 </select>
                               </div>
                               <div style={{ flex: 1 }}
-                                title="B 法（疊構 Dk）用：整條通道的等效介電常數。留空則只用 A 法（群延遲，需載入電路板取得通道長度）。">
-                                <div className="field-label">介電常數（選填）</div>
-                                <input className="input" type="number" min="1" step="0.1"
-                                  placeholder="例：3.8"
-                                  value={tdrDkHint} onChange={event => setTdrDkHint(event.target.value)} />
+                                title="B 法（疊構 Dk）的速度來源：由目前載入疊構的介電層厚度加權平均自動計算，不需輸入。">
+                                <div className="field-label">介電常數（疊構自動）</div>
+                                <div className="input" style={{
+                                  display: 'flex', alignItems: 'center',
+                                  color: tdrDkHint ? undefined : '#8fa1b5',
+                                }}>
+                                  {tdrDkHint
+                                    ? Number(tdrDkHint).toFixed(2)
+                                    : '未載入電路板，僅用 A 法'}
+                                </div>
                               </div>
                             </div>
                             <div className="field-row" style={{ marginTop: 5 }}>
@@ -4667,40 +4626,9 @@ ${data.output_path}`)
                           </div>
                         )}
                       </div>
-                      {/* S 參數曲線檢視 */}
-                      <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'flex-end' }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div className="field-label">Port A</div>
-                          <select className="input" value={cascPortA} onChange={e => setCascPortA(e.target.value)}>
-                            {cascadeResult.port_names.map((p: string) => <option key={p} value={p}>{p}</option>)}
-                          </select>
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div className="field-label">Port B</div>
-                          <select className="input" value={cascPortB} onChange={e => setCascPortB(e.target.value)}>
-                            {cascadeResult.port_names.map((p: string) => <option key={p} value={p}>{p}</option>)}
-                          </select>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                        <button className="btn" style={{ flex: 1 }} onClick={handleCascadeAddCurve}>
-                          加入曲線 S(A,B)
-                        </button>
-                        <button className="btn" onClick={() => setCascSeries([])} disabled={cascSeries.length === 0}>
-                          清除
-                        </button>
-                      </div>
-                      <div style={{ marginTop: 8 }}>
-                        <div onDoubleClick={() => cascSeries.length && setChartExpanded(true)}
-                          title="雙擊放大 S 參數圖" style={{ cursor: cascSeries.length ? 'zoom-in' : 'default' }}>
-                          <SParamChart series={cascSeries} />
-                        </div>
-                        <button className="btn" style={{ width: '100%', marginTop: 5 }}
-                          disabled={cascSeries.length === 0}
-                          onClick={() => setChartExpanded(true)}>
-                          ⛶ 放大 S 參數圖
-                        </button>
-                      </div>
+                      {/* 面板內原有的 S(A,B) 手動加曲線區塊已移除——「S 參數」
+                          分頁的自動曲線（IL/RL/NEXT/FEXT、單端／差動切換）
+                          已完整取代它。 */}
                     </>
                   )}
                 </div>
