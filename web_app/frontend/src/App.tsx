@@ -2694,30 +2694,41 @@ ${data.output_path}`)
                 {/* 輸入檔案 */}
                 <div hidden={!(show.load)}>
                   <h3 className="panel-title">輸入檔案（.aedb / .brd / .tgz）</h3>
-                  {/* 版本選擇放在載入之前——載入之後就不能換了 */}
-                  <div className="field-row" style={{ marginTop: 6 }}>
-                    <span className="field-label" style={{ margin: 0, minWidth: 78 }}>
-                      AEDT 版本
-                    </span>
-                    <select className="input" value={aedtVersion}
-                      disabled={aedtLocked}
-                      onChange={e => void handleSetAedtVersion(e.target.value)}>
-                      {aedtVersions.map(v => (
-                        <option key={v.version} value={v.version} disabled={!v.installed}>
-                          {v.version.replace('.', ' R')}
-                          {v.installed ? '' : '（未安裝）'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="panel-hint" style={{ marginTop: 3, fontSize: 11 }}>
-                    {aedtLocked
-                      ? '已載入電路板，無法切換版本。要換版本請先「重新載入原始檔」，'
-                        + '再從匯入原始板檔開始。'
-                      : '整條流程（匯入、裁切、分段、求解、匯出）都會使用這個版本。'
-                        + '求解機只有舊版時，把版本對齊到求解機也有的那一版——'
-                        + '用新版 EDB 去撞舊版求解器不會失敗，只會讓疊構被誤讀。'}
-                  </div>
+                  {/* 只有一個可用版本時不顯示選單——一個選項的下拉是純噪音。
+                      AEDT 出新版並納入支援後會自動出現。 */}
+                  {aedtVersions.length > 1 && (
+                    <>
+                      <div className="field-row" style={{ marginTop: 6 }}>
+                        <span className="field-label" style={{ margin: 0, minWidth: 78 }}>
+                          AEDT 版本
+                        </span>
+                        <select className="input" value={aedtVersion}
+                          disabled={aedtLocked}
+                          onChange={e => void handleSetAedtVersion(e.target.value)}>
+                          {aedtVersions.map(v => (
+                            <option key={v.version} value={v.version} disabled={!v.installed}>
+                              {v.version.replace('.', ' R')}
+                              {v.installed ? '' : '（未安裝）'}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="panel-hint" style={{ marginTop: 3, fontSize: 11 }}>
+                        {aedtLocked
+                          ? '已載入電路板，無法切換版本。要換版本請先「重新載入原始檔」，'
+                            + '再從匯入原始板檔開始。'
+                          : '整條流程（匯入、裁切、分段、求解、匯出）都會使用這個版本。'
+                            + '求解機只有舊版時，正確做法是在求解機補裝相同版本，'
+                            + '不要把來源端降版。'}
+                      </div>
+                    </>
+                  )}
+                  {aedtVersions.length === 1 && !aedtVersions[0].installed && (
+                    <div className="status status--warn" style={{ marginTop: 6, fontSize: 11.5 }}>
+                      找不到 AEDT {aedtVersion} 的安裝。本工具只支援這一版——
+                      pyedb 對更舊的版本會改用未經驗證的 .NET 後端。
+                    </div>
+                  )}
                   <div className="field-row" style={{ marginTop: 6 }}>
                     <input
                       type="text"
