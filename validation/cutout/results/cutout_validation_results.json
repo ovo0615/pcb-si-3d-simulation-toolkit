@@ -1,0 +1,149 @@
+{
+  "metadata": {
+    "generated_at": "2026-08-11T15:23:27+08:00",
+    "aedt_version": "2026.1",
+    "solver": "HFSS 3D Layout",
+    "adaptive": {
+      "mode": "broadband",
+      "range_ghz": [
+        1.0,
+        5.0
+      ],
+      "max_passes": 10,
+      "max_delta_s": 0.02
+    },
+    "frequency_sweep": {
+      "type": "Interpolating",
+      "start": "10MHz",
+      "stop": "10GHz",
+      "step": "25MHz"
+    },
+    "cores": 4,
+    "coupon": {
+      "structure": "symmetric stripline",
+      "board_size_mm": [
+        40.0,
+        20.0
+      ],
+      "trace_width_mm": 0.2,
+      "trace_length_mm": 38.0,
+      "dielectric_thickness_mm": 0.25,
+      "copper_thickness_mm": 0.035,
+      "permittivity": 4.0,
+      "loss_tangent": 0.005,
+      "stitch_via_pitch_mm": 2.0,
+      "stitch_via_offset_mm_main": 1.5,
+      "stitch_via_offset_mm_control": 0.8
+    },
+    "extent_type": "Bounding",
+    "pass_criterion_db": 0.5,
+    "signature": "此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供"
+  },
+  "results": [
+    {
+      "id": "expansion_5mm",
+      "title": "擴張 5 mm",
+      "description": "保留平面約 10.2 mm 寬，縫合 Via 全數保留。",
+      "status": "PASS",
+      "expansion_mm": 5.0,
+      "retained_plane_width_mm": 10.2,
+      "stitch_vias_retained": true,
+      "baseline_touchstone": "touchstone/baseline_full_board.s2p",
+      "cutout_touchstone": "touchstone/cutout_expansion5mm.s2p",
+      "frequency_range_ghz": [
+        0.01,
+        10.0
+      ],
+      "insertion_loss_max_deviation_db": 0.0166,
+      "insertion_loss_rms_deviation_db": 0.0082,
+      "reflection_max_linear_deviation": 0.0332,
+      "worst_frequency_ghz": 6.6978,
+      "points_over_0p5db": 0,
+      "points_compared": 600
+    },
+    {
+      "id": "expansion_3mm",
+      "title": "擴張 3 mm",
+      "description": "保留平面約 6.2 mm 寬，縫合 Via 全數保留。",
+      "status": "PASS",
+      "expansion_mm": 3.0,
+      "retained_plane_width_mm": 6.2,
+      "stitch_vias_retained": true,
+      "baseline_touchstone": "touchstone/baseline_full_board.s2p",
+      "cutout_touchstone": "touchstone/cutout_expansion3mm.s2p",
+      "frequency_range_ghz": [
+        0.01,
+        10.0
+      ],
+      "insertion_loss_max_deviation_db": 0.0174,
+      "insertion_loss_rms_deviation_db": 0.0076,
+      "reflection_max_linear_deviation": 0.0349,
+      "worst_frequency_ghz": 6.7145,
+      "points_over_0p5db": 0,
+      "points_compared": 600
+    },
+    {
+      "id": "expansion_2mm",
+      "title": "擴張 2 mm",
+      "description": "保留平面約 4.2 mm 寬，縫合 Via 全數保留。",
+      "status": "PASS",
+      "expansion_mm": 2.0,
+      "retained_plane_width_mm": 4.2,
+      "stitch_vias_retained": true,
+      "baseline_touchstone": "touchstone/baseline_full_board.s2p",
+      "cutout_touchstone": "touchstone/cutout_expansion2mm.s2p",
+      "frequency_range_ghz": [
+        0.01,
+        10.0
+      ],
+      "insertion_loss_max_deviation_db": 0.0274,
+      "insertion_loss_rms_deviation_db": 0.0132,
+      "reflection_max_linear_deviation": 0.0392,
+      "worst_frequency_ghz": 6.8145,
+      "points_over_0p5db": 0,
+      "points_compared": 600
+    },
+    {
+      "id": "expansion_1mm_vias_removed",
+      "title": "擴張 1 mm（縫合 Via 被切掉）",
+      "description": "保留平面約 2.2 mm 寬；縫合 Via 位於 Y ±1.5 mm，全數落在裁切範圍外。",
+      "status": "FAIL",
+      "expansion_mm": 1.0,
+      "retained_plane_width_mm": 2.2,
+      "stitch_vias_retained": false,
+      "baseline_touchstone": "touchstone/baseline_full_board.s2p",
+      "cutout_touchstone": "touchstone/cutout_expansion1mm_vias_removed.s2p",
+      "frequency_range_ghz": [
+        0.01,
+        10.0
+      ],
+      "insertion_loss_max_deviation_db": 1.6436,
+      "insertion_loss_rms_deviation_db": 0.7583,
+      "reflection_max_linear_deviation": 0.1119,
+      "worst_frequency_ghz": 6.8646,
+      "points_over_0p5db": 315,
+      "points_compared": 600
+    },
+    {
+      "id": "control_1mm_vias_kept",
+      "title": "控制組：擴張 1 mm（縫合 Via 保留）",
+      "description": "縫合 Via 改放 Y ±0.8 mm，同樣 1 mm 擴張、同樣 2.2 mm 平面寬度，但 42 個縫合 Via 全數保留。用來把「平面變窄」與「縫合 Via 被切掉」兩個變因拆開。",
+      "status": "PASS",
+      "expansion_mm": 1.0,
+      "retained_plane_width_mm": 2.2,
+      "stitch_vias_retained": true,
+      "baseline_touchstone": "touchstone/control_baseline_full_board.s2p",
+      "cutout_touchstone": "touchstone/control_cutout_expansion1mm_vias_kept.s2p",
+      "frequency_range_ghz": [
+        0.01,
+        10.0
+      ],
+      "insertion_loss_max_deviation_db": 0.0392,
+      "insertion_loss_rms_deviation_db": 0.0233,
+      "reflection_max_linear_deviation": 0.0458,
+      "worst_frequency_ghz": 7.0647,
+      "points_over_0p5db": 0,
+      "points_compared": 600
+    }
+  ]
+}

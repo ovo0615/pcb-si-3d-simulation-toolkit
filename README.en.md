@@ -32,18 +32,23 @@ High-frequency PCB signal-integrity analysis usually requires engineers to repea
 
 The techniques this toolkit uses to go faster — extracting only the channel, splitting a long channel into independently solved segments, assigning the cheaper solver where it is adequate — **all modify what is actually being solved**. Each therefore has to answer the same question first: how far does the result drift from simply solving the whole thing in one piece?
 
-Two have been quantitatively validated so far, with raw data and failure cases published in full:
+Three have been quantitatively validated so far, with raw data and failure cases published in full:
 
 | Validation | Reference baseline | Result |
 |---|---|---|
+| [Channel cutout](./validation/cutout/cutout_validation_report.md) | The same coupon, uncut, solved directly | Insertion-loss deviation within **0.03 dB** (2–5 mm expansion) |
 | [Segmentation + circuit cascading](./validation/segmentation/segmentation_validation_report.md) | The same coupon, uncut, solved monolithically | Insertion-loss deviation within **0.1 dB (0–10 GHz)**; no point exceeds 0.5 dB |
 | [TDR group-delay localization](./validation/tdr/TDR_group_delay_validation_report.md) | Geometric boundaries known at modelling time | **0.66 mm** mean localization error, **1.71 mm** maximum |
 
 Segmentation is the toolkit's primary speed-up and also the one **most likely to damage accuracy**, because it cuts a complete channel apart and stitches it back together. The validation uses a purpose-built 38 mm, 50 Ω symmetric stripline coupon compared against its own uncut monolithic full-wave solve, and shows the two are all but indistinguishable under the right conditions.
 
-Both validations deliberately include a **negative control** showing what failure looks like. The segmentation study found that an unstitched reference plane at the cut produces a **14 dB** artificial resonance; that condition is now an automatic check inside the toolkit, surfaced to the user before they solve. The point of validation is not endorsement — it is finding where the method breaks and writing that boundary back into the tool.
+All three validations deliberately include a **negative control** showing what failure looks like. More tellingly, the cutout and segmentation studies **independently converge on the same root cause**: accuracy is governed by whether the reference planes are ground-stitched at the cut or cutout boundary — not by expansion distance or cut angle. Without stitching, segmentation produces a **14 dB** artificial resonance and cutout a **1.6 dB** deviation; that condition is now an automatic check inside the toolkit, surfaced before the user solves.
 
-Cutout and layout-cleanup equivalence have not yet been separately quantified and are not claimed here; they remain on the validation roadmap.
+The cutout study also includes a control that separates "narrow retained plane" from "stitching vias removed": same expansion, same retained width, **1.644 dB with the vias removed versus 0.039 dB with them kept — a 42× difference.**
+
+The point of validation is not endorsement — it is finding where the method breaks and writing that boundary back into the tool.
+
+Layout-cleanup equivalence has not yet been separately quantified and is not claimed here; it remains on the validation roadmap.
 
 ## 4. Feature Showcase
 
@@ -119,6 +124,16 @@ The toolkit's core method splits a long channel into segments, solves each indep
 ![Validation coupon and variants](./validation/segmentation/results/segmentation_variants.svg)
 
 ![Segmentation validation overview](./validation/segmentation/results/segmentation_validation_overview.svg)
+
+### Quantified validation of channel cutout equivalence
+
+Extracting only the signal channel from a full board is the toolkit's first speed-up. A 40 × 20 mm stripline coupon was compared against its own uncut baseline: **the expansion distance itself barely matters** (5 mm, 3 mm and 2 mm give 0.017, 0.017 and 0.027 dB). What actually breaks the result is a cutout that **removes the ground stitching vias** — same expansion, same retained plane width, **1.644 dB with the vias removed versus 0.039 dB with them kept, a 42× difference**.
+
+[Open the full English validation report, variant schematics, JSON, and anonymized Touchstone data](./validation/cutout/cutout_validation_report.md)
+
+![Cutout validation coupon and variants](./validation/cutout/results/cutout_variants.svg)
+
+![Cutout validation overview](./validation/cutout/results/cutout_validation_overview.svg)
 
 ![One-click HTML report: company branding, purpose, and result summary](./graph/一鍵產出HTML報告_1_20260810.png)
 
