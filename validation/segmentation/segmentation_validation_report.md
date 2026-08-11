@@ -53,7 +53,7 @@ variable removed.
 | Stackup | GND_TOP 35 µm / dielectric 250 µm / SIG 35 µm / dielectric 250 µm / GND_BOT 35 µm |
 | Dielectric | εr = 4.0, tanδ = 0.005 (deliberately low loss so dielectric loss does not mask the effect under test) |
 | Trace | 0.2 mm wide, 38 mm long, 50 Ω target impedance |
-| Reference planes | 46 × 8 mm, one above and one below |
+| Reference planes | 40 × 6 mm, one above and one below |
 | Terminations | SIG-layer pads with component-end ports (pin-to-layer circuit ports referenced to the planes) |
 | Stitching vias (coupon B) | Two rows at Y = ±1.5 mm, 2 mm pitch (≈ λ/7.5 @10 GHz) |
 

@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "generated_at": "2026-08-11T14:20:36+08:00",
+    "generated_at": "2026-08-11T14:47:46+08:00",
     "aedt_version": "2026.1",
     "solver": "HFSS 3D Layout",
     "adaptive": {
@@ -29,8 +29,8 @@
       "loss_tangent": 0.005,
       "target_impedance_ohm": 50,
       "plane_size_mm": [
-        46.0,
-        8.0
+        40.0,
+        6.0
       ],
       "stitch_via_pitch_mm": 2.0,
       "stitch_via_offset_mm": 1.5
