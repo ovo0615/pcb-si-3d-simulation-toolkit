@@ -28,6 +28,23 @@ The toolkit uses Ansys HFSS 3D Layout and SIwave, with PyEDB operating on the ED
 
 High-frequency PCB signal-integrity analysis usually requires engineers to repeat the same manual preparation: selecting the signal channel from a full board, building a cutout region around the selected nets, placing ports by hand at component ends, splitting long channels into segments when a single mesh would be too large to solve in reasonable time, and manually cascading the resulting S-parameters back into a full-channel response. These steps are slow and error-prone, especially for long channels. This toolkit automates that preparation and post-processing pipeline, then presents the cascaded result beside a full-board SIwave baseline so the segmentation strategy can be judged directly from the S-parameter differences.
 
+### Every speed-up has to prove it does not cost accuracy
+
+The techniques this toolkit uses to go faster — extracting only the channel, splitting a long channel into independently solved segments, assigning the cheaper solver where it is adequate — **all modify what is actually being solved**. Each therefore has to answer the same question first: how far does the result drift from simply solving the whole thing in one piece?
+
+Two have been quantitatively validated so far, with raw data and failure cases published in full:
+
+| Validation | Reference baseline | Result |
+|---|---|---|
+| [Segmentation + circuit cascading](./validation/segmentation/segmentation_validation_report.md) | The same coupon, uncut, solved monolithically | Insertion-loss deviation within **0.1 dB (0–10 GHz)**; no point exceeds 0.5 dB |
+| [TDR group-delay localization](./validation/tdr/TDR_group_delay_validation_report.md) | Geometric boundaries known at modelling time | **0.66 mm** mean localization error, **1.71 mm** maximum |
+
+Segmentation is the toolkit's primary speed-up and also the one **most likely to damage accuracy**, because it cuts a complete channel apart and stitches it back together. The validation uses a purpose-built 38 mm, 50 Ω symmetric stripline coupon compared against its own uncut monolithic full-wave solve, and shows the two are all but indistinguishable under the right conditions.
+
+Both validations deliberately include a **negative control** showing what failure looks like. The segmentation study found that an unstitched reference plane at the cut produces a **14 dB** artificial resonance; that condition is now an automatic check inside the toolkit, surfaced to the user before they solve. The point of validation is not endorsement — it is finding where the method breaks and writing that boundary back into the tool.
+
+Cutout and layout-cleanup equivalence have not yet been separately quantified and are not claimed here; they remain on the validation roadmap.
+
 ## 4. Feature Showcase
 
 | Feature | Description | Status |
