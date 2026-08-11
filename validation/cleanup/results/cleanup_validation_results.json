@@ -1,0 +1,134 @@
+{
+  "metadata": {
+    "generated_at": "2026-08-11T16:46:26+08:00",
+    "aedt_version": "2026.1",
+    "solver": "HFSS 3D Layout",
+    "adaptive": {
+      "mode": "broadband",
+      "range_ghz": [
+        1.0,
+        5.0
+      ],
+      "max_passes": 10,
+      "max_delta_s": 0.02
+    },
+    "frequency_sweep": {
+      "type": "Interpolating",
+      "start": "10MHz",
+      "stop": "10GHz",
+      "step": "25MHz"
+    },
+    "cores": 4,
+    "cleanup_mode": "conservative",
+    "coupon": {
+      "structure": "symmetric stripline",
+      "board_size_mm": [
+        40.0,
+        20.0
+      ],
+      "trace_width_mm": 0.2,
+      "trace_length_mm": 38.0,
+      "dielectric_thickness_mm": 0.25,
+      "copper_thickness_mm": 0.035,
+      "permittivity": 4.0,
+      "loss_tangent": 0.005,
+      "stitch_via_pitch_mm": 2.0,
+      "stitch_via_offset_mm": 1.5,
+      "clutter_offsets_mm": [
+        0.5,
+        2.5,
+        5.0,
+        8.0
+      ],
+      "clutter_note": "each on its own net, floating, 24 mm long"
+    },
+    "protected_nets": [
+      "SIG (signal)",
+      "GND (reference)"
+    ],
+    "pass_criterion_db": 0.5,
+    "signature": "此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供"
+  },
+  "results": [
+    {
+      "id": "guard_0p3mm",
+      "guard_mm": 0.3,
+      "status": "PASS",
+      "clutter_traces_removed": 8,
+      "clutter_traces_kept": "無（全部移除）",
+      "description": "保護距離小於最近的干擾走線，8 條全部移除。",
+      "baseline_touchstone": "touchstone/baseline_all_clutter_kept.s2p",
+      "cleaned_touchstone": "touchstone/cleanup_guard0p3mm_all_removed.s2p",
+      "frequency_range_ghz": [
+        0.01,
+        10.0
+      ],
+      "insertion_loss_max_deviation_db": 0.0211,
+      "insertion_loss_rms_deviation_db": 0.0062,
+      "reflection_max_linear_deviation": 0.0412,
+      "worst_frequency_ghz": 9.3496,
+      "points_over_0p5db": 0,
+      "points_compared": 600
+    },
+    {
+      "id": "guard_1mm",
+      "guard_mm": 1.0,
+      "status": "PASS",
+      "clutter_traces_removed": 6,
+      "clutter_traces_kept": "±0.5 mm",
+      "description": "保留距通道 ±0.5 mm 的一對，其餘 6 條移除。",
+      "baseline_touchstone": "touchstone/baseline_all_clutter_kept.s2p",
+      "cleaned_touchstone": "touchstone/cleanup_guard1mm.s2p",
+      "frequency_range_ghz": [
+        0.01,
+        10.0
+      ],
+      "insertion_loss_max_deviation_db": 0.0085,
+      "insertion_loss_rms_deviation_db": 0.003,
+      "reflection_max_linear_deviation": 0.0092,
+      "worst_frequency_ghz": 9.016,
+      "points_over_0p5db": 0,
+      "points_compared": 600
+    },
+    {
+      "id": "guard_3mm",
+      "guard_mm": 3.0,
+      "status": "PASS",
+      "clutter_traces_removed": 4,
+      "clutter_traces_kept": "±0.5、±2.5 mm",
+      "description": "保留 ±0.5 與 ±2.5 mm 兩對，其餘 4 條移除。",
+      "baseline_touchstone": "touchstone/baseline_all_clutter_kept.s2p",
+      "cleaned_touchstone": "touchstone/cleanup_guard3mm.s2p",
+      "frequency_range_ghz": [
+        0.01,
+        10.0
+      ],
+      "insertion_loss_max_deviation_db": 0.0164,
+      "insertion_loss_rms_deviation_db": 0.0074,
+      "reflection_max_linear_deviation": 0.0267,
+      "worst_frequency_ghz": 8.9493,
+      "points_over_0p5db": 0,
+      "points_compared": 600
+    },
+    {
+      "id": "guard_6mm",
+      "guard_mm": 6.0,
+      "status": "PASS",
+      "clutter_traces_removed": 2,
+      "clutter_traces_kept": "±0.5、±2.5、±5.0 mm",
+      "description": "只移除最遠的 ±8.0 mm 一對。",
+      "baseline_touchstone": "touchstone/baseline_all_clutter_kept.s2p",
+      "cleaned_touchstone": "touchstone/cleanup_guard6mm.s2p",
+      "frequency_range_ghz": [
+        0.01,
+        10.0
+      ],
+      "insertion_loss_max_deviation_db": 0.0184,
+      "insertion_loss_rms_deviation_db": 0.0081,
+      "reflection_max_linear_deviation": 0.029,
+      "worst_frequency_ghz": 7.0147,
+      "points_over_0p5db": 0,
+      "points_compared": 600
+    }
+  ]
+}

@@ -32,11 +32,12 @@ Taiwan Auto-Design Co. (TADC)｜虎門科技股份有限公司
 
 本工具的加速做法——只取通道、把長通道分段求解、逐段挑成本較低的求解器——**都會改動求解對象本身**。因此每一項都必須先回答同一個問題：這樣做出來的結果，跟老老實實整片解一次差多少？
 
-已完成量化驗證的三項，原始數據與失敗案例全部公開：
+已完成量化驗證的四項，原始數據與失敗案例全部公開：
 
 | 驗證項目 | 對照基準 | 結果 |
 |---|---|---|
 | [通道裁切](./validation/cutout/通道裁切等效性驗證報告.md) | 同一片試片不裁切、直接求解 | 插入損耗偏差 **0.03 dB 以內**（擴張 2～5 mm） |
+| [Layout 清理](./validation/cleanup/Layout清理等效性驗證報告.md) | 同一片試片不清理、干擾物全部保留 | 插入損耗偏差 **0.021 dB 以內**（四種保護距離） |
 | [分段切割 + 電路串接](./validation/segmentation/分段切板方法驗證報告.md) | 同一片試片不切割、單體全波求解 | 插入損耗偏差 **0.1 dB 以內（0～10 GHz）**，全頻無一點超過 0.5 dB |
 | [TDR 群延遲定位](./validation/tdr/TDR_群延遲定位驗證報告.md) | 建模時已知的幾何邊界位置 | 平均定位誤差 **0.66 mm**、最大 **1.71 mm** |
 
@@ -48,7 +49,7 @@ Taiwan Auto-Design Co. (TADC)｜虎門科技股份有限公司
 
 驗證的價值不在背書，而在找出方法的邊界，再把邊界寫回工具裡。
 
-Layout 清理的等效性尚未單獨量化驗證，列為後續工作，此處不作宣稱。
+三項會改動求解對象的加速手法——裁切、清理、分段——現在都有量化數據，且結論一致：**唯一需要小心的是切面／裁切邊界處的接地縫合狀況**，其餘都在 0.03 dB 以內。仍未單獨驗證的是「逐段挑求解器」，那是求解器等價性問題、性質與前三項不同，列為後續工作。
 
 ## 4. 功能展示
 
@@ -134,6 +135,16 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 ![裁切驗證試片與變體示意](./validation/cutout/results/cutout_variants.svg)
 
 ![裁切等效性驗證總覽](./validation/cutout/results/cutout_validation_overview.svg)
+
+### Layout 清理等效性的量化驗證
+
+清理是移除通道電磁影響範圍外的其他網路銅箔。以 40 × 20 mm Stripline 試片、通道兩側四對浮接干擾走線（距通道 ±0.5～±8.0 mm）對照未清理的基準：**四種保護距離的插入損耗偏差都在 0.021 dB 以內且無趨勢**——連距通道僅 0.5 mm 的干擾走線移除掉也一樣。清理功能保護訊號與參考網路，回流路徑從頭到尾沒被動過。
+
+[查看完整繁體中文驗證報告、變體示意圖、JSON 與匿名 Touchstone](./validation/cleanup/Layout清理等效性驗證報告.md)
+
+![清理驗證試片與變體示意](./validation/cleanup/results/cleanup_variants.svg)
+
+![Layout 清理等效性驗證總覽](./validation/cleanup/results/cleanup_validation_overview.svg)
 
 ![一鍵產出的 HTML 報告：公司品牌、分析目的與結果摘要](./graph/一鍵產出HTML報告_1_20260810.png)
 

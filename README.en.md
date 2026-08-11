@@ -32,11 +32,12 @@ High-frequency PCB signal-integrity analysis usually requires engineers to repea
 
 The techniques this toolkit uses to go faster — extracting only the channel, splitting a long channel into independently solved segments, assigning the cheaper solver where it is adequate — **all modify what is actually being solved**. Each therefore has to answer the same question first: how far does the result drift from simply solving the whole thing in one piece?
 
-Three have been quantitatively validated so far, with raw data and failure cases published in full:
+Four have been quantitatively validated so far, with raw data and failure cases published in full:
 
 | Validation | Reference baseline | Result |
 |---|---|---|
 | [Channel cutout](./validation/cutout/cutout_validation_report.md) | The same coupon, uncut, solved directly | Insertion-loss deviation within **0.03 dB** (2–5 mm expansion) |
+| [Layout cleanup](./validation/cleanup/cleanup_validation_report.md) | The same coupon, uncleaned, all clutter retained | Insertion-loss deviation within **0.021 dB** (four protection distances) |
 | [Segmentation + circuit cascading](./validation/segmentation/segmentation_validation_report.md) | The same coupon, uncut, solved monolithically | Insertion-loss deviation within **0.1 dB (0–10 GHz)**; no point exceeds 0.5 dB |
 | [TDR group-delay localization](./validation/tdr/TDR_group_delay_validation_report.md) | Geometric boundaries known at modelling time | **0.66 mm** mean localization error, **1.71 mm** maximum |
 
@@ -48,7 +49,7 @@ The cutout study also includes a control that separates "narrow retained plane" 
 
 The point of validation is not endorsement — it is finding where the method breaks and writing that boundary back into the tool.
 
-Layout-cleanup equivalence has not yet been separately quantified and is not claimed here; it remains on the validation roadmap.
+All three speed-ups that modify what is being solved — cutout, cleanup and segmentation — now have quantified data, and they agree: **the only one needing care is ground stitching at the cut or cutout boundary**; everything else stays within 0.03 dB. Per-segment solver assignment remains unvalidated; that is a solver-equivalence question of a different nature and stays on the roadmap.
 
 ## 4. Feature Showcase
 
@@ -134,6 +135,16 @@ Extracting only the signal channel from a full board is the toolkit's first spee
 ![Cutout validation coupon and variants](./validation/cutout/results/cutout_variants.svg)
 
 ![Cutout validation overview](./validation/cutout/results/cutout_validation_overview.svg)
+
+### Quantified validation of layout-cleanup equivalence
+
+Cleanup deletes foreign-net copper outside the channel's EM-relevant region. A 40 × 20 mm stripline coupon with four pairs of floating clutter traces (±0.5 to ±8.0 mm from the channel) was compared against its uncleaned baseline: **all four protection distances stay within 0.021 dB with no trend** — even removing clutter only 0.5 mm away. Cleanup protects the signal and reference nets, so the return path is never touched.
+
+[Open the full English validation report, variant schematics, JSON, and anonymized Touchstone data](./validation/cleanup/cleanup_validation_report.md)
+
+![Cleanup validation coupon and variants](./validation/cleanup/results/cleanup_variants.svg)
+
+![Cleanup validation overview](./validation/cleanup/results/cleanup_validation_overview.svg)
 
 ![One-click HTML report: company branding, purpose, and result summary](./graph/一鍵產出HTML報告_1_20260810.png)
 
