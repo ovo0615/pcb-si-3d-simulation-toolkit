@@ -85,6 +85,14 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 ![TDR 阻抗定位：劇變位置標回 Layout 走線，附劇變表與 Z(距離) 曲線](./graph/TDR_20260810.png)
 
+### TDR 群延遲定位的量化驗證
+
+工具以 S21 群延遲反推有效傳播速度，再把 TDR 往返時間換算成沿走線距離。六組匿名 SIwave 案例包含均勻線、加寬、縮窄、多重不連續、45° 彎折與解析度極限；5 組可解析案例全部通過，平均定位誤差 **0.66 mm**、最大誤差 **1.71 mm**。
+
+[查看完整繁體中文驗證報告、HTML 圖表、JSON 與匿名 Touchstone](./validation/tdr/TDR_群延遲定位驗證報告.md)
+
+![TDR 群延遲定位驗證報告預覽](./validation/tdr/results/TDR_定位驗證報告_預覽.png)
+
 ![一鍵產出的 HTML 報告：公司品牌、分析目的與結果摘要](./graph/一鍵產出HTML報告_1_20260810.png)
 
 ## 6. 技術架構

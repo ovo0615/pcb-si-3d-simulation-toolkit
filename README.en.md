@@ -85,6 +85,14 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 ![TDR impedance localization: discontinuities mapped back onto the layout traces, with peak table and Z(distance) curve](./graph/TDR_20260810.png)
 
+### Quantitative validation of TDR group-delay localization
+
+The toolkit infers effective propagation velocity from S21 group delay and converts TDR round-trip time into routed distance. Six anonymized SIwave cases cover a uniform control, widened and narrowed sections, multiple discontinuities, 45-degree bends, and the spatial-resolution limit. All five resolvable cases passed, with a **0.66 mm** mean error and a **1.71 mm** maximum error.
+
+[Open the full English validation report, HTML plots, JSON, and anonymized Touchstone data](./validation/tdr/TDR_group_delay_validation_report.md)
+
+![TDR group-delay localization validation report preview](./validation/tdr/results/TDR_定位驗證報告_預覽.png)
+
 ![One-click HTML report: company branding, purpose, and result summary](./graph/一鍵產出HTML報告_1_20260810.png)
 
 ## 6. Technical Architecture
