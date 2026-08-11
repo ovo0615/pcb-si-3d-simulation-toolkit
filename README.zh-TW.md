@@ -63,7 +63,7 @@ Taiwan Auto-Design Co. (TADC)｜虎門科技股份有限公司
 
 Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
-![入口畫面：勾選這次要用的項目，介面只顯示對應面板](./graph/入口畫面_20260810.png)
+![入口畫面：放大標題與完整任務圖示，介面只顯示對應面板](./graph/入口畫面_20260810.png)
 
 ![完整電路板 Layout 與右側圖層面板](./graph/完整板Layout_20260809.png)
 
