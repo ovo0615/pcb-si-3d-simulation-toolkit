@@ -63,7 +63,7 @@ The segmentation view overlays the engineering decision directly on the complete
 
 Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
-![Task picker: tick what this run needs; the UI shows only those panels](./graph/入口畫面_20260810.png)
+![Task picker with enlarged title and task icons; the UI shows only selected panels](./graph/入口畫面_20260810.png)
 
 ![Full board layout with the layer panel](./graph/完整板Layout_20260809.png)
 

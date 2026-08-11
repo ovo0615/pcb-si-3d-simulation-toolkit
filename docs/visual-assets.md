@@ -18,6 +18,7 @@ This document tracks the public visual assets used by the project README.
 - `graph/混合求解設定_20260803.png` — per-segment HFSS／SIwave selection controls
 - `graph/N段分割後推薦求解器示意_20260805.png` — preferred README hero; N-way split with safety overlay and per-segment solver regions (green = SIwave, purple = HFSS)
 - `graph/混合求解設定_20260805.png` — preferred mixed-solver table (three-segment demo, current UI)
+- `graph/入口畫面_20260810.png` — current task picker with enlarged title and complete task icon set
 
 For current documentation, prefer the 20260803 multi-layer, ten-segment, mixed-solver,
 and S-parameter comparison images over the retired score-based fidelity screenshots.
@@ -44,4 +45,3 @@ local workspace paths.
 3. End-to-end workflow diagram: Import → Select Nets → Cutout → Port → Segment → Solve → Analyze.
 
 Use Demo or anonymized data only. Store future README images under `graph/` or `docs/images/` and reference them with repository-relative paths.
-
