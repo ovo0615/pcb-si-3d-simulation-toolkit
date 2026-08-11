@@ -93,6 +93,16 @@ The toolkit infers effective propagation velocity from S21 group delay and conve
 
 ![TDR group-delay localization validation report preview](./validation/tdr/results/TDR_定位驗證報告_預覽.png)
 
+### Quantified validation of the channel segmentation method
+
+The toolkit's core method splits a long channel into segments, solves each independently, and cascades them back together. A purpose-built 38 mm, 50 Ω symmetric stripline coupon was compared against its own monolithic full-wave solve: with the reference planes **stitched** at the cut, cascading reproduces the monolithic result to within **0.1 dB (0–10 GHz)**; **without stitching**, the same cut deviates by **14.4 dB**. The validation includes a negative control that shows what failure looks like.
+
+[Open the full English validation report, variant schematics, JSON, and anonymized Touchstone data](./validation/segmentation/segmentation_validation_report.md)
+
+![Validation coupon and variants](./validation/segmentation/results/segmentation_variants.svg)
+
+![Segmentation validation overview](./validation/segmentation/results/segmentation_validation_overview.svg)
+
 ![One-click HTML report: company branding, purpose, and result summary](./graph/一鍵產出HTML報告_1_20260810.png)
 
 ## 6. Technical Architecture

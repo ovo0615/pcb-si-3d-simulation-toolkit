@@ -93,6 +93,16 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 ![TDR 群延遲定位驗證報告預覽](./validation/tdr/results/TDR_定位驗證報告_預覽.png)
 
+### 分段切板方法的量化驗證
+
+工具的核心方法是把長通道切成數段、各段獨立求解、再以電路串接還原。以自建的 38 mm、50 Ω 對稱 Stripline 試片對照同一片不切割的單體全波求解：切面處的參考平面**有接地縫合**時，串接可重現單體求解至 **0.1 dB 以內（0～10 GHz）**；**缺少縫合**時同一切點的偏差達 **14.4 dB**。驗證同時包含呈現方法失效樣貌的負控制組。
+
+[查看完整繁體中文驗證報告、變體示意圖、JSON 與匿名 Touchstone](./validation/segmentation/分段切板方法驗證報告.md)
+
+![驗證試片與變體示意](./validation/segmentation/results/segmentation_variants.svg)
+
+![分段切板方法驗證總覽](./validation/segmentation/results/segmentation_validation_overview.svg)
+
 ![一鍵產出的 HTML 報告：公司品牌、分析目的與結果摘要](./graph/一鍵產出HTML報告_1_20260810.png)
 
 ## 6. 技術架構

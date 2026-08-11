@@ -1,0 +1,128 @@
+{
+  "metadata": {
+    "generated_at": "2026-08-11T14:20:36+08:00",
+    "aedt_version": "2026.1",
+    "solver": "HFSS 3D Layout",
+    "adaptive": {
+      "mode": "broadband",
+      "range_ghz": [
+        1.0,
+        5.0
+      ],
+      "max_passes": 10,
+      "max_delta_s": 0.02
+    },
+    "frequency_sweep": {
+      "type": "Interpolating",
+      "start": "10MHz",
+      "stop": "10GHz",
+      "step": "25MHz"
+    },
+    "cores": 4,
+    "coupon": {
+      "structure": "symmetric stripline",
+      "trace_width_mm": 0.2,
+      "trace_length_mm": 38.0,
+      "dielectric_thickness_mm": 0.25,
+      "copper_thickness_mm": 0.035,
+      "permittivity": 4.0,
+      "loss_tangent": 0.005,
+      "target_impedance_ohm": 50,
+      "plane_size_mm": [
+        46.0,
+        8.0
+      ],
+      "stitch_via_pitch_mm": 2.0,
+      "stitch_via_offset_mm": 1.5
+    },
+    "pass_criterion_db": 0.5,
+    "wavelength_at_10ghz_mm": 14.99,
+    "signature": "此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供"
+  },
+  "results": [
+    {
+      "id": "A_unstitched_cut19mm",
+      "title": "試片 A ── 無接地縫合 Via",
+      "description": "上下接地平面互不相連。切面距最近 Port 19 mm。",
+      "status": "FAIL",
+      "reference_plane_stitched": false,
+      "cut_distance_mm": 19.0,
+      "cut_distance_wavelengths_10ghz": 1.268,
+      "monolithic_touchstone": "touchstone/A_unstitched_monolithic.s2p",
+      "cascaded_touchstone": "touchstone/A_unstitched_cut19mm_cascaded.s2p",
+      "frequency_range_ghz": [
+        0.01,
+        10.0
+      ],
+      "insertion_loss_max_deviation_db": 14.3867,
+      "insertion_loss_rms_deviation_db": 1.3116,
+      "return_loss_max_deviation_db": 36.1354,
+      "worst_frequency_ghz": 1.3609,
+      "points_over_0p5db": 115,
+      "points_compared": 600
+    },
+    {
+      "id": "B1_stitched_cut19mm",
+      "title": "試片 B-1 ── 有接地縫合 Via",
+      "description": "縫合 Via Y ±1.5 mm、間距 2 mm。切面距最近 Port 19 mm。",
+      "status": "PASS",
+      "reference_plane_stitched": true,
+      "cut_distance_mm": 19.0,
+      "cut_distance_wavelengths_10ghz": 1.268,
+      "monolithic_touchstone": "touchstone/B_stitched_monolithic.s2p",
+      "cascaded_touchstone": "touchstone/B1_stitched_cut19mm_cascaded.s2p",
+      "frequency_range_ghz": [
+        0.01,
+        10.0
+      ],
+      "insertion_loss_max_deviation_db": 0.0731,
+      "insertion_loss_rms_deviation_db": 0.0249,
+      "return_loss_max_deviation_db": 32.7653,
+      "worst_frequency_ghz": 7.4483,
+      "points_over_0p5db": 0,
+      "points_compared": 600
+    },
+    {
+      "id": "B2_stitched_cut4mm",
+      "title": "試片 B-2 ── 有接地縫合 Via",
+      "description": "同 B-1，切面移到距最近 Port 4 mm。",
+      "status": "PASS",
+      "reference_plane_stitched": true,
+      "cut_distance_mm": 4.0,
+      "cut_distance_wavelengths_10ghz": 0.267,
+      "monolithic_touchstone": "touchstone/B_stitched_monolithic.s2p",
+      "cascaded_touchstone": "touchstone/B2_stitched_cut4mm_cascaded.s2p",
+      "frequency_range_ghz": [
+        0.01,
+        10.0
+      ],
+      "insertion_loss_max_deviation_db": 0.0217,
+      "insertion_loss_rms_deviation_db": 0.0086,
+      "return_loss_max_deviation_db": 32.6866,
+      "worst_frequency_ghz": 10.0,
+      "points_over_0p5db": 0,
+      "points_compared": 600
+    },
+    {
+      "id": "B3_stitched_cut1p5mm",
+      "title": "試片 B-3 ── 有接地縫合 Via",
+      "description": "同 B-1，切面貼近不連續點，距最近 Port 1.5 mm。",
+      "status": "PASS",
+      "reference_plane_stitched": true,
+      "cut_distance_mm": 1.5,
+      "cut_distance_wavelengths_10ghz": 0.1,
+      "monolithic_touchstone": "touchstone/B_stitched_monolithic.s2p",
+      "cascaded_touchstone": "touchstone/B3_stitched_cut1p5mm_cascaded.s2p",
+      "frequency_range_ghz": [
+        0.01,
+        10.0
+      ],
+      "insertion_loss_max_deviation_db": 0.1053,
+      "insertion_loss_rms_deviation_db": 0.0373,
+      "return_loss_max_deviation_db": 34.9307,
+      "worst_frequency_ghz": 9.7999,
+      "points_over_0p5db": 0,
+      "points_compared": 600
+    }
+  ]
+}
