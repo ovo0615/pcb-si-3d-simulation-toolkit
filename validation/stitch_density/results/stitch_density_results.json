@@ -1,0 +1,88 @@
+{
+  "metadata": {
+    "coupon": "40 x 12 mm 對稱 Stripline，x=20 mm 切一刀分兩段",
+    "solver": "SIwave SYZ",
+    "frequency": "0.01-20 GHz / 25 MHz",
+    "guard_mm": 2.0,
+    "stitch_y_mm": 1.5,
+    "current_tool_constants": {
+      "STITCH_SEARCH_RADIUS_MM": 3.0,
+      "STITCH_MIN_VIAS": 2
+    },
+    "signature": "此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供"
+  },
+  "results": [
+    {
+      "pitch_mm": 1.0,
+      "vias_within_3mm_of_cut": 14,
+      "max_deviation_db": 0.1194,
+      "rms_deviation_db": 0.0459,
+      "max_by_band_db": {
+        "0-5GHz": 0.0162,
+        "5-10GHz": 0.0583,
+        "10-20GHz": 0.1194
+      },
+      "usable_up_to_ghz": 11.497
+    },
+    {
+      "pitch_mm": 2.0,
+      "vias_within_3mm_of_cut": 6,
+      "max_deviation_db": 0.7077,
+      "rms_deviation_db": 0.071,
+      "max_by_band_db": {
+        "0-5GHz": 0.0139,
+        "5-10GHz": 0.7077,
+        "10-20GHz": 0.38
+      },
+      "usable_up_to_ghz": 7.713
+    },
+    {
+      "pitch_mm": 4.0,
+      "vias_within_3mm_of_cut": 2,
+      "max_deviation_db": 21.949,
+      "rms_deviation_db": 2.5781,
+      "max_by_band_db": {
+        "0-5GHz": 0.0105,
+        "5-10GHz": 4.8346,
+        "10-20GHz": 21.949
+      },
+      "usable_up_to_ghz": 6.395
+    },
+    {
+      "pitch_mm": 8.0,
+      "vias_within_3mm_of_cut": 2,
+      "max_deviation_db": 12.9488,
+      "rms_deviation_db": 2.2429,
+      "max_by_band_db": {
+        "0-5GHz": 12.9488,
+        "5-10GHz": 8.4766,
+        "10-20GHz": 11.8217
+      },
+      "usable_up_to_ghz": 3.778
+    },
+    {
+      "pitch_mm": 16.0,
+      "vias_within_3mm_of_cut": 2,
+      "max_deviation_db": 12.8267,
+      "rms_deviation_db": 1.891,
+      "max_by_band_db": {
+        "0-5GHz": 9.6605,
+        "5-10GHz": 2.1386,
+        "10-20GHz": 12.8267
+      },
+      "usable_up_to_ghz": 1.961
+    },
+    {
+      "pitch_mm": null,
+      "vias_within_3mm_of_cut": 0,
+      "max_deviation_db": 20.0162,
+      "rms_deviation_db": 2.7205,
+      "max_by_band_db": {
+        "0-5GHz": 3.002,
+        "5-10GHz": 5.6374,
+        "10-20GHz": 20.0162
+      },
+      "usable_up_to_ghz": 3.261
+    }
+  ]
+}

@@ -136,6 +136,25 @@ Extracting only the signal channel from a full board is the toolkit's first spee
 
 ![Cutout validation overview](./validation/cutout/results/cutout_validation_overview.svg)
 
+### The tool's numerics are still being improved
+
+Validation is not only about showing the current behaviour is good enough — it
+is also how the weak points get found. Four studies in August 2026 examined two
+decisions inside the tool that had never been quantitatively validated (how cut
+quality is judged, and how solvers are assigned). They surfaced three real
+problems, all since fixed:
+
+| Finding | Change made |
+|---|---|
+| The HFSS adaptive default **under-reported loss by 3.2 dB** at the top of the sweep | Adaptive range now spans the whole sweep |
+| Cut-quality checking passed a cut with **21.9 dB cascade error** | Replaced with a spacing-to-usable-frequency rule, verified with two solvers across five stackups |
+| Trace bends were treated as complexity, sending segments to HFSS that SIwave handles fine (120× slower) | Bend count no longer raises the complexity score |
+
+[English overview](./validation/solver_and_segmentation_studies.md) ｜ [繁體中文總覽](./validation/分段與求解器研究總覽.md)
+
+Raw data, the failed coupon revisions, and the process of overturning our own
+earlier conclusions are all published.
+
 ### Quantified validation of layout-cleanup equivalence
 
 Cleanup deletes foreign-net copper outside the channel's EM-relevant region. A 40 × 20 mm stripline coupon with four pairs of floating clutter traces (±0.5 to ±8.0 mm from the channel) was compared against its uncleaned baseline: **all four protection distances stay within 0.021 dB with no trend** — even removing clutter only 0.5 mm away. Cleanup protects the signal and reference nets, so the return path is never touched.

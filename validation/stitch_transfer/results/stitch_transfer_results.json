@@ -1,0 +1,80 @@
+{
+  "metadata": {
+    "purpose": "驗證 λ/10 縫合規則跨疊構的轉移性",
+    "fixed": {
+      "stitch_pitch_mm": 2.0,
+      "cut_x_mm": 20.0,
+      "solver": "SIwave SYZ",
+      "sweep": "0.01-20 GHz / 25 MHz"
+    },
+    "criterion": "分段串接與整片求解偏差首次超過 0.1 dB 的頻率",
+    "signature": "此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供"
+  },
+  "results": [
+    {
+      "case": "er4_d250",
+      "er": 4.0,
+      "dielectric_um": 250.0,
+      "description": "基準：與 Phase 2 相同",
+      "trace_width_mm": 0.1963,
+      "via_count_in_radius": 6,
+      "effective_spacing_mm": 2.171,
+      "predicted_limit_ghz": 6.905,
+      "measured_limit_ghz": 7.713,
+      "conservative": true,
+      "max_deviation_db": 0.7032
+    },
+    {
+      "case": "er3_d250",
+      "er": 3.0,
+      "dielectric_um": 250.0,
+      "description": "只改介電常數（低）",
+      "trace_width_mm": 0.2563,
+      "via_count_in_radius": 6,
+      "effective_spacing_mm": 2.171,
+      "predicted_limit_ghz": 7.973,
+      "measured_limit_ghz": 8.53,
+      "conservative": true,
+      "max_deviation_db": 0.4961
+    },
+    {
+      "case": "er6_d250",
+      "er": 6.0,
+      "dielectric_um": 250.0,
+      "description": "只改介電常數（高）",
+      "trace_width_mm": 0.1213,
+      "via_count_in_radius": 6,
+      "effective_spacing_mm": 2.171,
+      "predicted_limit_ghz": 5.638,
+      "measured_limit_ghz": 6.412,
+      "conservative": true,
+      "max_deviation_db": 25.3624
+    },
+    {
+      "case": "er4_d150",
+      "er": 4.0,
+      "dielectric_um": 150.0,
+      "description": "只改板厚（薄）",
+      "trace_width_mm": 0.1066,
+      "via_count_in_radius": 6,
+      "effective_spacing_mm": 2.171,
+      "predicted_limit_ghz": 6.905,
+      "measured_limit_ghz": 7.096,
+      "conservative": true,
+      "max_deviation_db": 0.464
+    },
+    {
+      "case": "er4_d400",
+      "er": 4.0,
+      "dielectric_um": 400.0,
+      "description": "只改板厚（厚）",
+      "trace_width_mm": 0.3309,
+      "via_count_in_radius": 6,
+      "effective_spacing_mm": 2.171,
+      "predicted_limit_ghz": 6.905,
+      "measured_limit_ghz": 7.012,
+      "conservative": true,
+      "max_deviation_db": 1.3846
+    }
+  ]
+}

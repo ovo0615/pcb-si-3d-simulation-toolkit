@@ -1,0 +1,64 @@
+{
+  "metadata": {
+    "purpose": "量化 HFSS 自適應範圍對掃頻上限精度的影響",
+    "coupon": "40 x 12 mm、5 層金屬，SIG_A/SIG_B 雙 stripline，中央 x=20 mm 訊號 Via 穿越 GND2",
+    "reference": "single_20（自適應於掃頻上限，網格最紮實）",
+    "sweep": "0.01-20 GHz / 25 MHz，4 核心",
+    "siwave_il_at_20ghz_db": -1.6783,
+    "signature": "此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供"
+  },
+  "results": [
+    {
+      "id": "bkm_bb_1_10",
+      "mode": "broadband",
+      "adaptive_low_ghz": 1.0,
+      "adaptive_high_ghz": 10.0,
+      "description": "Broadband adaptive 1-10 GHz (current tool BKM: 1 GHz to Fmax/2)",
+      "solve_seconds": 391.8,
+      "il_at_20ghz_db": -2.4985,
+      "max_deviation_vs_converged_db": 5.7319,
+      "max_deviation_10_20ghz_db": 5.7319,
+      "deviation_at_20ghz_db": 3.2084,
+      "touchstone": "touchstone/adaptive_bkm_bb_1_10.s2p"
+    },
+    {
+      "id": "single_10",
+      "mode": "single",
+      "adaptive_low_ghz": null,
+      "adaptive_high_ghz": 10.0,
+      "description": "Single-frequency adaptive at 10 GHz (half the sweep maximum)",
+      "solve_seconds": 523.0,
+      "il_at_20ghz_db": -4.7591,
+      "max_deviation_vs_converged_db": 4.4656,
+      "max_deviation_10_20ghz_db": 4.4656,
+      "deviation_at_20ghz_db": 0.9478,
+      "touchstone": "touchstone/adaptive_single_10.s2p"
+    },
+    {
+      "id": "bb_1_20",
+      "mode": "broadband",
+      "adaptive_low_ghz": 1.0,
+      "adaptive_high_ghz": 20.0,
+      "description": "Broadband adaptive 1-20 GHz (covers the whole sweep)",
+      "solve_seconds": 769.7,
+      "il_at_20ghz_db": -5.9103,
+      "max_deviation_vs_converged_db": 1.531,
+      "max_deviation_10_20ghz_db": 1.531,
+      "deviation_at_20ghz_db": -0.2035,
+      "touchstone": "touchstone/adaptive_bb_1_20.s2p"
+    },
+    {
+      "id": "single_20",
+      "mode": "single",
+      "adaptive_low_ghz": null,
+      "adaptive_high_ghz": 20.0,
+      "description": "Single-frequency adaptive at 20 GHz (sweep maximum)",
+      "solve_seconds": 1441.8,
+      "il_at_20ghz_db": -5.7068,
+      "max_deviation_vs_converged_db": 0.0,
+      "max_deviation_10_20ghz_db": 0.0,
+      "deviation_at_20ghz_db": 0.0,
+      "touchstone": "touchstone/adaptive_single_20.s2p"
+    }
+  ]
+}

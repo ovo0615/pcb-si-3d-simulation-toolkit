@@ -1,0 +1,74 @@
+{
+  "metadata": {
+    "reference": "收斂 HFSS（寬頻自適應 1-20 GHz）",
+    "coupon": "40 x 16 mm 對稱 Stripline，縫合間距 1 mm",
+    "criterion": "SIwave 與 HFSS 插入損耗偏差首次超過 0.5 dB 的頻率",
+    "signature": "此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供"
+  },
+  "results": [
+    {
+      "structure": "straight",
+      "siwave_vs_hfss_max_db": 0.1231,
+      "siwave_vs_hfss_rms_db": 0.0308,
+      "max_by_band_db": {
+        "0-5GHz": 0.0159,
+        "5-10GHz": 0.0118,
+        "10-20GHz": 0.1231
+      },
+      "siwave_trustworthy_up_to_ghz": null,
+      "solve_seconds": {
+        "siwave": 27.3,
+        "hfss": 3759.1
+      },
+      "speedup": 137.7
+    },
+    {
+      "structure": "bend",
+      "siwave_vs_hfss_max_db": 0.2904,
+      "siwave_vs_hfss_rms_db": 0.0655,
+      "max_by_band_db": {
+        "0-5GHz": 0.0149,
+        "5-10GHz": 0.0104,
+        "10-20GHz": 0.2904
+      },
+      "siwave_trustworthy_up_to_ghz": null,
+      "solve_seconds": {
+        "siwave": 27.4,
+        "hfss": 3337.0
+      },
+      "speedup": 121.8
+    },
+    {
+      "structure": "stub",
+      "siwave_vs_hfss_max_db": 3.9575,
+      "siwave_vs_hfss_rms_db": 0.8461,
+      "max_by_band_db": {
+        "0-5GHz": 0.1633,
+        "5-10GHz": 1.0246,
+        "10-20GHz": 3.9575
+      },
+      "siwave_trustworthy_up_to_ghz": 7.079,
+      "solve_seconds": {
+        "siwave": 27.1,
+        "hfss": 3066.6
+      },
+      "speedup": 113.2
+    },
+    {
+      "structure": "gap",
+      "siwave_vs_hfss_max_db": 0.7827,
+      "siwave_vs_hfss_rms_db": 0.2852,
+      "max_by_band_db": {
+        "0-5GHz": 0.0388,
+        "5-10GHz": 0.2837,
+        "10-20GHz": 0.7827
+      },
+      "siwave_trustworthy_up_to_ghz": 13.581,
+      "solve_seconds": {
+        "siwave": 25.8,
+        "hfss": 3323.6
+      },
+      "speedup": 128.8
+    }
+  ]
+}

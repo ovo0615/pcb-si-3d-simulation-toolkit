@@ -1,0 +1,25 @@
+{
+  "results": [
+    {
+      "tag": "p1p0",
+      "solver": "HFSS",
+      "max_deviation_db": 0.9794,
+      "rms_deviation_db": 0.2481,
+      "usable_up_to_ghz": 10.413
+    },
+    {
+      "tag": "p2p0",
+      "solver": "HFSS",
+      "max_deviation_db": 4.6652,
+      "rms_deviation_db": 0.9027,
+      "usable_up_to_ghz": 7.262
+    },
+    {
+      "tag": "p4p0",
+      "solver": "HFSS",
+      "max_deviation_db": 2.0678,
+      "rms_deviation_db": 0.6948,
+      "usable_up_to_ghz": 5.478
+    }
+  ]
+}
