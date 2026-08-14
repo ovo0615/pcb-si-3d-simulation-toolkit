@@ -59,6 +59,8 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 The segmentation view overlays the safety judgement directly on the layout: orange marks risky traces, red marks hard no-cut obstacles, cyan is the adopted cut, and green and purple are SIwave and HFSS segments.
 
+Step-by-step instructions are in the [user manual](./操作說明.md) (ten chapters, in Traditional Chinese, covering cutout, ports, segmentation, scheduling, IBIS eye analysis and troubleshooting).
+
 ## Technical stack
 
 React/TypeScript/Vite front end, FastAPI + WebSocket back end, PyEDB geometry layer, PyAEDT driving HFSS 3D Layout and SIwave, scikit-rf post-processing.

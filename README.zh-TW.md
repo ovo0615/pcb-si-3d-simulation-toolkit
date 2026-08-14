@@ -59,6 +59,8 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 分段畫面把安全判斷疊在 Layout 上：橘色為風險走線、紅色為硬性禁切、青色為採用的切面、綠色與紫色分別是 SIwave 與 HFSS 區段。
 
+逐步操作請見 [操作說明](./操作說明.md)（十章，含裁切、Port、分段、排程、IBIS 眼圖與疑難排解）。
+
 ## 技術架構
 
 React／TypeScript／Vite 前端、FastAPI＋WebSocket 後端、PyEDB 幾何層、PyAEDT 驅動 HFSS 3D Layout／SIwave、scikit-rf 後處理。

@@ -11,18 +11,35 @@ holds the full front-end + back-end + test suite + launcher scripts.
 - `web_app/backend/` does not exist on this branch on purpose — that is expected, not a missing file.
 - Use Demo or anonymized PCB data in screenshots and examples.
 
-## Files that exist on both sides but differ
+## Files that exist on both sides
 
-`操作說明.md` and `graph/` exist in both the public and private repositories, but the private
-version of `操作說明.md` is more detailed (it documents solver selection, monitor data,
-re-export, core/memory budgeting, and automatic material creation — features that are not part
-of the public showcase).
+### The manual: same text on both sides, safe to sync wholesale
 
-> **Never overwrite one side's file wholesale with the other's.** When a change needs to be
-> mirrored, apply the same edit separately to each side; a blind `cp` will delete the other
-> side's exclusive content. (This rule exists because that exact mistake happened once.)
+Since 2026-08-14, `操作說明.md` and `docs/manual/` (ten chapters) carry **word-for-word
+identical text** on both sides. The private repository is the single source; the whole set can
+be copied over.
 
-Image files under `graph/` are shared and can be copied directly between the two repositories.
+The only difference is three screenshots whose log or path fields expose a local absolute path.
+The public side must reference the anonymized `-public` variants instead:
+
+| Private reference | Public must use |
+|---|---|
+| `指定裁切區_20260730.png` | `指定裁切區_20260730-public.png` |
+| `混合排程模擬過程_20260805.png` | `混合排程模擬過程_20260805-public.png` |
+| `背鑽示意_20260805.png` | `背鑽示意_20260805-public.png` |
+
+After syncing, confirm the three CI scans (sensitive paths, `customer`, forbidden file types)
+still pass.
+
+> An earlier rule said the manual must never be overwritten wholesale — that applied when the
+> public manual was the shorter one and no longer holds. **Other files** (READMEs, validation
+> reports) are still maintained independently and must not be copied over wholesale.
+
+### graph/: not every image is publishable
+
+Most images are shared, but any image containing local paths or customer data needs an
+anonymized `-public` variant first. Before copying in any image the public repository does not
+already have, actually look at the image content and decide.
 
 ## Before publishing
 
