@@ -50,6 +50,10 @@
 | GetWave | 逐位元時域演算法模型 | 要求 Tx／Rx 都宣告 `GetWave_Exists=True`；失敗時不會靜默改跑 Statistical。 |
 | Statistical＋GetWave | 比較兩種模型行為 | 依序執行兩次並分別保存結果；兩端必須同時支援兩種方法。 |
 
+S4P 的拓撲選擇與一般 IBIS 相同，在第 4 步「綁定」：可設為**一組差動**，或設為**兩條彼此耦合的單端 Lane**，各自指定 Tx Port、Rx Port 與 Tx／Rx AMI 模型；四個 Port 不可重複。雙單端同樣不會把 S4P 拆成兩個 S2P，因此保留兩條 Lane 的串擾。
+
+雙單端的 AMI 會**逐條 Lane 各求解一次**，求解時間約為單條的兩倍——AEDT 對同一個 Setup 只保存第一顆 Probe 的量測資料。兩次都保留完整 S4P 與兩組激勵，另一條 Lane 仍是串擾源；兩條 Lane 的碼型 Seed 會自動錯開，避免兩條完全同步而低估串擾。
+
 AMI 參數不是固定表單。工具從 `.ami` 解析 `Usage In／InOut`，依 Boolean、Integer、Float、List 或 Range 動態產生欄位；Info／Out 等唯讀值只做能力判斷，不能由 API 覆寫。每次執行會把實際參數值寫入 `run_manifest.json`。
 
 PAM4 只有在 **Tx 與 Rx 都以模型參數明確宣告相容**時才會出現在調變選單。檔名含 `PAM4`、使用者手動輸入或只有一端支援都不算證據；不符合條件時只提供 NRZ。
