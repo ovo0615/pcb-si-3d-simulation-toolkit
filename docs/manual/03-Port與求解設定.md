@@ -15,9 +15,7 @@
 
 Port 建立時會檢查 Reference。若元件端為 Solder Ball／BGA，工具會依訊號 Pin 所在層尋找適合的參考層；沒有 Reference 的 Port 不應進入後續分段與求解。
 
-**負端落點修正**：元件端 Port 的負端若落在參考銅箔的任意位置，SIwave 在建立網表時可能把該節點視為無效而整個排除，症狀是輸出的 Touchstone Port 數比預期少。`cutout.snap_component_port_references_to_via_centers` 會把負端吸附到鄰近參考 Via 的中心（`MAX_REFERENCE_SNAP_M = 0.001`，即 1 mm），使負端落在明確的導通結構上。此修正經 A／B 實測驗證：同一片板未修正時輸出 `s8p`，修正後輸出 `s12p`。
-
-> `_reference_via_centers` 內的座標檢查用 `_finite_pt`。早期誤寫成不存在的 `_usable_xy`，NameError 被逐項的 `except` 吞掉，結果是「找到 0 顆參考 Via」而完全不吸附——**沒有任何錯誤訊息**。修改此處時要留意逐項 `except` 會遮蔽拼字錯誤。
+**負端落點修正**：元件端 Port 的負端若落在參考銅箔的任意位置，SIwave 在建立網表時可能把該節點視為無效而整個排除，症狀是輸出的 Touchstone Port 數比預期少。工具會自動把負端吸附到 1 mm 內最近的參考 Via 中心，使負端落在明確的導通結構上。此修正經 A／B 實測驗證：同一片板未修正時輸出 `s8p`，修正後輸出 `s12p`。
 
 
 
@@ -60,11 +58,11 @@ Port 建立時會檢查 Reference。若元件端為 Solder Ball／BGA，工具�
 
 其他依 BKM 套用的設定：
 
-- **平行自適應區（PAR）**：`use_parallel_refinement`，預設啟用。
+- **平行自適應區（PAR）**：預設啟用。
 - **Airbox padding**：裁切件採 XY `0`、上下 `0.5` 倍（BKM 的 Cutout case）。
 - **Max Refinement Per Pass 15%** 與 **Phi／Phi Plus 網格**已是既有預設。
 
-實作位於 `solver_setup.apply_hfss_adaptive_solution` 與 `apply_hfss_bkm_options`，由「裁切／6b」與「混合求解工作副本」兩條建立 Setup 的路徑共用，避免行為分歧。任一模式設定失敗都會退回單一頻率並在日誌記錄原因，不會靜默沿用預設。
+不論 Setup 是在裁切時建立，還是在混合求解建立工作副本時建立，套用的都是同一組設定，不會因為入口不同而有差異。任一模式設定失敗都會退回單一頻率並在日誌記錄原因，不會靜默沿用預設。
 
 > BKM 的兩項 Beta 選項（low memory mesh adaptive、frequency sweep acceleration via disk caching）在 EDB 的 setup API 沒有對應欄位，屬 AEDT 端旗標，需要時請自行在 AEDT 介面開啟。
 
