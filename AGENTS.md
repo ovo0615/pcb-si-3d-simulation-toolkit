@@ -28,8 +28,10 @@ The public side must reference the anonymized `-public` variants instead:
 | `混合排程模擬過程_20260805.png` | `混合排程模擬過程_20260805-public.png` |
 | `背鑽示意_20260805.png` | `背鑽示意_20260805-public.png` |
 
-After syncing, confirm the three CI scans (sensitive paths, `customer`, forbidden file types)
-still pass.
+After syncing, run `bash .github/scripts/ci_scan_local.sh`, which reproduces every CI scan
+locally. **Do not rewrite those patterns as inline shell commands** — the shell eats one level
+of backslash escaping, so the check passes locally and then fails in CI (the drive-letter match
+was silently disabled that way once, and two example paths got pushed).
 
 > An earlier rule said the manual must never be overwritten wholesale — that applied when the
 > public manual was the shorter one and no longer holds. **Other files** (READMEs, validation
