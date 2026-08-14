@@ -19,14 +19,18 @@ Since 2026-08-14, `操作說明.md` and `docs/manual/` (ten chapters) carry **wo
 identical text** on both sides. The private repository is the single source; the whole set can
 be copied over.
 
-The only difference is three screenshots whose log or path fields expose a local absolute path.
-The public side must reference the anonymized `-public` variants instead:
+The only difference is four screenshots whose log, path, or location fields expose a local
+absolute path. The public side must reference the anonymized `-public` variants instead:
 
-| Private reference | Public must use |
-|---|---|
-| `指定裁切區_20260730.png` | `指定裁切區_20260730-public.png` |
-| `混合排程模擬過程_20260805.png` | `混合排程模擬過程_20260805-public.png` |
-| `背鑽示意_20260805.png` | `背鑽示意_20260805-public.png` |
+| Private reference | Public must use | What leaked |
+|---|---|---|
+| `指定裁切區_20260730.png` | `指定裁切區_20260730-public.png` | `.aedb` path in the log and input field |
+| `混合排程模擬過程_20260805.png` | `混合排程模擬過程_20260805-public.png` | solver output path |
+| `背鑽示意_20260805.png` | `背鑽示意_20260805-public.png` | save-as path field |
+| `IBIS模型庫_20260813.png` | `IBIS模型庫_20260813-public.png` | managed model library location, including the user name |
+
+Unredacted originals stay in the private repository only. The public repository carries the
+`-public` variant alone — never both.
 
 After syncing, run `bash .github/scripts/ci_scan_local.sh`, which reproduces every CI scan
 locally. **Do not rewrite those patterns as inline shell commands** — the shell eats one level

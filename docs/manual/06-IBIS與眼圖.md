@@ -25,6 +25,8 @@
 
 `.ibs` 是可編輯的文字模型，因此內容變更後 SHA-256 會改變並形成新版本；DLL／SO 的信任不會自動延伸到另一個 Hash。工具不會因檔名相同就沿用舊信任。
 
+![模型庫：左側為受管模型版本與各自的 SHA-256，右側為該版本的 IBIS 版本、Component／Model／Pin 數與角色候選清單](../../graph/IBIS模型庫_20260813-public.png)
+
 ### 一般 IBIS 通道
 
 「標準 IBIS 通道」使用七步向導選擇 Touchstone、Tx、Rx、Port、Corner 與分析設定：
