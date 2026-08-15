@@ -9,7 +9,7 @@ English ｜ [繁體中文](README.zh-TW.md)
 
 Consolidates PCB and package channel import, cutout, port creation, segmented solving and S-parameter cascading into a single workflow. Solving runs on Ansys HFSS 3D Layout and SIwave, driven through PyEDB and PyAEDT.
 
-![N-way segmentation with per-segment solver assignment: green = SIwave, purple = HFSS, labels show complexity score](./graph/N段分割後推薦求解器示意_20260805.png)
+![N-way segmentation with per-segment solver assignment: green = SIwave, purple = HFSS, labels show complexity score](./graph/N段分割後推薦求解器示意_20260815.png)
 
 ## Features and the experiments that validate them
 
@@ -25,7 +25,11 @@ Every speed-up **changes what is actually being solved**, so each one has to ans
 | **Solver default settings** | Is the default adaptive range trustworthy at the sweep top? | The old default **under-reported loss by 3.2 dB**; now spans the whole sweep. [Report](./validation/solver_mix/自適應範圍驗證報告.md) |
 | **TDR impedance location** | How accurately does time convert to trace distance? | Mean error **0.66 mm**, worst **1.71 mm**. [Report](./validation/tdr/TDR_群延遲定位驗證報告.md) |
 | **IBIS / IBIS-AMI eye analysis** | — | Managed models with SHA-256 trust; QuickEye/Transient and AMI Statistical/GetWave; an S4P can be declared as differential or as two single-ended lanes that retain crosstalk |
-| Other | — | Cut-safety visualisation, scheduled solving, external Touchstone cascading, whole-board reference solve, remote solve package, one-click HTML report |
+| **Multi-port crosstalk** | How long must a random pattern run before it hits the worst alignment? | A deterministic worst-case pattern needs **128 UI / 3.1 s**, against 20,000 UI / 116.6 s for random. The deterministic one makes every lane hit its worst case **once for certain**; the random one only expects 1.22 occurrences |
+| **Bus direction** | An eye measured in the wrong direction looks completely normal | Derived lane by lane from the IBIS `Model_type`. When both sides can drive, the user must choose; the tool supplies no default |
+| **Stackup replacement** | Can replacing a stackup silently delete layers? | Differences are shown first with the to-be-deleted layers marked, and nothing is written until confirmed. The EtchFactor that `load()` drops is restored separately |
+| **Backdrill** | Is the stub length right? | Connectivity decides which layers the signal actually enters and leaves. Two independent signals each back out the stackup average Dk from their measured notch, agreeing within **1.0%** |
+| Other | — | Cut-safety visualisation, scheduled solving, external Touchstone cascading, whole-board reference solve, remote solve package, channel-model preflight, one-click HTML report |
 
 Several independent validations point at the **same root cause**: accuracy is governed by **reference-plane ground stitching** at the cut or cutout boundary, not by expansion distance or cut angle. That condition is now an automatic check inside the tool.
 
@@ -37,25 +41,25 @@ Validation is also used to **find our own problems**: the last three rows above 
 
 Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
-![Entry screen](./graph/入口畫面_20260810.png)
+![Entry screen](./graph/入口畫面_20260815.png)
 
-![Full board layout with the layer panel](./graph/完整板Layout_20260809.png)
+![Full board layout with the layer panel](./graph/完整板Layout_20260815.png)
 
-![After cutout: only the target channel and its component-end ports remain](./graph/裁切後Layout_20260809.png)
+![After cutout: only the target channel and its component-end ports remain](./graph/裁切後Layout_20260815.png)
 
-![N-way segmentation preview with the safety overlay](./graph/N段分割示意_20260805.png)
+![N-way segmentation preview with the safety overlay](./graph/N段分割示意_20260815.png)
 
-![Per-segment HFSS/SIwave recommendation and its reasoning](./graph/混合求解設定_20260805.png)
+![Per-segment HFSS/SIwave recommendation and its reasoning](./graph/混合求解設定_20260815.png)
 
-![Mixed-solver schedule running](./graph/混合排程模擬過程_20260805-public.png)
+![Solve schedule running: the solver-region table with each segment stage and elapsed time](./graph/SIwave模擬過程_20260815.png)
 
-![Cascaded S-parameters, switchable between single-ended and differential](./graph/S參數展現_20260810.png)
+![Cascaded S-parameters, switchable between single-ended and differential](./graph/S參數展現_20260815.png)
 
 ![QuickEye eye diagram with eye height and width](./graph/QuickEye眼圖_20260809-public.png)
 
-![TDR impedance location mapped back onto the layout trace](./graph/TDR_20260810.png)
+![TDR impedance location mapped back onto the layout trace](./graph/TDR_20260815.png)
 
-![One-click HTML report](./graph/一鍵產出HTML報告_1_20260810.png)
+![One-click HTML report](./graph/一鍵產出HTML報告_1_20260815.png)
 
 The segmentation view overlays the safety judgement directly on the layout: orange marks risky traces, red marks hard no-cut obstacles, cyan is the adopted cut, and green and purple are SIwave and HFSS segments.
 

@@ -5,7 +5,7 @@ Choose your language / 選擇語言：
 - [繁體中文](README.zh-TW.md)
 - [English](README.en.md)
 
-![N 段分割與逐段求解器指定（綠色 SIwave、紫色 HFSS）](./graph/N段分割後推薦求解器示意_20260805.png)
+![N 段分割與逐段求解器指定（綠色 SIwave、紫色 HFSS）](./graph/N段分割後推薦求解器示意_20260815.png)
 
 PCB 通道裁切、風險感知分段、HFSS／SIwave 混合求解、Touchstone 串接與完整板 S 參數對照的工程流程展示。
 

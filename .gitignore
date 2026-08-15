@@ -52,6 +52,7 @@ Result/
 /Example_SYZ_segments/
 /Example_SYZ_Cutout_ports_segments/
 /ibis_channel_runs/
+/ami_channel_runs/
 /IBIS_Example/
 
 # 一鍵報告的執行期工作區一定含客戶名稱欄位，任何層級都不進版控。
