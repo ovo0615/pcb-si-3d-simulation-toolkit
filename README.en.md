@@ -17,7 +17,7 @@ Every speed-up **changes what is actually being solved**, so each one has to ans
 
 | Feature | Why it needs validation | Experiment and result |
 |---|---|---|
-| **Channel cutout** | Does extracting only the channel change the result? | Within **0.03 dB**; but cutting away stitching vias makes it 1.644 dB — a **42× difference**. [Report](./validation/cutout/cutout_validation_report.md) |
+| **Channel cutout** | Does extracting only the channel change the result? | Within **0.03 dB**; but cutting away stitching vias makes it 1.644 dB, a **42× difference**. [Report](./validation/cutout/cutout_validation_report.md) |
 | **Layout cleanup** | Does removing foreign-net copper affect the channel? | All four protection distances within **0.021 dB, no trend**. [Report](./validation/cleanup/cleanup_validation_report.md) |
 | **N-way segmentation** + cascade | Does cutting and reassembling distort the result? | Within **0.1 dB** when stitching is adequate; **14.4 dB** spurious resonance without it. [Report](./validation/segmentation/segmentation_validation_report.md) |
 | **Cut-quality gating** | The threshold was originally engineering judgement | The old rule passed a cut with **21.9 dB cascade error** → replaced by "spacing → usable frequency". [Report](./validation/stitch_density/切面縫合密度驗證報告.md) |
@@ -29,7 +29,7 @@ Every speed-up **changes what is actually being solved**, so each one has to ans
 
 Several independent validations point at the **same root cause**: accuracy is governed by **reference-plane ground stitching** at the cut or cutout boundary, not by expansion distance or cut angle. That condition is now an automatic check inside the tool.
 
-Validation is also used to **find our own problems** — the last three rows above came from exactly that. Negative controls, failed coupon revisions, and the process of overturning our own earlier conclusions are all published; what remains unvalidated or uncalibrated is stated in the reports.
+Validation is also used to **find our own problems**: the last three rows above came from exactly that. Negative controls, failed coupon revisions, and the process of overturning our own earlier conclusions are all published; what remains unvalidated or uncalibrated is stated in the reports.
 
 [Study overview](./validation/solver_and_segmentation_studies.md)｜[繁體中文總覽](./validation/分段與求解器研究總覽.md)
 
@@ -69,7 +69,7 @@ React/TypeScript/Vite front end, FastAPI + WebSocket back end, PyEDB geometry la
 
 The full version requires 64-bit Windows 10/11, Ansys Electronics Desktop 2026.1, an available license, and Python 3.10 or 3.12.
 
-This repository contains only the front-end source and its built `dist` — **no back-end source and no solving environment**. Images use demo/anonymized data; net names and reference designators are illustrative.
+This repository contains only the front-end source and its built `dist`, with **no back-end source and no solving environment**. Images use demo/anonymized data; net names and reference designators are illustrative.
 
 ## Collaboration and notices
 
