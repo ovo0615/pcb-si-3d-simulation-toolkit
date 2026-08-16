@@ -5,6 +5,8 @@ Choose your language／選擇語言：
 - [繁體中文驗證報告](通道裁切等效性驗證報告.md)
 - [English validation report](cutout_validation_report.md)
 
+操作步驟／How to run it：[操作說明 第 2 章〈載入電路板與裁切通道〉→ 執行裁切](../../docs/manual/02-載入與裁切.md#執行裁切)
+
 This folder contains static evidence for the toolkit's first speed-up: extracting
 only the signal channel from a full board instead of solving the whole board. A
 40 × 20 mm stripline coupon is compared against its own uncut baseline across four
