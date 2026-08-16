@@ -7,6 +7,25 @@ Provided by Jeff Hong, Senior Technical Engineer, Taiwan Auto-Design Co. (TADC)
 >
 > 繁體中文版：[分段與求解器研究總覽](分段與求解器研究總覽.md)
 
+## The short version
+
+**These four studies exist to audit the tool itself. All four found a problem,
+and all four problems were fixed.**
+
+| What was found | What it became |
+|---|---|
+| The old cut-quality check passed a cut with **21.9 dB of error** | Replaced with "stitch pitch ≤ one tenth of a wavelength" |
+| That new rule had only been calibrated on one stackup | Re-validated across materials and thicknesses; all five cases conservative |
+| The solver-assignment score had no measured basis | Measured SIwave's actual deviation on each structure type |
+| The default solve setup **under-reported loss by 3.2 dB** at high frequency | Adaptive range widened to cover the whole sweep |
+
+**The common finding: what decides accuracy is the return path, not how complex
+the geometry looks.**
+
+Full data and method for each study below.
+
+---
+
 ## Why these studies exist
 
 Two decisions inside the segmentation feature had **never been quantitatively

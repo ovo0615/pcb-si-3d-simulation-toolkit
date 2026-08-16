@@ -7,14 +7,6 @@ Choose your language／選擇語言：
 
 操作步驟／How to run it：[操作說明 第 2 章〈載入電路板與裁切通道〉→ Layout 清理](../../docs/manual/02-載入與裁切.md#layout-清理)
 
-This folder contains static evidence for the toolkit's layout-cleanup speed-up:
-deleting foreign-net copper around the channel before solving. A 40 × 20 mm
-stripline coupon with four pairs of floating clutter traces is compared against
-its own uncleaned baseline across four protection distances.
-
-本資料夾收錄工具「Layout 清理」加速手法的靜態驗證證據：以 40 × 20 mm Stripline
-試片、通道兩側四對浮接干擾走線，對照同一片未清理的基準，掃描四種保護距離。
-
 **Headline result／核心結果**
 
 > Cleanup has no measurable effect: all four protection distances stay within
@@ -25,6 +17,15 @@ its own uncleaned baseline across four protection distances.
 > 清理對通道結果沒有可量測的影響：四種保護距離都在 **0.021 dB 以內**且無趨勢，
 > 連距通道 0.5 mm 的干擾走線移除掉也一樣。清理功能保護訊號與參考網路，
 > 回流路徑從頭到尾沒被動過。
+
+
+This folder contains static evidence for the toolkit's layout-cleanup speed-up:
+deleting foreign-net copper around the channel before solving. A 40 × 20 mm
+stripline coupon with four pairs of floating clutter traces is compared against
+its own uncleaned baseline across four protection distances.
+
+本資料夾收錄工具「Layout 清理」加速手法的靜態驗證證據：以 40 × 20 mm Stripline
+試片、通道兩側四對浮接干擾走線，對照同一片未清理的基準，掃描四種保護距離。
 
 ![Cleanup validation coupon and variants／清理驗證試片與變體示意](results/cleanup_variants.svg)
 

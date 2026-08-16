@@ -1,5 +1,21 @@
 # Channel Cutout Equivalence Validation Report
 
+## The short version
+
+**Solving only the channel matches solving the whole board to within 0.03 dB.
+Go ahead and use it.**
+
+One condition: **do not let the cutout delete the ground stitching vias next to
+the channel.** If it does, the deviation jumps from 0.03 dB to **1.64 dB — a 42×
+difference**.
+
+**How much expansion margin you leave turns out not to be the point.**
+Shrinking the retained ground plane from 10.2 mm to 4.2 mm costs 0.01 dB.
+
+Full data and method below.
+
+---
+
 ## Summary
 
 This validation answers a concrete question: **after extracting a signal channel
