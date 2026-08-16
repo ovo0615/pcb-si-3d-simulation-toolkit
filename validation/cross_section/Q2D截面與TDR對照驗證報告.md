@@ -25,7 +25,7 @@
 
 | 項目 | 內容 |
 | --- | --- |
-| 板檔 | `D:\demo\Example_SYZ_Cutout_backdrill_ports.aedb`（示範板，3 條網路：GND、ST_CTL、ST_ERROR） |
+| 板檔 | `Example_SYZ_Cutout_backdrill_ports.aedb`（示範板，3 條網路：GND、ST_CTL、ST_ERROR） |
 | S 參數 | `cascade_siwave_result.s4p`，4 埠、0～50 GHz、1160 點 |
 | 被量測訊號 | ST_CTL，走線在 L3，參考面 L2 |
 | 通道實體長度 | 188.83 mm（由 EDB 走線幾何串出，與工具 TDR 面板顯示一致） |
