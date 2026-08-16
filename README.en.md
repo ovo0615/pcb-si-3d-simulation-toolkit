@@ -56,7 +56,7 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 ![Cascaded S-parameters, switchable between single-ended and differential](./graph/S參數展現_20260815.png)
 
-![QuickEye eye diagram with eye height and width](./graph/QuickEye眼圖_20260809-public.png)
+![One S4P declared as two single-ended lanes that retain crosstalk, each with its own QuickEye eye diagram and measurements](./graph/IBIS雙單端眼圖_20260816.png)
 
 ![TDR impedance location mapped back onto the layout trace](./graph/TDR_20260815.png)
 

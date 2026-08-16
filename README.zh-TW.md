@@ -56,7 +56,7 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 ![串接後 S 參數：單端／差動可切換](./graph/S參數展現_20260815.png)
 
-![QuickEye 眼圖與眼高、眼寬量測](./graph/QuickEye眼圖_20260809-public.png)
+![同一個 S4P 設成兩條保留串擾的單端 Lane，各得一張 QuickEye 眼圖與量測值](./graph/IBIS雙單端眼圖_20260816.png)
 
 ![TDR 阻抗定位：劇變位置標回 Layout 走線](./graph/TDR_20260815.png)
 
