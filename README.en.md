@@ -24,6 +24,7 @@ Every speed-up **changes what is actually being solved**, so each one has to ans
 | **Mixed-solver assignment** | Which structures does SIwave handle accurately? | Straight runs and bends are **trustworthy full-band and 120× faster**; **open stubs only to 7.1 GHz**. [Report](./validation/solver_map/SIwave適用性地圖.md) |
 | **Solver default settings** | Is the default adaptive range trustworthy at the sweep top? | The old default **under-reported loss by 3.2 dB**; now spans the whole sweep. [Report](./validation/solver_mix/自適應範圍驗證報告.md) |
 | **TDR impedance location** | How accurately does time convert to trace distance? | Mean error **0.66 mm**, worst **1.71 mm**. [Report](./validation/tdr/TDR_群延遲定位驗證報告.md) |
+| **Cross-section impedance (Q2D)** | How far is the idealised cross-section from the real geometry? | The section is rebuilt from what is **actually there** in the EDB. Six positions along one trace, against SIwave to TDR on the same trace: median 48.617 Ω versus 48.625 Ω, a **median difference of −0.015%**. [Report](./validation/cross_section/Q2D截面與TDR對照驗證報告.md) |
 | **IBIS / IBIS-AMI eye analysis** | — | Managed models with SHA-256 trust; QuickEye/Transient and AMI Statistical/GetWave; an S4P can be declared as differential or as two single-ended lanes that retain crosstalk |
 | **Multi-port crosstalk** | How long must a random pattern run before it hits the worst alignment? | A deterministic worst-case pattern needs **128 UI / 3.1 s**, against 20,000 UI / 116.6 s for random. The deterministic one makes every lane hit its worst case **once for certain**; the random one only expects 1.22 occurrences |
 | **Bus direction** | An eye measured in the wrong direction looks completely normal | Derived lane by lane from the IBIS `Model_type`. When both sides can drive, the user must choose; the tool supplies no default |
@@ -59,11 +60,13 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 ![TDR impedance location mapped back onto the layout trace](./graph/TDR_20260815.png)
 
+![Cross-section view, solvability verdict and the segments the cut line hit](./graph/截面阻抗_剖視圖_20260816.png)
+
 ![One-click HTML report](./graph/一鍵產出HTML報告_1_20260815.png)
 
 The segmentation view overlays the safety judgement directly on the layout: orange marks risky traces, red marks hard no-cut obstacles, cyan is the adopted cut, and green and purple are SIwave and HFSS segments.
 
-Step-by-step instructions are in the [user manual](./操作說明.md) (ten chapters, in Traditional Chinese, covering cutout, ports, segmentation, scheduling, IBIS eye analysis and troubleshooting).
+Step-by-step instructions are in the [user manual](./操作說明.md) (eleven chapters, in Traditional Chinese, covering cutout, ports, segmentation, scheduling, IBIS eye analysis, TDR, cross-section impedance and troubleshooting).
 
 ## Technical stack
 
