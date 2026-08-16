@@ -1,0 +1,158 @@
+[
+  {
+    "x_mm": 85.0,
+    "y_mm": 82.804,
+    "seconds": 51.0,
+    "widths_um": {
+      "ST_CTL": 201.99999999999386,
+      "ST_ERROR": 201.99999999999386
+    },
+    "conductors": [
+      "ST_CTL_L3",
+      "ST_ERROR_L3"
+    ],
+    "matrix": {
+      "C(ST_CTL_L3,ST_CTL_L3)": 141.9986871464357,
+      "L(ST_CTL_L3,ST_CTL_L3)": 335.4221035195662,
+      "C(ST_CTL_L3,ST_ERROR_L3)": -5.0613700018141,
+      "L(ST_CTL_L3,ST_ERROR_L3)": 10.883318336854217,
+      "C(ST_ERROR_L3,ST_CTL_L3)": -5.0613700018141,
+      "L(ST_ERROR_L3,ST_CTL_L3)": 10.883318336854217,
+      "C(ST_ERROR_L3,ST_ERROR_L3)": 141.5233242952099,
+      "L(ST_ERROR_L3,ST_ERROR_L3)": 336.220584544393
+    },
+    "Zdiff": 93.95414257780652,
+    "Z0_ST_CTL_L3": 48.6019477871241,
+    "Z0_ST_ERROR_L3": 48.74141565584026
+  },
+  {
+    "x_mm": 95.0,
+    "y_mm": 82.804,
+    "seconds": 17.6,
+    "widths_um": {
+      "ST_CTL": 201.99999999999386,
+      "ST_ERROR": 201.99999999999386
+    },
+    "conductors": [
+      "ST_CTL_L3",
+      "ST_ERROR_L3"
+    ],
+    "matrix": {
+      "C(ST_CTL_L3,ST_CTL_L3)": 142.0532695444935,
+      "L(ST_CTL_L3,ST_CTL_L3)": 335.63546935779794,
+      "C(ST_CTL_L3,ST_ERROR_L3)": -4.9678374168824275,
+      "L(ST_CTL_L3,ST_ERROR_L3)": 10.64625110429609,
+      "C(ST_ERROR_L3,ST_CTL_L3)": -4.9678374168824275,
+      "L(ST_ERROR_L3,ST_CTL_L3)": 10.64625110429609,
+      "C(ST_ERROR_L3,ST_ERROR_L3)": 142.03582577890302,
+      "L(ST_ERROR_L3,ST_ERROR_L3)": 335.63080349948666
+    },
+    "Zdiff": 94.03177367905144,
+    "Z0_ST_CTL_L3": 48.60806220995077,
+    "Z0_ST_ERROR_L3": 48.610709069557636
+  },
+  {
+    "x_mm": 105.0,
+    "y_mm": 82.804,
+    "seconds": 19.8,
+    "widths_um": {
+      "ST_CTL": 201.99999999999386,
+      "ST_ERROR": 202.00000000000773
+    },
+    "conductors": [
+      "ST_CTL_L3",
+      "ST_ERROR_L3"
+    ],
+    "matrix": {
+      "C(ST_CTL_L3,ST_CTL_L3)": 141.81187428460152,
+      "L(ST_CTL_L3,ST_CTL_L3)": 335.69833117051246,
+      "C(ST_CTL_L3,ST_ERROR_L3)": -0.46034571653168205,
+      "L(ST_CTL_L3,ST_ERROR_L3)": 1.503574685300805,
+      "C(ST_ERROR_L3,ST_CTL_L3)": -0.46034571653168205,
+      "L(ST_ERROR_L3,ST_CTL_L3)": 1.503574685300805,
+      "C(ST_ERROR_L3,ST_ERROR_L3)": 141.966249857326,
+      "L(ST_ERROR_L3,ST_ERROR_L3)": 335.68155676458997
+    },
+    "Zdiff": 96.93257666133073,
+    "Z0_ST_CTL_L3": 48.65397107822295,
+    "Z0_ST_ERROR_L3": 48.62629552477787
+  },
+  {
+    "x_mm": 145.0,
+    "y_mm": 80.137,
+    "seconds": 19.9,
+    "widths_um": {
+      "ST_CTL": 201.99999999999386,
+      "ST_ERROR": 203.99999999999585
+    },
+    "conductors": [
+      "ST_CTL_L3",
+      "ST_ERROR_L3"
+    ],
+    "matrix": {
+      "C(ST_CTL_L3,ST_CTL_L3)": 141.8855977178674,
+      "L(ST_CTL_L3,ST_CTL_L3)": 335.73827835078725,
+      "C(ST_CTL_L3,ST_ERROR_L3)": -0.24666529300961582,
+      "L(ST_CTL_L3,ST_ERROR_L3)": 1.03012318453042,
+      "C(ST_ERROR_L3,ST_CTL_L3)": -0.24666529300961582,
+      "L(ST_ERROR_L3,ST_CTL_L3)": 1.03012318453042,
+      "C(ST_ERROR_L3,ST_ERROR_L3)": 142.4456523452822,
+      "L(ST_ERROR_L3,ST_ERROR_L3)": 334.2309425929849
+    },
+    "Zdiff": 97.0547526863306,
+    "Z0_ST_CTL_L3": 48.64422319584243,
+    "Z0_ST_ERROR_L3": 48.43939694098429
+  },
+  {
+    "x_mm": 155.0,
+    "y_mm": 80.137,
+    "seconds": 22.0,
+    "widths_um": {
+      "ST_CTL": 201.99999999999386,
+      "ST_ERROR": 203.99999999999585
+    },
+    "conductors": [
+      "ST_CTL_L3",
+      "ST_ERROR_L3"
+    ],
+    "matrix": {
+      "C(ST_CTL_L3,ST_CTL_L3)": 144.9492978024387,
+      "L(ST_CTL_L3,ST_CTL_L3)": 328.85733256229025,
+      "C(ST_CTL_L3,ST_ERROR_L3)": -0.03143924697637488,
+      "L(ST_CTL_L3,ST_ERROR_L3)": 0.1603245784861124,
+      "C(ST_ERROR_L3,ST_CTL_L3)": -0.03143924697637488,
+      "L(ST_ERROR_L3,ST_CTL_L3)": 0.1603245784861124,
+      "C(ST_ERROR_L3,ST_ERROR_L3)": 142.5390839980577,
+      "L(ST_ERROR_L3,ST_ERROR_L3)": 333.33291976968667
+    },
+    "Zdiff": 95.22976650032852,
+    "Z0_ST_CTL_L3": 47.63165887464785,
+    "Z0_ST_ERROR_L3": 48.358422071299564
+  },
+  {
+    "x_mm": 165.0,
+    "y_mm": 80.137,
+    "seconds": 17.6,
+    "widths_um": {
+      "ST_CTL": 201.99999999999386,
+      "ST_ERROR": 203.99999999999585
+    },
+    "conductors": [
+      "ST_CTL_L3",
+      "ST_ERROR_L3"
+    ],
+    "matrix": {
+      "C(ST_CTL_L3,ST_CTL_L3)": 141.8394023049275,
+      "L(ST_CTL_L3,ST_CTL_L3)": 335.3885716892096,
+      "C(ST_CTL_L3,ST_ERROR_L3)": -0.35882087690979614,
+      "L(ST_CTL_L3,ST_ERROR_L3)": 1.364714109567952,
+      "C(ST_ERROR_L3,ST_CTL_L3)": -0.35882087690979614,
+      "L(ST_ERROR_L3,ST_CTL_L3)": 1.364714109567952,
+      "C(ST_ERROR_L3,ST_ERROR_L3)": 139.5068697842775,
+      "L(ST_ERROR_L3,ST_ERROR_L3)": 339.37606877174056
+    },
+    "Zdiff": 96.9330000935073,
+    "Z0_ST_CTL_L3": 48.626799215398755,
+    "Z0_ST_ERROR_L3": 49.32224205170411
+  }
+]

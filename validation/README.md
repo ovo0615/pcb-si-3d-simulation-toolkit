@@ -28,6 +28,7 @@
 | 目錄 | 問的問題 |
 |---|---|
 | [tdr](tdr/README.md) | TDR 標出來的位置對回 Layout 誤差多大？ |
+| [cross_section](cross_section/README.md) | 從 EDB 重建的 Q2D 二維截面，算出來的阻抗跟同一條走線的 TDR 剖面對不對得起來？ |
 
 ## 共通前提
 
