@@ -1,5 +1,23 @@
 # Channel Segmentation Method Validation Report
 
+## The short version
+
+**Splitting a long channel into segments, solving each one, and cascading them
+back together matches the one-piece solve to within 0.1 dB (0–10 GHz).**
+
+One condition: **the reference planes must be stitched where you cut.**
+Without stitching, the same cut location under identical solver settings deviates
+by **14.4 dB** — the cascade grows narrowband resonances that do not exist in the
+one-piece solve.
+
+**Where you cut matters much less than you would expect.** Once stitching is
+present, a cut 19 mm from a discontinuity and a cut 1.5 mm from it differ by no
+more than 0.11 dB, already at mesh-noise level.
+
+Full data and method below.
+
+---
+
 ## Summary
 
 This validation answers one concrete question: **when a long channel is split into

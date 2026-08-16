@@ -2,6 +2,9 @@
 
 哪些結構 SIwave 算得準？四種標準結構各自與收斂 HFSS 比對。
 
+**結果：決定準不準的是回流路徑有沒有被破壞，不是幾何有多複雜。**
+平面內的走線 SIwave 到 20 GHz 都行、還快 120 倍；開路殘段只撐到 7.1 GHz。
+
 - [驗證報告（繁體中文）](SIwave適用性地圖.md)
 - [四項研究總覽](../分段與求解器研究總覽.md)
 - [English overview](../solver_and_segmentation_studies.md)

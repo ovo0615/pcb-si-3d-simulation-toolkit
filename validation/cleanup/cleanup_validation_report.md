@@ -1,5 +1,21 @@
 # Layout Cleanup Equivalence Validation Report
 
+## The short version
+
+**Deleting foreign-net copper around the channel has no measurable effect on the
+channel itself. All four protection distances stay within 0.021 dB.**
+
+**Even deleting clutter that sits only 0.5 mm from the channel changes nothing.**
+
+The reason is direct: cleanup protects the signal nets and the reference nets,
+so **the return path is never touched**. What gets deleted is other nets' metal,
+and a stripline is fully enclosed by the planes above and below it, so its
+coupling to outside metal is weak to begin with.
+
+Full data and method below.
+
+---
+
 ## Summary
 
 This validation answers a concrete question: **after removing foreign-net copper

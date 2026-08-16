@@ -7,6 +7,16 @@ Choose your language／選擇語言：
 
 操作步驟／How to run it：[操作說明 第 4 章〈分段與混合求解〉](../../docs/manual/04-分段與混合求解.md)與[第 5 章 → 電路串接](../../docs/manual/05-排程與串接.md#電路串接)
 
+**Headline result／核心結果**
+
+> With the reference planes stitched at the cut, cascading reproduces the
+> monolithic full-wave solve to within **0.1 dB (0–10 GHz)**. Without stitching,
+> the same cut deviates by **14.4 dB**.
+>
+> 切面處的參考平面有接地縫合時，分段串接可重現單體全波求解至 **0.1 dB 以內
+> （0～10 GHz）**；缺少縫合時，同一切點的偏差達 **14.4 dB**。
+
+
 This folder contains static evidence for the toolkit's core method — splitting a
 long channel into segments, solving each independently, and cascading them back
 into a full-channel S-parameter response. A purpose-built 38 mm 50 Ω stripline
@@ -16,15 +26,6 @@ control that shows what failure looks like.
 本資料夾收錄工具核心方法（長通道分段切割、逐段求解、電路串接還原）的靜態驗證
 證據：以自建的 38 mm 50 Ω Stripline 試片，對照同一片不切割的單體全波求解，
 並附上呈現方法失效樣貌的負控制組。
-
-**Headline result／核心結果**
-
-> With the reference planes stitched at the cut, cascading reproduces the
-> monolithic full-wave solve to within **0.1 dB (0–10 GHz)**. Without stitching,
-> the same cut deviates by **14.4 dB**.
->
-> 切面處的參考平面有接地縫合時，分段串接可重現單體全波求解至 **0.1 dB 以內
-> （0～10 GHz）**；缺少縫合時，同一切點的偏差達 **14.4 dB**。
 
 ![Validation coupon and variants／驗證試片與變體示意](results/segmentation_variants.svg)
 
