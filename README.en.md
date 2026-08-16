@@ -62,6 +62,10 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 
 ![Cross-section view, solvability verdict and the segments the cut line hit](./graph/截面阻抗_剖視圖_20260816.png)
 
+![Sampling along the trace: bends are skipped and reported with their angle](./graph/截面阻抗_沿線取樣_20260816.png)
+
+Whether the lateral extent is wide enough is one click away: the same cut is solved again with the frame widened by 50%, and the two impedances are compared. Once TDR has located a discontinuity, each row of its table can produce a cut at that exact point, or a whole row of cuts can be laid along the trace at a chosen spacing to build a Z₀(x) profile. Positions whose angle to the trace is too steep are refused with a reason rather than returned as a silently inflated section.
+
 ![One-click HTML report](./graph/一鍵產出HTML報告_1_20260815.png)
 
 The segmentation view overlays the safety judgement directly on the layout: orange marks risky traces, red marks hard no-cut obstacles, cyan is the adopted cut, and green and purple are SIwave and HFSS segments.
