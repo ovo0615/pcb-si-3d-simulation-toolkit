@@ -5,6 +5,8 @@ Choose your language／選擇語言：
 - [繁體中文驗證報告](分段切板方法驗證報告.md)
 - [English validation report](segmentation_validation_report.md)
 
+操作步驟／How to run it：[操作說明 第 4 章〈分段與混合求解〉](../../docs/manual/04-分段與混合求解.md)與[第 5 章 → 電路串接](../../docs/manual/05-排程與串接.md#電路串接)
+
 This folder contains static evidence for the toolkit's core method — splitting a
 long channel into segments, solving each independently, and cascading them back
 into a full-channel S-parameter response. A purpose-built 38 mm 50 Ω stripline

@@ -5,6 +5,8 @@ Choose your language／選擇語言：
 - [繁體中文驗證報告](Layout清理等效性驗證報告.md)
 - [English validation report](cleanup_validation_report.md)
 
+操作步驟／How to run it：[操作說明 第 2 章〈載入電路板與裁切通道〉→ Layout 清理](../../docs/manual/02-載入與裁切.md#layout-清理)
+
 This folder contains static evidence for the toolkit's layout-cleanup speed-up:
 deleting foreign-net copper around the channel before solving. A 40 × 20 mm
 stripline coupon with four pairs of floating clutter traces is compared against
