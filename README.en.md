@@ -34,6 +34,8 @@ Every speed-up **changes what is actually being solved**, so each one has to ans
 
 Several independent validations point at the **same root cause**: accuracy is governed by **reference-plane ground stitching** at the cut or cutout boundary, not by expansion distance or cut angle. That condition is now an automatic check inside the tool.
 
+**That condition is the subject of the sentence, not a footnote.** On a real board cut where no stitching via exists within 3 mm, cascading stays accurate to 0.040 dB up to 1 GHz but the **usable upper limit is only 1.35 GHz**, growing past 1.5 dB above 3 GHz. [Full-band real-board comparison](./validation/segmentation/真實板全頻對照_20260817.md) (Traditional Chinese).
+
 Validation is also used to **find our own problems**: the last three rows above came from exactly that. Negative controls, failed coupon revisions, and the process of overturning our own earlier conclusions are all published; what remains unvalidated or uncalibrated is stated in the reports.
 
 [Study overview](./validation/solver_and_segmentation_studies.md)｜[繁體中文總覽](./validation/分段與求解器研究總覽.md)

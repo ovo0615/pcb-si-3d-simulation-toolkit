@@ -10,6 +10,13 @@ Without stitching, the same cut location under identical solver settings deviate
 by **14.4 dB** — the cascade grows narrowband resonances that do not exist in the
 one-piece solve.
 
+> **This report uses a purpose-built stripline coupon, and the cut is stitched.
+> Those two conditions are the subject of the sentence, not a footnote.** On a
+> real board cut where no stitching via exists within 3 mm, the usable upper limit
+> drops to 1.35 GHz — still 0.040 dB up to 1 GHz, but past 3 GHz the deviation
+> grows beyond 1.5 dB. See
+> [真實板全頻對照](真實板全頻對照_20260817.md) (Traditional Chinese).
+
 **Where you cut matters much less than you would expect.** Once stitching is
 present, a cut 19 mm from a discontinuity and a cut 1.5 mm from it differ by no
 more than 0.11 dB, already at mesh-noise level.

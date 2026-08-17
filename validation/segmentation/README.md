@@ -15,6 +15,13 @@ Choose your language／選擇語言：
 >
 > 切面處的參考平面有接地縫合時，分段串接可重現單體全波求解至 **0.1 dB 以內
 > （0～10 GHz）**；缺少縫合時，同一切點的偏差達 **14.4 dB**。
+>
+> On a real board cut where **no** stitching via exists within 3 mm, the usable
+> upper limit drops to **1.35 GHz** — see
+> [真實板全頻對照](真實板全頻對照_20260817.md).
+>
+> 真實板上切在 3 mm 內**完全沒有**縫合 Via 的位置時，可用頻率上限只剩
+> **1.35 GHz**。那個前提不是小字，是主詞。
 
 
 This folder contains static evidence for the toolkit's core method — splitting a
