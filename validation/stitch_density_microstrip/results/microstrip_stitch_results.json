@@ -1,0 +1,111 @@
+{
+  "metadata": {
+    "coupon": "40 x 12 mm 微帶線（SIG 頂層／GND_1 參考面／GND_2），x=20 mm 切一刀分兩段",
+    "why_two_gnd_layers": "微帶線只有一個參考面，兩層板上「縫合密度」不存在變因。真實板那 15 顆是跨層 GND Via，所以試片要有第二個 GND 平面可縫。",
+    "trace_width_mm": 0.51,
+    "trace_width_source": "Hammerstad 合成式，εr=4.0、h=250 µm → W/h≈2.05。解析估算，以 coupon_qualification 的回波損耗驗證。",
+    "solver": "SIwave SYZ",
+    "frequency": "0.01-20 GHz / 25 MHz",
+    "cores": 4,
+    "guard_mm": 2.0,
+    "stitch_y_mm": 1.5,
+    "core_thickness": "400um",
+    "comparable_with": "validation/stitch_density/（同間距、同尺寸、同判準）",
+    "current_tool_behaviour": "微帶線切面只出風險提示、不影響評級（segment.py 的 stitch_return_path_risk）",
+    "signature": "此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供"
+  },
+  "coupon_qualification": {
+    "worst_return_loss_db": -7.44,
+    "return_loss_at_ghz": {
+      "1": -24.01,
+      "10": -23.4,
+      "20": -7.44
+    },
+    "insertion_loss_at_ghz": {
+      "1": -0.102,
+      "10": -0.473,
+      "20": -1.71
+    },
+    "verdict": "不合格：回波損耗差於 -14 dB，線寬要重算"
+  },
+  "results": [
+    {
+      "pitch_mm": 1.0,
+      "vias_within_3mm_of_cut": 14,
+      "max_deviation_db": 2.0774,
+      "rms_deviation_db": 0.7326,
+      "max_by_band_db": {
+        "0-5GHz": 0.1994,
+        "5-10GHz": 0.6356,
+        "10-20GHz": 2.0774
+      },
+      "usable_up_to_ghz": 4.111,
+      "worst_return_loss_db": -7.44
+    },
+    {
+      "pitch_mm": 2.0,
+      "vias_within_3mm_of_cut": 6,
+      "max_deviation_db": 2.0774,
+      "rms_deviation_db": 0.7326,
+      "max_by_band_db": {
+        "0-5GHz": 0.1994,
+        "5-10GHz": 0.6356,
+        "10-20GHz": 2.0774
+      },
+      "usable_up_to_ghz": 4.111,
+      "worst_return_loss_db": -7.44
+    },
+    {
+      "pitch_mm": 4.0,
+      "vias_within_3mm_of_cut": 2,
+      "max_deviation_db": 2.0774,
+      "rms_deviation_db": 0.7326,
+      "max_by_band_db": {
+        "0-5GHz": 0.1994,
+        "5-10GHz": 0.6356,
+        "10-20GHz": 2.0774
+      },
+      "usable_up_to_ghz": 4.111,
+      "worst_return_loss_db": -7.44
+    },
+    {
+      "pitch_mm": 8.0,
+      "vias_within_3mm_of_cut": 2,
+      "max_deviation_db": 2.0774,
+      "rms_deviation_db": 0.7326,
+      "max_by_band_db": {
+        "0-5GHz": 0.1994,
+        "5-10GHz": 0.6356,
+        "10-20GHz": 2.0774
+      },
+      "usable_up_to_ghz": 4.111,
+      "worst_return_loss_db": -7.44
+    },
+    {
+      "pitch_mm": 16.0,
+      "vias_within_3mm_of_cut": 2,
+      "max_deviation_db": 2.0774,
+      "rms_deviation_db": 0.7326,
+      "max_by_band_db": {
+        "0-5GHz": 0.1994,
+        "5-10GHz": 0.6356,
+        "10-20GHz": 2.0774
+      },
+      "usable_up_to_ghz": 4.111,
+      "worst_return_loss_db": -7.44
+    },
+    {
+      "pitch_mm": null,
+      "vias_within_3mm_of_cut": 0,
+      "max_deviation_db": 2.0774,
+      "rms_deviation_db": 0.7326,
+      "max_by_band_db": {
+        "0-5GHz": 0.1994,
+        "5-10GHz": 0.6356,
+        "10-20GHz": 2.0774
+      },
+      "usable_up_to_ghz": 4.111,
+      "worst_return_loss_db": -7.44
+    }
+  ]
+}

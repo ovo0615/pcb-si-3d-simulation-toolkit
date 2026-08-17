@@ -16,12 +16,16 @@ Choose your language／選擇語言：
 > 切面處的參考平面有接地縫合時，分段串接可重現單體全波求解至 **0.1 dB 以內
 > （0～10 GHz）**；缺少縫合時，同一切點的偏差達 **14.4 dB**。
 >
-> On a real board cut where **no** stitching via exists within 3 mm, the usable
-> upper limit drops to **1.35 GHz** — see
-> [真實板全頻對照](真實板全頻對照_20260817.md).
+> On a real board, a **microstrip** channel cut twice drops to a usable upper
+> limit of **1.35 GHz**. For microstrip the cause is **not** missing stitching:
+> sweeping stitch density from 14 vias to 0 changes the result by 0.001 dB. The
+> cost comes from cutting itself and accumulates with the number of cuts. See
+> [微帶線縫合密度驗證](../stitch_density_microstrip/微帶線縫合密度驗證報告.md)
+> and [真實板全頻對照](真實板全頻對照_20260817.md).
 >
-> 真實板上切在 3 mm 內**完全沒有**縫合 Via 的位置時，可用頻率上限只剩
-> **1.35 GHz**。那個前提不是小字，是主詞。
+> 真實板上的**微帶線**通道切兩刀時，可用頻率上限只剩 **1.35 GHz**。
+> 微帶線的原因**不是**缺縫合——縫合密度從 14 顆掃到 0 顆只差 0.001 dB；
+> 代價來自切開本身，隨刀數累加。那個前提不是小字，是主詞。
 
 
 This folder contains static evidence for the toolkit's core method — splitting a
