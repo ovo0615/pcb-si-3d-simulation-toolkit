@@ -72,6 +72,9 @@ interface SegmentCut {
   risk_hit: boolean
   risk_reasons: string[]
   reference_missing: string[]
+  /** 單參考（微帶線）切面的提示。不影響評級，但要讓人看到。
+   *  後端刻意讓每一刀的文字相同，所以顯示時去重、只出現一次。 */
+  stitch_return_path_risk?: string | null
   nearest_obstacle?: { kind: string; label: string; net: string; layer: string } | null
 }
 
@@ -105,6 +108,8 @@ interface ComplexityAnalysis {
     /** 這把刀是在預覽圖上拖過的；auto_position_mm 是原本的自動位置。 */
     manual: boolean
     auto_position_mm: number | null
+    /** 單參考（微帶線）切面的提示。每一刀文字相同，顯示時去重。 */
+    stitch_return_path_risk?: string | null
   }[]
   segments: {
     index: number
@@ -3736,6 +3741,17 @@ ${data.output_path}`)
                         舊分數。刀的把數與方向由偵測到的複雜區決定，拖曳不能增減。
                       </div>
 
+                      {/* 單參考切面的提示。這條路有自己的顯示區塊，等分那邊補了
+                          這邊沒補的話，走複雜度分段的人照樣看不到。 */}
+                      {[...new Set(complexityAnalysis.cuts
+                        .map(c => c.stitch_return_path_risk)
+                        .filter((m): m is string => !!m))].map(msg => (
+                        <div key={msg} className="status status--warn"
+                          style={{ marginTop: 6, fontSize: 11 }}>
+                          {complexityAnalysis.cuts.length} 把刀：{msg}
+                        </div>
+                      ))}
+
                       {complexityAnalysis.cuts.some(cut => cut.manual) && (
                         <button className="btn" style={{ width: '100%', marginTop: 6 }}
                           onClick={handleComplexityAnalyze}>
@@ -3860,6 +3876,16 @@ ${data.output_path}`)
                           </tbody>
                         </table>
                       </div>
+                      {/* 單參考切面的提示。誤差隨刀數累加，所以那是整條計畫的
+                          性質、不是某一刀的性質——去重後只顯示一次，並帶上刀數。 */}
+                      {[...new Set(segAnalysis.cuts
+                        .map(c => c.stitch_return_path_risk)
+                        .filter((m): m is string => !!m))].map(msg => (
+                        <div key={msg} className="status status--warn"
+                          style={{ marginTop: 6, fontSize: 11 }}>
+                          {segAnalysis.cuts.length} 把刀：{msg}
+                        </div>
+                      ))}
                       {segAnalysis.auto_profile && (
                         <div className="segment-analysis__rule">
                           自動規則：3×線寬、2×參考層高度，淨空限制
