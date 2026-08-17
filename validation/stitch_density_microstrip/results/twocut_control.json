@@ -1,0 +1,65 @@
+{
+  "metadata": {
+    "question": "串接誤差會隨切幾刀累加嗎？",
+    "coupon": "與主研究同一片微帶線試片，縫合間距 1 mm（最密，排除缺縫合）",
+    "one_cut": {
+      "cuts_mm": [
+        20.0
+      ],
+      "segments": 2
+    },
+    "two_cut": {
+      "cuts_mm": [
+        13.3333,
+        26.6667
+      ],
+      "segments": 3
+    },
+    "solver": "SIwave SYZ",
+    "frequency": "0.01-20 GHz / 25 MHz",
+    "why": "主研究證明縫合密度對微帶線沒有影響，但真實板（兩刀）比試片（一刀）差。刀數是最簡單的候選解釋，這一組就是去驗它。",
+    "signature": "此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供"
+  },
+  "usable_up_to_ghz": {
+    "one_cut": 4.104,
+    "two_cut": 5.451
+  },
+  "by_band": [
+    {
+      "band": "0-1 GHz",
+      "one_cut_db": 0.0158,
+      "two_cut_db": 0.0327,
+      "ratio": 2.07
+    },
+    {
+      "band": "1-3 GHz",
+      "one_cut_db": 0.0354,
+      "two_cut_db": 0.0336,
+      "ratio": 0.95
+    },
+    {
+      "band": "3-5 GHz",
+      "one_cut_db": 0.1994,
+      "two_cut_db": 0.0724,
+      "ratio": 0.36
+    },
+    {
+      "band": "5-10 GHz",
+      "one_cut_db": 0.6356,
+      "two_cut_db": 0.9074,
+      "ratio": 1.43
+    },
+    {
+      "band": "10-15 GHz",
+      "one_cut_db": 1.2853,
+      "two_cut_db": 2.8108,
+      "ratio": 2.19
+    },
+    {
+      "band": "15-20 GHz",
+      "one_cut_db": 2.0774,
+      "two_cut_db": 4.9259,
+      "ratio": 2.37
+    }
+  ]
+}

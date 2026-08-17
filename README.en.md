@@ -34,7 +34,9 @@ Every speed-up **changes what is actually being solved**, so each one has to ans
 
 Several independent validations point at the **same root cause**: accuracy is governed by **reference-plane ground stitching** at the cut or cutout boundary, not by expansion distance or cut angle. That condition is now an automatic check inside the tool.
 
-**That condition is the subject of the sentence, not a footnote.** On a real board cut where no stitching via exists within 3 mm, cascading stays accurate to 0.040 dB up to 1 GHz but the **usable upper limit is only 1.35 GHz**, growing past 1.5 dB above 3 GHz. [Full-band real-board comparison](./validation/segmentation/真實板全頻對照_20260817.md) (Traditional Chinese).
+**That condition is the subject of the sentence, not a footnote.** On a real board, a microstrip channel cut twice stays accurate to 0.040 dB up to 1 GHz but its **usable upper limit is only 1.35 GHz**, growing past 1.5 dB above 3 GHz.
+
+**For microstrip the cause is not stitching.** A dedicated coupon swept stitch density from 14 vias within 3 mm down to 0: the deviation curves spread by **0.001 dB**. The cost comes from the cut itself and accumulates with the number of cuts. **Adding ground vias does not help; cut fewer times instead.** This overturned our own attribution from the previous day, and the process is kept in the report. [Microstrip stitch-density validation](./validation/stitch_density_microstrip/微帶線縫合密度驗證報告.md)｜[Full-band real-board comparison](./validation/segmentation/真實板全頻對照_20260817.md) (both Traditional Chinese).
 
 Validation is also used to **find our own problems**: the last three rows above came from exactly that. Negative controls, failed coupon revisions, and the process of overturning our own earlier conclusions are all published; what remains unvalidated or uncalibrated is stated in the reports.
 

@@ -10,12 +10,17 @@ Without stitching, the same cut location under identical solver settings deviate
 by **14.4 dB** — the cascade grows narrowband resonances that do not exist in the
 one-piece solve.
 
-> **This report uses a purpose-built stripline coupon, and the cut is stitched.
-> Those two conditions are the subject of the sentence, not a footnote.** On a
-> real board cut where no stitching via exists within 3 mm, the usable upper limit
-> drops to 1.35 GHz — still 0.040 dB up to 1 GHz, but past 3 GHz the deviation
-> grows beyond 1.5 dB. See
-> [真實板全頻對照](真實板全頻對照_20260817.md) (Traditional Chinese).
+> **This report uses a purpose-built stripline coupon, the cut is stitched, and
+> there is exactly one cut. Those three conditions are the subject of the
+> sentence, not a footnote.** On a real board, a microstrip channel cut twice
+> drops to a usable upper limit of 1.35 GHz — still 0.040 dB up to 1 GHz, but past
+> 3 GHz the deviation grows beyond 1.5 dB.
+>
+> **For microstrip the cause is different from this report: not stitching, but
+> the number of cuts and the frequency.** Sweeping stitch density from 14 vias
+> within 3 mm down to 0 changes the deviation by 0.001 dB. See
+> [微帶線縫合密度驗證](../stitch_density_microstrip/微帶線縫合密度驗證報告.md)
+> and [真實板全頻對照](真實板全頻對照_20260817.md) (both Traditional Chinese).
 
 **Where you cut matters much less than you would expect.** Once stitching is
 present, a cut 19 mm from a discontinuity and a cut 1.5 mm from it differ by no
@@ -215,9 +220,13 @@ industry-standard Delta S 0.02, so the ±0.1 dB residual includes mesh numerical
 noise and is not attributable to the cut alone.
 
 Microstrip (single-reference) structures cannot exhibit the artificial-resonance
-mechanism described here, but their cut error was not separately measured.
+mechanism described here. Their cut error was measured separately on a dedicated
+coupon on 2026-08-18, see
+[微帶線縫合密度驗證](../stitch_density_microstrip/微帶線縫合密度驗證報告.md)
+(Traditional Chinese): **stitch density has no effect on microstrip; the error
+comes from the cut itself and accumulates with the number of cuts.**
 Differential pairs, multiple parallel traces (where crosstalk paths are severed by
-the cut), layer-transition vias and connector models are outside this scope.
+the cut), layer-transition vias and connector models remain outside this scope.
 Extending the evidence to more complex real PCBs should start with differential
 pairs and parallel-trace bundles.
 
