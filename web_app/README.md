@@ -2,7 +2,7 @@
 
 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
 
-**這是開發者用的說明。要照著操作介面走的話，看 [操作說明](../操作說明.md)。**
+**這是開發者用的說明。要照著操作介面走的話，看 [操作說明](https://github.com/ovo0615/pcb-si-3d-simulation-toolkit/blob/main/操作說明.md)。**
 
 求解環境：**HFSS 3D Layout ／ SIwave**，透過 PyEDB 操作 Ansys Electronics Database。
 
@@ -140,7 +140,7 @@ PYTHONPATH="$(pwd)" uv run --with pytest --with fastapi --with pydantic --with p
 **那個前提不是小字，是主詞。** 真實板上的**微帶線**通道切兩刀時，分段串接的
 可用頻率上限只剩 1.35 GHz。**微帶線的原因不是缺縫合**——縫合密度從 14 顆掃到
 0 顆結果一模一樣，代價來自切開本身、隨刀數累加。見
-[微帶線縫合密度驗證](../validation/stitch_density_microstrip/微帶線縫合密度驗證報告.md)
-與[真實板全頻對照](../validation/segmentation/真實板全頻對照_20260817.md)。
+[微帶線縫合密度驗證](https://github.com/ovo0615/pcb-si-3d-simulation-toolkit/blob/main/validation/stitch_density_microstrip/微帶線縫合密度驗證報告.md)
+與[真實板全頻對照](https://github.com/ovo0615/pcb-si-3d-simulation-toolkit/blob/main/validation/segmentation/真實板全頻對照_20260817.md)。
 
 原始數據與失敗案例見 [驗證與研究](../validation/README.md)。
