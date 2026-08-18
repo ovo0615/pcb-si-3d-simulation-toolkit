@@ -2604,8 +2604,8 @@ ${data.output_path}`)
           ? `整體 Layout（切割線，共 ${segRun.segments.length} 段）`
           : `第 ${activeSegIdx + 1} 段 Layout（共 ${segRun.segments.length} 段）`)
       : 'N 段分割預覽',
-    schematic: '串接電路示意圖 · 黃點 = 短路節點（stripline T+B）· 虛線框 = 尚未解算',
-    sparam: '串接後 S 參數 · 單端／差動可切換 · 兩端與差動對由 Port 名稱自動判斷',
+    schematic: '串接電路示意圖 · 黃點 = 短路節點 · 虛線框 = 尚未解算',
+    sparam: '串接後 S 參數 · 單端／差動可切換',
     eye: 'QuickEye 眼圖 · 眼高與眼寬由 AEDT 量測',
     tdr: 'TDR 阻抗定位 · 劇變位置以解析度寬度標在 Layout 上',
     report: '一鍵 HTML 報告中心',
@@ -2895,11 +2895,8 @@ ${data.output_path}`)
                       </div>
                       <div className="panel-hint" style={{ marginTop: 3, fontSize: 11 }}>
                         {aedtLocked
-                          ? '已載入電路板，無法切換版本。要換版本請先「重新載入原始檔」，'
-                            + '再從匯入原始板檔開始。'
-                          : '整條流程（匯入、裁切、分段、求解、匯出）都會使用這個版本。'
-                            + '求解機只有舊版時，正確做法是在求解機補裝相同版本，'
-                            + '不要把來源端降版。'}
+                          ? '已載入電路板，要換版本請先「重新載入原始檔」。'
+                          : '整條流程都用這個版本。'}
                       </div>
                     </>
                   )}
@@ -3014,10 +3011,10 @@ ${data.output_path}`)
                     {actualCutoutExtentType
                       ? `上次實際裁切形狀：${EXTENT_LABEL[actualCutoutExtentType] || actualCutoutExtentType}`
                       : extentType === 'Conforming'
-                        ? '外框會沿著走線轉彎，真正只向外擴張所設距離。彎折或斜向通道用凸包時，內側會被一條弦線切過而包進大量無關的 Via。'
+                        ? '沿著走線轉彎，只向外擴張所設距離。'
                         : extentType === 'ConvexHull'
-                          ? '凸包依定義是凸的：斜向或彎折通道的內側必然被弦線切過，會多包無關銅箔。要貼著走線請改選「貼合走線」。'
-                          : '矩形最保守也最大；實際裁切會遵照所選形狀，只有 PyEDB 明確失敗時才回退並通知。'}
+                          ? '斜向或彎折通道的內側會被弦線切過，多包無關銅箔。'
+                          : '最保守也最大。'}
                   </div>
                   {boundaryAreaSaving !== null && extentType === 'Conforming' && (
                     <div className="status" style={{ marginTop: 4, fontSize: 11.5, color: 'var(--accent)' }}>
@@ -3036,7 +3033,7 @@ ${data.output_path}`)
                     {preciseBoundaryPreview
                       && preciseBoundaryPreviewKey === cutoutBoundaryKey(signalNets, refNets, expansionMm, extentType)
                       ? `已顯示 PyEDB 精確預估外框（${preciseBoundaryPreview.length} 點）。`
-                      : '按上方按鈕才會顯示外框；顯示的是與正式裁切完全相同的演算法結果，不是估算值。'}
+                      : '按上方按鈕顯示外框（與正式裁切同一套演算法）。'}
                   </div>
                 </div>
 
@@ -3044,8 +3041,7 @@ ${data.output_path}`)
                 <div hidden={!(show.cutout)} style={directSegmentMode ? { opacity: 0.4, pointerEvents: 'none' } : undefined}>
                   <h3 className="panel-title">執行裁切</h3>
                   <p className="panel-hint">
-                    這一步只裁出通道，不建立 Port。元件端 Port 要建立在最終幾何上，
-                    所以排在背鑽與 Layout 清理之後——見下方〈設定 Port 與求解器〉。
+                    只裁出通道，不建立 Port。Port 排在背鑽與清理之後。
                   </p>
                   <div className="field-row" style={{ marginTop: 6 }}>
                     <input
@@ -3071,14 +3067,10 @@ ${data.output_path}`)
                 <div hidden={!(show.stackup)} style={{ opacity: boardLoaded ? 1 : 0.5, pointerEvents: boardLoaded ? undefined : 'none' }}>
                   <h3 className="panel-title">疊構更換</h3>
                   <p className="panel-hint">
-                    指定疊構檔即可直接分析並套用，支援 XML／CSV／JSON；XML 為 Ansys
-                    Control 格式。<b>套用前一定會先列出差異</b>，永遠另存新檔。
+                    支援 XML／CSV／JSON。<b>套用前會先列出差異</b>，永遠另存新檔。
                   </p>
                   <p className="panel-hint">
-                    <b>排在裁切之後、背鑽與設定 Port 之前。</b>pyedb 換疊構時會把每一個
-                    padstack instance 的 layer_map 讀出再寫回，耗時與板上 Via 數量成
-                    正比——全板要十幾分鐘，裁完只剩通道範圍就快得多。但一定要在背鑽與
-                    Port 之前，那兩者都必須建立在最終疊構上。
+                    <b>排在裁切之後、背鑽與設定 Port 之前。</b>
                   </p>
 
                   <div className="field-label" style={{ marginTop: 6 }}>疊構檔</div>
@@ -3201,9 +3193,7 @@ ${data.output_path}`)
                 <div hidden={!(show.backdrill)} style={{ opacity: canSegment ? 1 : 0.5, pointerEvents: canSegment ? undefined : 'none' }}>
                   <h3 className="panel-title">背鑽</h3>
                   <p className="panel-hint">
-                    自動推導每顆訊號 Via 的連接層與應鑽側，確認後批次寫入。
-                    貫穿孔出線後剩下的殘樁會在四分之一波長處造成深陷波。
-                    永遠另存新檔，並輸出逐顆的設定報告。
+                    自動推導每顆訊號 Via 的連接層與應鑽側，確認後批次寫入。永遠另存新檔。
                   </p>
 
                   <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
@@ -3294,8 +3284,7 @@ ${data.output_path}`)
                 <div hidden={!(show.cleanup)} style={{ opacity: canSegment ? 1 : 0.5 }}>
                   <h3 className="panel-title">Layout 清理</h3>
                   <p className="panel-hint">
-                    保留訊號、參考平面、元件 Pin 與 Port；可使用固定保護距離，或依 Stackup 電磁影響範圍判斷。
-                    永遠另存新檔，不覆寫目前 Layout。
+                    保留訊號、參考平面、元件 Pin 與 Port。永遠另存新檔。
                   </p>
                   <div className="field-label" style={{ marginTop: 6 }}>清理等級</div>
                   <div className="field-row">
@@ -3432,9 +3421,7 @@ ${data.output_path}`)
                 <div hidden={!showSolverSetup}>
                   <h3 className="panel-title">模擬設定</h3>
                   <p className="panel-hint" style={{ marginTop: 4 }}>
-                    <b>掃頻設定 SIwave 與 HFSS 共用</b>；Solution Frequency 與收斂條件
-                    只有 HFSS 會用到。實際每段用哪一種求解器，由「排程求解」的
-                    「混合求解區域」決定。
+                    <b>掃頻 SIwave 與 HFSS 共用</b>；Solution Frequency 與收斂條件只有 HFSS 用得到。
                   </p>
 
                   {/* Sweep Type & Solution Freq */}
@@ -3582,10 +3569,7 @@ ${data.output_path}`)
                 <div hidden={!(show.ports)} style={canSegment ? undefined : { opacity: 0.4, pointerEvents: 'none' }}>
                   <h3 className="panel-title">設定 Port 與求解器</h3>
                   <p className="panel-hint">
-                    在目前的通道上建立元件端 Port 並套用求解器設定，不執行裁切。
-                    適用於自己裁切好的檔案，或上一步只做了裁切的輸出。
-                    <b>跳過這一步，通道頭尾不會有元件端 Port</b>，分段與求解都會白做，
-                    最後電路串接必定失敗。永遠另存新檔，來源檔不會被修改。
+                    <b>跳過這一步，通道頭尾不會有 Port</b>，分段與求解都會白做。永遠另存新檔。
                   </p>
                   <div className="field-row" style={{ marginTop: 6 }}>
                     <input
@@ -3649,22 +3633,18 @@ ${data.output_path}`)
                       分析切割位置（等分）
                     </button>
                     <div className="panel-hint" style={{ gridColumn: '1 / -1', marginTop: -2 }}>
-                      適合<b>全段都用 HFSS</b> 求解：各段大小相近，逐段求解的時間與
-                      記憶體才不會被某一段拖垮。段數由上面的 N 決定。
+                      適合<b>全段都用 HFSS</b>：各段大小相近。段數由上面的 N 決定。
                     </div>
                     <button className="btn--primary" style={{ gridColumn: '1 / -1', marginTop: 4 }}
                       onClick={handleComplexityAnalyze} disabled={!canSegment}>
                       依 3D 複雜度分析切割位置
                     </button>
                     <div className="panel-hint" style={{ gridColumn: '1 / -1', marginTop: -2 }}>
-                      適合 <b>HFSS＋SIwave 混合求解</b>：把換層 Via 與元件端 launch
-                      所在的區域切成獨立分段交給 HFSS，中間的平面走線交給 SIwave
-                      ——那正是 SIwave 最擅長也最快的情形。段數是偵測結果，不需要填 N。
+                      適合 <b>HFSS＋SIwave 混合求解</b>：3D 結構交給 HFSS，平面走線交給 SIwave。段數是偵測結果。
                     </div>
                   </div>
                   <div className="status" style={{ marginTop: 5, fontSize: 11.5 }}>
-                    工具會在這個評分之上，把各段長度盡可能平分——分段是逐段依序求解，
-                    總時間與記憶體由最大的那一段決定。
+                    在這個評分之上盡量平分——總時間由最大的那一段決定。
                     {segmentQuality === 'C' && (
                       <b style={{ color: 'var(--warn, #d79a35)' }}>
                         　C 級切點的角度或淨空已放寬，執行前建議人工複核切面位置。
@@ -3731,14 +3711,10 @@ ${data.output_path}`)
                         )).join('　')}
                       </div>
                       <div className="status" style={{ marginTop: 4, fontSize: 11 }}>
-                        餘裕是「從最後一個垂直結構往外走到第一個符合評分門檻的位置」
-                        算出來的，尚未以雙求解器實測校準——這是目前最沒把握的一環，
-                        數值一併記進 segments.json 供日後回頭校準。
+                        餘裕尚未以實測校準，是目前最沒把握的一環；數值記進 segments.json。
                       </div>
                       <div className="status" style={{ marginTop: 4, fontSize: 11 }}>
-                        自動位置不合意時，可在預覽圖上<b>直接拖曳刀線</b>。放開後會依
-                        新位置重新評分——拖到不好的地方就會看到等級掉下來，不會沿用
-                        舊分數。刀的把數與方向由偵測到的複雜區決定，拖曳不能增減。
+                        可在預覽圖上<b>直接拖曳刀線</b>，放開後重新評分。把數與方向不能改。
                       </div>
 
                       {/* 單參考切面的提示。這條路有自己的顯示區塊，等分那邊補了
@@ -3934,10 +3910,7 @@ ${data.output_path}`)
                     不分割，整片求解
                   </button>
                   <div className="panel-hint" style={{ marginTop: 3, fontSize: 11 }}>
-                    不分割不需要先分析切割位置，也不會建立切面 Port——Port 完全
-                    來自〈設定 Port 與求解器〉。之後的排程求解、遠端求解包、S 參數
-                    與眼圖都照常使用，適合拿來當分段結果的對照基準，或通道本來就
-                    小到不必切的情形。
+                    不建立切面 Port，Port 全部來自〈設定 Port 與求解器〉。適合當分段的對照基準。
                   </div>
                   {segRun && (
                     <div className="status status--ok" style={{ marginTop: 6, fontSize: 11.5 }}>
@@ -4050,8 +4023,7 @@ ${data.output_path}`)
                   {/* 分段一次要二十分鐘以上。換個求解器設定、改核心數或重打一次包
                       都不該逼人整段重跑——指向既有的 segments.json 就能直接接上。 */}
                   <div className="panel-hint" style={{ marginTop: 3, fontSize: 11 }}>
-                    <b>不必重跑分段</b>：指向先前產生的 segments.json（在分段輸出
-                    資料夾內）即可直接排程求解或打包，逐段的求解器指派會一併載入。
+                    <b>不必重跑分段</b>：指向先前的 segments.json 即可直接排程或打包。
                   </div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                     <button
@@ -4104,16 +4076,7 @@ ${data.output_path}`)
                         <b>上面的求解核心數兩種段都會套用</b>，用的是你填的值，不會被
                         這台電腦的核心數夾住：SIwave 寫進 .exec 的 SetNumCpus，HFSS 以
                         ansysedt 的 -batchoptions 傳入。
-                        <b style={{ color: 'var(--warn)' }}>但它受 HPC 授權限制</b>——
-                        HFSS 求解內含 4 核，超出的每一核要一張 anshpc 授權
-                        （12 核就佔 8 張）。授權不夠時求解包會明白寫出「只有 N 核
-                        可用」與建議值。
-                      </div>
-                      <div className="panel-hint" style={{ marginTop: 3, fontSize: 11 }}>
-                        HPC 授權型別不必設定：SIwave 段先試 Pack，取不到足夠授權就
-                        自動改用 Workgroup 重試；HFSS 段一律用 <b>Auto</b> 讓 AEDT
-                        自己挑當下取得到的授權——實測寫死 Pack 反而會落到 Parametric
-                        而只拿到 4 核。同一包在兩種機器上都跑得動。
+                        <b style={{ color: 'var(--warn)' }}>受 HPC 授權限制</b>：HFSS 內含 4 核，超出每核要一張 anshpc。
                       </div>
                       <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                         <input className="input" style={{ flex: 1 }} value={ingestDir}
@@ -4198,8 +4161,7 @@ ${data.output_path}`)
                 <div hidden={!(show.cascade)}>
                   <h3 className="panel-title">電路串接</h3>
                   <p className="panel-hint">
-                    切面 Port 依配對表對接（Stripline 雙參考 Port 先短路成節點），
-                    還原完整通道 S 參數。可先「預覽接線」看電路示意圖再執行。
+                    依配對表對接，還原完整通道 S 參數。可先「預覽接線」再執行。
                   </p>
                   {/* 模式切換 */}
                   <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
@@ -4269,11 +4231,7 @@ ${data.output_path}`)
                             {cascadeBusy ? '載入中…' : '直接檢視這個檔（不接線）'}
                           </button>
                           <div className="status" style={{ marginTop: 5, fontSize: 11.5 }}>
-                            單一檔案沒有段可接。整片板子一次解完的 .sNp 用這個
-                            按鈕直接進「S 參數」分頁，切到<b>差動</b>就會自動列出
-                            每一對的 Sdd21（IL）、Sdd11（RL）與 NEXT／FEXT——
-                            差動對由檔頭的 Port 名稱自動配（…TXP… ↔ …TXN…），
-                            遠近端由兩端的元件代號判定。
+                            單一檔案沒有段可接，直接進「S 參數」分頁檢視。差動對由 Port 名稱自動配。
                           </div>
                           <div className="status" style={{ marginTop: 4, fontSize: 11 }}>
                             要接線請再加入第二個檔。

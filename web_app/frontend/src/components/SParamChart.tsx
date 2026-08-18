@@ -459,8 +459,8 @@ export default function SParamChart({
           {clippedBelow || clippedAbove
             ? `目前 Y 軸預設已裁掉範圍外資料${clippedBelow ? '（下方）' : ''}${clippedAbove ? '（上方）' : ''}；按 Auto 或 Fit All 查看全部。`
             : readout
-              ? '讀值開啟中：游標可讀取所有曲線；在圖上按兩下可關閉。'
-              : '滾輪約每格縮放 6%；按住左鍵拖曳平移；在圖上按兩下開啟游標讀值。'}
+              ? '讀值開啟中；按兩下關閉。'
+              : '滾輪縮放、拖曳平移、按兩下開啟讀值。'}
         </div>
       )}
     </div>
