@@ -156,6 +156,23 @@ jobs:
           fi
           python -m py_compile $files
 
+  touchstone-header-encoding:
+    name: Touchstone headers must be UTF-8
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # AEDT writes Touchstone headers in the solver machine's system ANSI
+      # (cp950 on a Traditional Chinese Windows). Publishing one of those turns
+      # the "! Port[n] = ..." comment lines into mojibake on GitHub, and nothing
+      # else in CI would catch it - the file still parses as numbers, so the
+      # failure looks exactly like success. It happened once (2026-08-17); the
+      # writer was fixed, and this job guards every .sNp we publish.
+      - name: Reject non-UTF-8 headers in tracked Touchstone files
+        run: python .github/scripts/check_touchstone_headers.py
+
   readme-link-check:
     name: README link check
     runs-on: ubuntu-latest
