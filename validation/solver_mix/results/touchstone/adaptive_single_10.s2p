@@ -2,7 +2,6 @@
 ! with a signal via transition at mid-board
 ! Case: Single-frequency adaptive at 10 GHz (half the sweep maximum)
 ! Sweep: interpolating 10 MHz - 20 GHz, 25 MHz step, 4 cores
-! Provided by Jeff Hong, Senior Technical Engineer, Taiwan Auto-Design Co.
 # GHz S MA R 50.000000
 ! Terminal data exported
 ! Port[1] = U1.PAD1.SIG

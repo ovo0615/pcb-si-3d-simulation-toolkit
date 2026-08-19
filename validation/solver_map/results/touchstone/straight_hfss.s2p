@@ -1,7 +1,6 @@
 ! Solver applicability map - 40 x 16 mm symmetric stripline
 ! Case: straight_hfss
 ! Sweep: 10 MHz - 20 GHz, 25 MHz step, 4 cores
-! Provided by Jeff Hong, Senior Technical Engineer, Taiwan Auto-Design Co.
 # GHz S MA R 50.000000
 ! Terminal data exported
 ! Port[1] = U1.PAD1.SIG

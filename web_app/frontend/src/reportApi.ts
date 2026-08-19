@@ -1,5 +1,4 @@
 // 一鍵 HTML 報告 API 與圖片轉換工具。
-// 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
 import type {
   ReportBrand,
   ReportManifest,

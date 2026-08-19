@@ -2,7 +2,6 @@
 ! Case: Coupon A (no stitching vias) - cut 19 mm from nearest port, cascaded
 ! Solver: Ansys HFSS 3D Layout 2026 R1, broadband adaptive 1-5 GHz,
 !         Delta S 0.02, interpolating sweep 10 MHz - 10 GHz
-! Provided by Jeff Hong, Senior Technical Engineer, Taiwan Auto-Design Co.
 ! Port[1] = U1.PAD1.SIG
 ! Port[2] = U2.PAD1.SIG
 # GHz S MA R 50.0 

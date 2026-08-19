@@ -86,6 +86,4 @@ The present evidence demonstrates usefulness for the tested single-ended microst
 
 The public repository contains anonymized Touchstone data and static evidence only. PyEDB model generation, SIwave solver orchestration, and the product backend remain in the restricted implementation repository.
 
-> 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
-
 > This repository is Jeff Hong's personal technical portfolio. It is not an official product of Taiwan Auto-Design Co.（TADC）or Ansys, Inc. Ansys and SIwave are trademarks of Ansys, Inc.

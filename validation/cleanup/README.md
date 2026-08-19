@@ -50,8 +50,6 @@ stitching at the cut or cutout boundary**.
 
 三份合看可見：**三項加速手法中唯一需要小心的，是切面／裁切邊界處的接地縫合狀況**。
 
-> 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
-
 This is Jeff Hong's personal technical portfolio. It is not an official account of
 Taiwan Auto-Design Co.（TADC）and is not officially affiliated with Ansys, Inc.
 Ansys, HFSS and SIwave are trademarks of Ansys, Inc.

@@ -2,7 +2,6 @@
 ! Case: Coupon B (with stitching vias) - monolithic full-wave solve, no cut
 ! Solver: Ansys HFSS 3D Layout 2026 R1, broadband adaptive 1-5 GHz,
 !         Delta S 0.02, interpolating sweep 10 MHz - 10 GHz
-! Provided by Jeff Hong, Senior Technical Engineer, Taiwan Auto-Design Co.
 # GHz S MA R 50.000000
 ! Terminal data exported
 ! Port[1] = U1.PAD1.SIG

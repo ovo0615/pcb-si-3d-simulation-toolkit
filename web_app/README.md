@@ -1,7 +1,5 @@
 # PCB SI 3D 模擬分析工具（Web App）
 
-此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
-
 **這是開發者用的說明。要照著操作介面走的話，看 [操作說明](https://github.com/ovo0615/pcb-si-3d-simulation-toolkit/blob/main/操作說明.md)。**
 
 求解環境：**HFSS 3D Layout ／ SIwave**，透過 PyEDB 操作 Ansys Electronics Database。

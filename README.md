@@ -43,4 +43,4 @@ PCB 通道裁切、風險感知分段、HFSS／SIwave 混合求解、Touchstone 
 
 ---
 
-此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供。This is Jeff Hong's personal technical portfolio; it is not an official account of Taiwan Auto-Design Co. (TADC). Ansys is a trademark of Ansys, Inc.
+This is Jeff Hong's personal technical portfolio; it is not an official account of Taiwan Auto-Design Co. (TADC). Ansys is a trademark of Ansys, Inc.

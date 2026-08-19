@@ -234,9 +234,6 @@ The public repository keeps only anonymized Touchstone files and static results;
 PyEDB modelling, HFSS solve orchestration and the product backend live in a
 restricted version.
 
-> This toolkit is provided by Jeff Hong, Senior Technical Engineer at Taiwan
-> Auto-Design Co. (TADC).
-
 > This repository is Jeff Hong's personal technical portfolio. It is not an
 > official product of Taiwan Auto-Design Co. (TADC) or Ansys, Inc. Ansys, HFSS and
 > SIwave are trademarks of Ansys, Inc.
