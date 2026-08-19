@@ -17,8 +17,6 @@
 | `results/touchstone/` | 匿名化原始 Touchstone |
 | `build_and_run.py` | 建模、求解編排與分析 |
 
-> 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
-
 This repository is Jeff Hong's personal technical portfolio. It is not an official
 product of Taiwan Auto-Design Co. (TADC) or Ansys, Inc. Ansys, HFSS and SIwave are
 trademarks of Ansys, Inc.

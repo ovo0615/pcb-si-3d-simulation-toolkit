@@ -1,5 +1,4 @@
 // S 參數曲線圖（純 SVG，無外部相依）— 功能3 電路串接結果檢視
-// 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
 
 import { useEffect, useId, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent } from 'react'
 

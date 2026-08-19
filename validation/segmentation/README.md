@@ -53,8 +53,6 @@ control that shows what failure looks like.
 | `results/segmentation_validation_results.json` | Machine-readable results／機器可讀結果 |
 | `results/touchstone/` | Raw Touchstone files／原始 Touchstone |
 
-> 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
-
 This is Jeff Hong's personal technical portfolio. It is not an official account of
 Taiwan Auto-Design Co.（TADC）and is not officially affiliated with Ansys, Inc.
 Ansys, HFSS and SIwave are trademarks of Ansys, Inc.

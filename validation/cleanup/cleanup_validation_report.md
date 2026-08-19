@@ -177,9 +177,6 @@ floating neighbours are also outside this scope.
 The public repository keeps only anonymized Touchstone files and static results;
 PyEDB modelling and solve orchestration live in a restricted version.
 
-> This toolkit is provided by Jeff Hong, Senior Technical Engineer at Taiwan
-> Auto-Design Co. (TADC).
-
 > This repository is Jeff Hong's personal technical portfolio. It is not an
 > official product of Taiwan Auto-Design Co. (TADC) or Ansys, Inc. Ansys, HFSS and
 > SIwave are trademarks of Ansys, Inc.

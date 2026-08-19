@@ -1,6 +1,5 @@
 // PCB SI 3D 模擬分析工具 — 前端主程式
 // 裁切流程：載入電路板 → 選擇訊號／參考網路 → 裁切設定 → Port 設定 → 執行裁切
-// 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
 import { useState, useEffect, useRef, type ChangeEvent } from 'react'
 import { Allotment } from 'allotment'
 import {
@@ -2484,7 +2483,6 @@ ${data.output_path}`)
     if (signalNets.length === 0) { alert('目前沒有已選取的訊號網路'); return }
     const header = [
       '# PCB SI 3D 模擬分析工具－訊號網路清單',
-      '# 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供',
       '# 每行一個 Net；以 # 開頭的行會在匯入時忽略。',
     ]
     const blob = new Blob([[...header, ...signalNets, ''].join('\r\n')], { type: 'text/plain;charset=utf-8' })
@@ -2570,7 +2568,7 @@ ${data.output_path}`)
       { label: '一鍵 HTML 報告中心', action: () => setActiveView('report') },
     ],
     '說明': [
-      { label: '關於本工具', action: () => alert('PCB SI 3D 模擬分析工具\n\n電路板裁切與 Port 自動建立\n疊構更換、背鑽與 Layout 清理\nN 段分割與 HFSS／SIwave 混合求解\n遠端求解包（求解機不需安裝 Python）\nS 參數串接與眼圖\n\n此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供') },
+      { label: '關於本工具', action: () => alert('PCB SI 3D 模擬分析工具\n\n電路板裁切與 Port 自動建立\n疊構更換、背鑽與 Layout 清理\nN 段分割與 HFSS／SIwave 混合求解\n遠端求解包（求解機不需安裝 Python）\nS 參數串接與眼圖') },
     ],
   }
 
@@ -2810,7 +2808,7 @@ ${data.output_path}`)
         <div>
           <h1 className="app-title">PCB SI 3D 模擬分析工具</h1>
           <p className="app-sub">
-            HFSS 3D Layout 通道裁切、Port 建立與分段模擬。此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供。
+            HFSS 3D Layout 通道裁切、Port 建立與分段模擬。
           </p>
         </div>
         <img

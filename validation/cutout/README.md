@@ -47,8 +47,6 @@ plane" from "stitching vias removed".
 - [Channel segmentation method validation／分段切板方法驗證](../segmentation/README.md)
   — same root cause: reference-plane stitching dominates accuracy.
 
-> 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
-
 This is Jeff Hong's personal technical portfolio. It is not an official account of
 Taiwan Auto-Design Co.（TADC）and is not officially affiliated with Ansys, Inc.
 Ansys, HFSS and SIwave are trademarks of Ansys, Inc.

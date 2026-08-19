@@ -3,7 +3,6 @@
     "reference": "收斂 HFSS（寬頻自適應 1-20 GHz）",
     "coupon": "40 x 16 mm 對稱 Stripline，縫合間距 1 mm",
     "criterion": "SIwave 與 HFSS 插入損耗偏差首次超過 0.5 dB 的頻率",
-    "signature": "此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供"
   },
   "results": [
     {

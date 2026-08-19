@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """發佈出去的 Touchstone 檔頭一律要是 UTF-8。
 
-此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
-
 AEDT 寫出來的 Touchstone 檔頭用的是**求解機的系統 ANSI**（繁中 Windows 上是
 cp950）。那種檔案直接推上 GitHub，`! Port[n] = 訊號_控制` 這幾行會變成亂碼，
 而其他任何檢查都抓不到——數值照樣解得開，**失敗的樣子跟成功一模一樣**。

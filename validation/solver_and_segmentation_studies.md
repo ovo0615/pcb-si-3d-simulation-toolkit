@@ -1,7 +1,5 @@
 # Solver and Segmentation Studies: Four Investigations
 
-Provided by Jeff Hong, Senior Technical Engineer, Taiwan Auto-Design Co. (TADC)
-
 > Conducted 2026-08-11 to 2026-08-12. Purpose-built coupons, AEDT 2026.1,
 > 4 cores. Raw Touchstone data included.
 >

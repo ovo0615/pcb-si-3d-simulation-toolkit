@@ -8,7 +8,6 @@
       "sweep": "0.01-20 GHz / 25 MHz"
     },
     "criterion": "分段串接與整片求解偏差首次超過 0.1 dB 的頻率",
-    "signature": "此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供"
   },
   "results": [
     {

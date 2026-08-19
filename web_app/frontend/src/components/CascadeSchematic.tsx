@@ -1,6 +1,5 @@
 // 串接電路示意圖（純 SVG）— 功能3：解算前即可預覽 N 段接線
 // 資料契約與後端 /api/cascade/preview 一致；外部檔案模式由前端自組相同結構。
-// 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
 import { useEffect, useState, type WheelEvent } from 'react'
 
 export interface CascadeGraph {

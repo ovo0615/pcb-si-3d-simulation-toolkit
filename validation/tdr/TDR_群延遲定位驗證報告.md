@@ -86,6 +86,4 @@ max（2.0 mm，1.5 × TDR 空間解析度）
 
 公開 Repository 只保留匿名 Touchstone 與靜態結果；PyEDB 建模、SIwave 求解編排及產品後端實作位於受限版本，避免公開公司專用求解流程或授權環境。
 
-> 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
-
 > 本 Repository 為 Jeff Hong 個人技術作品集之展示內容，非 Taiwan Auto-Design Co.（TADC）或 Ansys, Inc. 官方產品。Ansys 與 SIwave 為 Ansys, Inc. 之商標。

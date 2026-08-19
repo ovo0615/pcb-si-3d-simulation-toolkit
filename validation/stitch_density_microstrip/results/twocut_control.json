@@ -18,7 +18,6 @@
     "solver": "SIwave SYZ",
     "frequency": "0.01-20 GHz / 25 MHz",
     "why": "主研究證明縫合密度對微帶線沒有影響，但真實板（兩刀）比試片（一刀）差。刀數是最簡單的候選解釋，這一組就是去驗它。",
-    "signature": "此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供"
   },
   "usable_up_to_ghz": {
     "one_cut": 4.104,

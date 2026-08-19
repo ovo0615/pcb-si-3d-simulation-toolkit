@@ -79,5 +79,3 @@ web_app\backend\.venv\Scripts\python.exe validation\tdr\run_validation.py --keep
 ![驗證報告入口預覽](results/TDR_定位驗證報告_預覽.png)
 
 工作用 EDB、SIwave 專案與求解器暫存檔放在作業系統暫存目錄；除非使用 `--keep-work`，執行結束後會自動移除。
-
-> 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供

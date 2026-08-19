@@ -1,5 +1,4 @@
 // 一鍵 HTML 報告共用型別。
-// 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
 
 export type SnapshotStatus = 'pass' | 'attention' | 'fail' | 'display'
 export type ReportLocale = 'zh-TW' | 'en' | 'bilingual'

@@ -1,7 +1,6 @@
 // 2D Layout 預覽（HTML5 Canvas，SIwave 風格）— 沿用 PCB_Simplifer_Toolkit 驗證過的渲染引擎
 // 右側面板仿 SIwave 欄位設計：Layers / Components / Nets 分頁
 //   Layers 欄位由左至右：Fill/Unfill All、Show/Hide All、Planes、Traces、Pads、Vias、Circuit Elements
-// 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 
 export interface PreviewData {

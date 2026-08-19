@@ -1,7 +1,6 @@
 ! Stitch-rule transferability - stripline, 2 mm stitch pitch, cut at x=20 mm
 ! Case: er4_d400_segB
 ! Sweep: 10 MHz - 20 GHz, 25 MHz step, 4 cores
-! Provided by Jeff Hong, Senior Technical Engineer, Taiwan Auto-Design Co.
 # GHz S MA R 50.000000
 ! Terminal data exported
 ! Port[1] = U1.PAD1.SIG

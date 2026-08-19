@@ -1,5 +1,4 @@
 // 結果畫面共用的「更新報告快照」按鈕。
-// 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
 import { useState } from 'react'
 import { toPng } from 'html-to-image'
 

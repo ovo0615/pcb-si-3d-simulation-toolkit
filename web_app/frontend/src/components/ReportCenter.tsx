@@ -1,5 +1,4 @@
 // 一鍵 HTML 報告中心：快照、品牌、章節、規格、浮水印與輸出。
-// 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
 import { useEffect, useMemo, useState } from 'react'
 
 import {
@@ -505,7 +504,6 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange 
         )}
       </div>
       {message && <div className={message.includes('失敗') ? 'report-center__message error' : 'report-center__message'}>{message}</div>}
-      <footer>此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供</footer>
     </div>
   )
 }
