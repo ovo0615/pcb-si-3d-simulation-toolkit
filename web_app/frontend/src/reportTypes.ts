@@ -100,6 +100,7 @@ export const REPORT_SECTION_LABELS: Record<string, string> = {
   models: 'IBIS 模型與眼圖分析',
   eye: '眼圖結果',
   tdr: 'TDR 阻抗定位',
+  crosssection: '截面阻抗（Q2D）',
   results: '模擬結果',
   external: '補充證據',
 }
