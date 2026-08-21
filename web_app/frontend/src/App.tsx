@@ -1594,7 +1594,7 @@ ${state.error}` : ''}`)
 
   const handleSegmentAnalyze = async () => {
     const n = parseInt(nSegments, 10)
-    if (!canSegment) { alert('請先執行「局部裁切」，或勾選「直接匯入分段」後載入檔案'); return }
+    if (!canSegment) { alert('請先執行「局部裁切」，或在入口不勾「局部裁切」直接載入已裁切的通道'); return }
     if (signalNets.length === 0) { alert('請先於「選擇網路」 選擇訊號網路'); return }
     if (!n || n < 2) { alert('分段數 N 必須大於等於 2'); return }
     setLoadingMsg('分析切割位置中…')

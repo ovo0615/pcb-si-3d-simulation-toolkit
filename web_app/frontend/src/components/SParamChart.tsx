@@ -145,7 +145,7 @@ export default function SParamChart({
         color: 'var(--faint)', fontSize: 12, border: '1px dashed var(--border)',
         borderRadius: 6,
       }}>
-        選擇 Port 後按「加入曲線」
+        還沒有曲線。串接完成後這裡會自動畫出插入／回波損耗與串音。
       </div>
     )
   }
