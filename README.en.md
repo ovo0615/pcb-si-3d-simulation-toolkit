@@ -25,8 +25,9 @@ Every speed-up **changes what is actually being solved**, so each one has to ans
 | **Solver default settings** | Is the default adaptive range trustworthy at the sweep top? | The old default **under-reported loss by 3.2 dB**; now spans the whole sweep. [Report](./validation/solver_mix/自適應範圍驗證報告.md) |
 | **TDR impedance location** | How accurately does time convert to trace distance? | Mean error **0.66 mm**, worst **1.71 mm**. [Report](./validation/tdr/TDR_群延遲定位驗證報告.md) |
 | **Cross-section impedance (Q2D)** | How far is the idealised cross-section from the real geometry? | The section is rebuilt from what is **actually there** in the EDB. Six positions along one trace, against SIwave to TDR on the same trace: median 48.617 Ω versus 48.625 Ω, a **median difference of −0.015%**. [Report](./validation/cross_section/Q2D截面與TDR對照驗證報告.md) |
-| **IBIS / IBIS-AMI eye analysis** | — | Managed models with SHA-256 trust; QuickEye/Transient and AMI Statistical/GetWave; an S4P can be declared as differential or as two single-ended lanes that retain crosstalk |
-| **Multi-port crosstalk** | How long must a random pattern run before it hits the worst alignment? | A deterministic worst-case pattern needs **128 UI / 3.1 s**, against 20,000 UI / 116.6 s for random. The deterministic one makes every lane hit its worst case **once for certain**; the random one only expects 1.22 occurrences |
+| **IBIS models and eye analysis** | An eye bound to the wrong side still looks fine | Managed copies with per-file SHA-256 trust. Channels of 8 ports and up are built around a **single** Touchstone component, so all coupling is kept. Each side takes its own `.ibs`; binding is graded on auditable key matches, and anything short of that is handed back for manual assignment |
+| **DDR timing margin** | The measured time is **not** the margin | Margin = measured time − specification requirement − derating, looked up per strobe edge and then reduced to the worst one. Without a compliance profile the tool reports times only and refuses to call pass or fail; it ships no JEDEC numbers of its own |
+| **Multi-port crosstalk** | How long must a random pattern run before it hits the worst alignment? | A deterministic worst-case pattern needs **128 UI / 3.1 s**, against 20,000 UI / 116.6 s for random. The deterministic one makes every lane hit its worst case **once for certain**; the random one only expects 1.22 occurrences. A group with a strobe is a byte lane and yields timing margin; a group without one is multi-lane crosstalk and yields eye degradation — **the two numbers cannot be compared** |
 | **Bus direction** | An eye measured in the wrong direction looks completely normal | Derived lane by lane from the IBIS `Model_type`. When both sides can drive, the user must choose; the tool supplies no default |
 | **Stackup replacement** | Can replacing a stackup silently delete layers? | Differences are shown first with the to-be-deleted layers marked, and nothing is written until confirmed. The EtchFactor that `load()` drops is restored separately |
 | **Backdrill** | Is the stub length right? | Connectivity decides which layers the signal actually enters and leaves. Two independent signals each back out the stackup average Dk from their measured notch, agreeing within **1.0%** |
@@ -59,8 +60,6 @@ Import → Select Nets → Cutout → Port → Segment → Solve → Analyze
 ![Solve schedule running: the solver-region table with each segment stage and elapsed time](./graph/SIwave模擬過程_20260815.png)
 
 ![Cascaded S-parameters, switchable between single-ended and differential](./graph/S參數展現_20260815.png)
-
-![One S4P declared as two single-ended lanes that retain crosstalk, each with its own QuickEye eye diagram and measurements](./graph/IBIS雙單端眼圖_20260816.png)
 
 ![TDR impedance location mapped back onto the layout trace](./graph/TDR_20260815.png)
 
