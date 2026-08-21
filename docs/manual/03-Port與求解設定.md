@@ -2,13 +2,14 @@
 
 [回操作說明索引](../../操作說明.md)
 
-## 設定元件端 Port
+## Port 設定
 
 **Port 是訊號進出模型的接點。通道兩端各一個，不要多勾。**
 
 1. 選 Port 類型：
    - **Coax**：建議用這個。適合元件 Pin 到參考導體的同軸型 Port。
    - **Circuit**：建立電路埠。
+   - **Pin Group（細間距 BGA）**：負端＝該元件所有參考腳，不找座標。整組一致，不與 Coax 混用。
 2. 工具會列出跟你所選訊號 Net 相連的候選元件。
 3. 按「建議端點（最多 2 個）」自動選出通道兩端的元件，再自己確認一次。
 4. **不要把所有候選元件全部勾選。** 大型 BGA 選錯元件的話，會建出一大堆不必要的 Port。
@@ -35,7 +36,12 @@ Port 有正端也有負端。負端就是 Reference，也就是回流路徑。�
 這個修正做過 A／B 實測：同一片板，未修正時輸出 `s8p`，修正後輸出 `s12p`。
 **少掉的 4 個 Port 就是這樣不見的。**
 
-## 設定求解條件（HFSS 3D Layout）
+**細間距 BGA 直接改用 Pin Group。** 球距小到訊號球正下方就是 antipad 時，
+座標型負端根本站不住，吸附也未必救得回來。把 Port 類型選成
+**Pin Group（細間距 BGA）**，負端就是該元件所有參考腳，不找座標。
+**整組一致，不與 Coax 混用。**
+
+## 模擬設定
 
 ![模擬設定：掃頻、自適應方式與收斂條件](../../graph/模擬求解器設定示意_20260815.png)
 
@@ -46,9 +52,12 @@ Solution Frequency、自適應方式、網格方法與收斂條件都只適用 H
 
 可以設定：
 
-- Sweep Type：`Interpolating`、`Discrete` 或 `Fast`。
-- 多段式 Frequency Sweep。
+- 掃頻模式（Sweep Type）：`Interpolating`、`Discrete` 或 `Fast`。
+- 多段式掃頻 (Frequency Sweeps)。
 - Interpolating Sweep 的 Error Tolerance。
+- **這次要用到的頻寬（GHz）**：只影響求解器建議，不改掃頻範圍。
+  跟「N 段分割」那一格是同一個值；已經分過段的話，欄位底下會多一顆
+  **「用這個頻寬重新評估求解器」**。
 - **自適應方式**與**平行自適應區（PAR）**。
 - **網格方法**：`Phi Plus`、`Phi` 或 `Classic`。
 - Max Refinement Per Pass、Min Converged Passes、Max Passes、Max Delta S。
@@ -110,7 +119,7 @@ HFSS 本身收斂是正常的：14 passes、Delta S 從 0.0195 降到 0.0151、�
 
 | 設定 | 預設值 |
 |---|---|
-| Sweep Type | `Interpolating` |
+| 掃頻模式（Sweep Type） | `Interpolating` |
 | Sweep 1 | `0 Hz～1 Hz`，Linear Count，2 Points |
 | Sweep 2 | `1 Hz～100 MHz`，Log Scale，20 Samples |
 | Sweep 3 | `100 MHz～50 GHz`，Linear Step，0.05 GHz |
@@ -133,8 +142,8 @@ HFSS 本身收斂是正常的：14 passes、Delta S 從 0.0195 降到 0.0151、�
 
 1. 載入通道 `.aedb`。可以是別人裁切好的檔案，也可以是上一步只做了裁切的輸出。
 2. 選好訊號 Net 與參考 Net。
-3. 在「設定元件端 Port」選 Port 類型並勾端點元件，在「設定求解條件」設好掃頻與自適應方式。
-4. 按 **「建立 Port 與求解器設定」**。
+3. 在「Port 設定」選 Port 類型並勾端點元件，在「模擬設定」設好掃頻與自適應方式。
+4. 按 **「建立 Port 並套用求解器設定」**。
 
 後端走 `main._apply_ports_and_solver_setup`，跟裁切流程的 Port／Setup 建立
 **共用同一段程式碼**，差別只是不做裁切。
