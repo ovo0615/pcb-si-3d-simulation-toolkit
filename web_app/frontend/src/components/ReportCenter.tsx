@@ -293,7 +293,8 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange 
       <div className="report-center__header">
         <div><h2>一鍵 HTML 報告中心</h2><div>各結果畫面的最新作用中快照會自動帶入報告。</div></div>
         <div className="report-workspace-open">
-          <input value={workspaceInput} onChange={event => setWorkspaceInput(event.target.value)}
+          <input aria-label="報告工作區目錄"
+            value={workspaceInput} onChange={event => setWorkspaceInput(event.target.value)}
             placeholder="留空＝預設目錄；或指定分析輸出目錄／既有 report_workspace" />
           <button className="btn" disabled={busy} onClick={openWorkspace}>切換工作區</button>
         </div>
@@ -336,15 +337,15 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange 
                         {snapshot.stale && <b>可能已過期</b>}
                       </div>
                       <div className="report-snapshot-fields">
-                        <select value={snapshot.engineering_status}
+                        <select aria-label={`${snapshot.title} 的工程狀態`} value={snapshot.engineering_status}
                           onChange={event => void patchSnapshot(snapshot, { engineering_status: event.target.value as SnapshotStatus })}>
                           {Object.entries(STATUS_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                         </select>
-                        <select value={snapshot.section}
+                        <select aria-label={`${snapshot.title} 要放進報告的哪一節`} value={snapshot.section}
                           onChange={event => void patchSnapshot(snapshot, { section: event.target.value })}>
                           {REPORT_SECTION_ORDER.map(section => <option key={section} value={section}>{REPORT_SECTION_LABELS[section]}</option>)}
                         </select>
-                        <textarea value={snapshot.caption} rows={3}
+                        <textarea aria-label={`${snapshot.title} 的圖說`} value={snapshot.caption} rows={3}
                           onChange={event => setManifest(current => current ? {
                             ...current,
                             snapshots: current.snapshots.map(item => item.id === snapshot.id ? { ...item, caption: event.target.value } : item),
@@ -453,7 +454,7 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange 
                 onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, color: event.target.value } })} /></label>
               <button className="btn" onClick={() => setSettings({ ...settings, watermark: { ...DEFAULT_WATERMARK } })}>帶入建議設定</button>
               <div className="report-template-row">
-                <select value={selectedWatermarkTemplate} onChange={event => setSelectedWatermarkTemplate(event.target.value)}>
+                <select aria-label="浮水印範本" value={selectedWatermarkTemplate} onChange={event => setSelectedWatermarkTemplate(event.target.value)}>
                   <option value="">選擇浮水印範本…</option>
                   {watermarkTemplates.map(template => <option key={template.name} value={template.name}>{template.name}</option>)}
                 </select>

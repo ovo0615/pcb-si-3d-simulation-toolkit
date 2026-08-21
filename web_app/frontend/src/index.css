@@ -962,3 +962,365 @@ select.input {
 /* 入口介面隱藏未勾選的面板；hidden 的 UA 樣式會輸給任何 author 的 display 規則，
    因此明確蓋回去。 */
 [hidden] { display: none !important; }
+
+/* ── IBIS／IBIS-AMI 本機模型庫 ────────────────────────────── */
+.model-library {
+  height: 100%;
+  padding: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: #d8e1ec;
+  background: #0c0e12;
+  font-family: "Calibri", "Microsoft JhengHei", sans-serif;
+}
+
+.model-library__header,
+.model-library__import,
+.model-library__detail-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.model-library__header h2,
+.model-library__detail-title h3 { margin: 0; }
+.model-library__header h2 { font-size: 24px; }
+.model-library__header p { margin: 5px 0 0; color: #91a2b5; font-size: 12.5px; }
+.model-library__header-actions { display: flex; align-items: center; gap: 16px; }
+.model-library__tabs { display: inline-flex; padding: 3px; border: 1px solid #2f3b49; border-radius: 8px; background: #11161d; }
+.model-library__tabs button { padding: 6px 11px; color: #91a2b5; border: 0; border-radius: 6px; background: transparent; cursor: pointer; font: inherit; font-size: 11.5px; font-weight: 700; }
+.model-library__tabs button.is-active { color: #eff7ff; background: #245173; box-shadow: 0 0 0 1px rgba(93, 190, 240, .35) inset; }
+.model-library__count { display: flex; align-items: baseline; gap: 7px; color: #8fa1b5; }
+.model-library__count strong { color: #7fd1ff; font-size: 26px; }
+
+.model-library__import {
+  padding: 10px;
+  border: 1px solid #2b3643;
+  border-radius: 9px;
+  background: #131820;
+}
+.model-library__import-selection { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 4px; }
+.model-library__import-selection small { color: #7f93a8; font-size: 10.5px; }
+.model-library__import .input { min-width: 180px; background: #0d1117; color: #e4edf7; border-color: #344253; }
+.model-library__import-paths { width: 100%; min-height: 48px; max-height: 92px; resize: vertical; line-height: 1.35; }
+.model-library__import-btn { width: auto; min-width: 120px; padding: 8px 15px; }
+.model-library__notice { padding: 7px 10px; border-radius: 7px; color: #9ff0c4; background: rgba(39, 174, 96, .12); border: 1px solid rgba(71, 207, 128, .3); font-size: 12px; }
+.model-library__notice--error { color: #ff9b9b; background: rgba(230, 57, 70, .12); border-color: rgba(255, 90, 100, .35); white-space: pre-line; }
+
+.model-library__body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(240px, 31%) minmax(0, 1fr);
+  gap: 10px;
+}
+.model-library__list,
+.model-library__detail {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #2b3643;
+  border-radius: 9px;
+  background: #11161d;
+}
+.model-library__list { padding: 8px; }
+.model-library__detail { padding: 14px; }
+.model-library__path { padding: 3px 4px 9px; color: #6f8297; font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-library__empty { padding: 28px 18px; color: #8292a5; text-align: center; line-height: 1.6; }
+
+.model-library__card {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+  text-align: left;
+  color: #d8e1ec;
+  border: 1px solid #283342;
+  border-radius: 8px;
+  background: #151b23;
+  cursor: pointer;
+}
+.model-library__card:hover { border-color: #3f6e8c; }
+.model-library__card.is-active { border-color: #58b7e8; background: #142735; }
+.model-library__card-title { align-self: center; font-size: 14px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-library__card-meta,
+.model-library__card-hash { grid-column: 1 / -1; color: #8da0b5; font-size: 10.5px; }
+
+.model-library__state { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; padding: 3px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; }
+.model-library__state--ready { color: #8ef0b6; background: rgba(46, 204, 113, .15); border: 1px solid rgba(46, 204, 113, .35); }
+.model-library__state--warning { color: #ffd28a; background: rgba(245, 158, 11, .14); border: 1px solid rgba(245, 158, 11, .35); }
+.model-library__state--block { color: #ff9b9b; background: rgba(230, 57, 70, .14); border: 1px solid rgba(230, 57, 70, .4); }
+.model-library__detail-title { padding-bottom: 11px; border-bottom: 1px solid #27313d; }
+.model-library__detail-title h3 { font-size: 21px; }
+.model-library__detail-title div div { margin-top: 4px; color: #8799ad; font-size: 11.5px; }
+
+.model-library__metrics { margin: 12px 0; display: grid; grid-template-columns: repeat(6, minmax(90px, 1fr)); gap: 7px; }
+.model-library__metrics > div { padding: 8px 9px; border: 1px solid #293441; border-radius: 7px; background: #151b23; }
+.model-library__metrics span { display: block; color: #8295aa; font-size: 10px; }
+.model-library__metrics strong { display: block; margin-top: 2px; color: #e7f0fa; font-size: 15px; }
+.model-library__section { margin-top: 11px; }
+/* 收起來的區塊（原生程式庫、可重現性）：標題要看得出可以展開，但不搶注意力 */
+details.model-library__section > summary,
+details.model-library__manifest > summary { cursor: pointer; padding: 5px 0; color: #b8c7d8; font-size: 13px; font-weight: 600; }
+details.model-library__section > summary:hover,
+details.model-library__manifest > summary:hover { color: #e0edf8; }
+details.model-library__section[open] > summary { margin-bottom: 4px; }
+.model-library__section h4 { margin: 0 0 6px; color: #b8c7d8; font-size: 13px; }
+.model-library__section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 7px; }
+.model-library__section-heading h4 { margin-bottom: 2px; }
+.model-library__section-heading p { margin: 0; color: #7f92a7; font-size: 10.5px; line-height: 1.4; }
+.model-library__section-heading .btn { width: auto; flex: 0 0 auto; }
+.model-library__issue { margin: 4px 0; padding: 6px 8px; border-radius: 6px; font-size: 11.5px; }
+.model-library__issue.is-error { color: #ff9b9b; background: rgba(230, 57, 70, .1); }
+.model-library__issue.is-warning { color: #ffd28a; background: rgba(245, 158, 11, .1); }
+.model-library__table-wrap { overflow: auto; border: 1px solid #293441; border-radius: 7px; }
+.model-library__table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.model-library__table th,
+.model-library__table td { padding: 7px 8px; text-align: left; border-bottom: 1px solid #27313d; white-space: nowrap; }
+.model-library__table th { color: #9fb0c3; background: #19212b; }
+.model-library__table td { color: #d1dbe7; }
+.model-library__native-state { display: inline-flex; align-items: center; padding: 2px 6px; border: 1px solid #3b4654; border-radius: 999px; color: #b5c1cf; background: #1b232d; font-size: 10px; font-weight: 700; }
+.model-library__native-state.is-clean,
+.model-library__native-state.is-trusted { color: #8ef0b6; border-color: rgba(46, 204, 113, .42); background: rgba(46, 204, 113, .12); }
+.model-library__native-state.is-unavailable { color: #ffd28a; border-color: rgba(245, 158, 11, .4); background: rgba(245, 158, 11, .12); }
+.model-library__native-state.is-error { color: #ff9b9b; border-color: rgba(230, 57, 70, .42); background: rgba(230, 57, 70, .12); }
+.model-library__trust-btn { width: auto; min-width: 72px; padding: 4px 7px; font-size: 10px; }
+.model-library__manifest > div { display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 8px; padding: 4px 0; color: #8fa1b5; font-size: 10.5px; }
+.model-library__manifest code { color: #bcd0e5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── 標準 IBIS 點對點通道七步向導 ─────────────────────────── */
+.ibis-wizard { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.ibis-wizard__steps { display: grid; grid-template-columns: repeat(7, minmax(72px, 1fr)); gap: 5px; }
+.ibis-wizard__steps button { min-width: 0; padding: 7px 5px; color: #718397; border: 1px solid #293441; border-radius: 7px; background: #11161d; cursor: default; font: 700 10.5px "Calibri", "Microsoft JhengHei", sans-serif; }
+.ibis-wizard__steps button span { display: inline-flex; width: 18px; height: 18px; margin-right: 5px; align-items: center; justify-content: center; border-radius: 50%; color: #8ea0b4; background: #222c38; }
+.ibis-wizard__steps button.is-active { color: #eaf6ff; border-color: #4eaddd; background: #173246; }
+.ibis-wizard__steps button.is-active span { color: #071018; background: #73cff8; }
+.ibis-wizard__steps button.is-done { color: #88d9ad; border-color: rgba(55, 199, 119, .4); cursor: pointer; }
+.ibis-wizard__steps button.is-done span { color: #dfffea; background: #247a4a; }
+.ibis-wizard__content { min-height: 0; flex: 1; overflow: auto; padding: 18px; border: 1px solid #2b3643; border-radius: 9px; background: #11161d; }
+.ibis-wizard__content section { max-width: 1080px; margin: 0 auto; }
+.ibis-wizard__content h3 { margin: 0 0 5px; color: #e6f1fb; font-size: 20px; }
+.ibis-wizard__content section > p { margin: 0 0 15px; color: #8fa1b5; font-size: 12px; line-height: 1.55; }
+.ibis-wizard__path-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.ibis-wizard__path-row .btn { width: auto; min-width: 90px; }
+.ibis-wizard__form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.ibis-wizard__form-grid.is-four { grid-template-columns: repeat(4, minmax(130px, 1fr)); }
+.ibis-wizard__form-grid label,
+.ibis-wizard__corner { min-width: 0; display: flex; flex-direction: column; gap: 5px; color: #9eb0c3; font-size: 11.5px; }
+.ibis-wizard__form-grid label.is-wide { grid-column: 1 / -1; }
+.ibis-wizard__form-grid .input,
+.ibis-wizard__corner .input,
+.ibis-wizard__path-row .input { color: #e2edf8; border-color: #344253; background: #0d1117; }
+/* 「帶入串接結果」：按鈕在左，右邊只放檔名與 Port 數，完整路徑走 title。 */
+.ibis-wizard__from-cascade { margin-top: 7px; display: flex; align-items: center; gap: 9px; }
+.ibis-wizard__from-cascade .btn { width: auto; flex-shrink: 0; }
+.ibis-wizard__from-cascade code { min-width: 0; overflow: hidden; color: #8fb4ca; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.ibis-wizard__explain { grid-column: 1 / -1; padding: 9px 11px; color: #8fb4ca; border-left: 3px solid #3488b8; border-radius: 5px; background: rgba(38, 117, 160, .12); font-size: 11.5px; line-height: 1.55; }
+.ibis-wizard__summary-strip { margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+.ibis-wizard__summary-strip > * { padding: 5px 9px; color: #b9c8d8; border: 1px solid #344253; border-radius: 999px; background: #151c25; font-size: 11px; }
+.ibis-wizard__summary-strip strong { color: #8bdcff; }
+.ibis-wizard__summary-strip.is-wide { grid-column: 1 / -1; margin: 0; }
+.ibis-wizard__topology-picker { margin: 0 0 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ibis-wizard__topology-picker button { padding: 12px; display: flex; flex-direction: column; gap: 5px; color: #9aacc0; text-align: left; border: 1px solid #344253; border-radius: 8px; background: #121923; cursor: pointer; }
+.ibis-wizard__topology-picker button strong { color: #d9e7f4; font-size: 13px; }
+.ibis-wizard__topology-picker button span { font: 11px/1.45 "Calibri", "Microsoft JhengHei", sans-serif; }
+.ibis-wizard__topology-picker button.is-active { border-color: #49b9ef; box-shadow: inset 0 0 0 1px rgba(73, 185, 239, .35); background: rgba(36, 122, 165, .18); }
+.ibis-wizard__topology-picker button.is-active strong { color: #8bdcff; }
+.ibis-wizard__lanes { display: flex; flex-direction: column; gap: 10px; }
+.ibis-wizard__lanes article { padding: 11px; border: 1px solid #303d4b; border-radius: 8px; background: #0d131a; }
+.ibis-wizard__lanes article > header { margin-bottom: 9px; display: grid; grid-template-columns: 80px minmax(0, 260px); gap: 8px; align-items: center; }
+.ibis-wizard__lanes article > header strong { color: #8bdcff; font-size: 12px; }
+.ibis-wizard__lanes .input { color: #e2edf8; border-color: #344253; background: #0d1117; }
+.ibis-wizard__corner { width: 220px; margin-top: 12px; }
+.ibis-wizard__preflight { margin-bottom: 10px; padding: 11px; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; border: 1px solid #344253; border-radius: 8px; background: #151c25; }
+.ibis-wizard__preflight strong { font-size: 14px; }
+.ibis-wizard__preflight span { color: #a6b7c9; font-size: 11.5px; }
+.ibis-wizard__preflight.is-ready { border-color: rgba(56, 200, 123, .45); }
+.ibis-wizard__preflight.is-ready strong { color: #8ef0b6; }
+.ibis-wizard__preflight.is-blocked { border-color: rgba(230, 72, 82, .45); }
+.ibis-wizard__preflight.is-blocked strong { color: #ff9b9b; }
+.ibis-wizard__confirm { margin-top: 14px; padding: 12px; display: flex; align-items: flex-start; gap: 9px; color: #d7e2ed; border: 1px solid #405063; border-radius: 8px; background: #18212b; font-size: 12px; line-height: 1.5; }
+.ibis-wizard__confirm input { margin-top: 2px; accent-color: #4ab7ee; }
+.ibis-wizard__job { padding: 14px; display: flex; justify-content: space-between; gap: 15px; color: #a9bbce; border: 1px solid #344253; border-radius: 9px; background: #151c25; font-size: 11.5px; }
+.ibis-wizard__job > div:first-child { display: flex; flex-direction: column; gap: 4px; }
+.ibis-wizard__job strong { color: #88d7ff; font-size: 15px; }
+.ibis-wizard__job.is-done { border-color: rgba(56, 200, 123, .45); }
+.ibis-wizard__job.is-done strong { color: #8ef0b6; }
+.ibis-wizard__job.is-error { border-color: rgba(230, 72, 82, .45); }
+.ibis-wizard__job.is-error strong { color: #ff9b9b; }
+.ibis-wizard__results { margin-top: 12px; border: 1px solid #2e3946; border-radius: 8px; overflow: hidden; }
+.ibis-wizard__results summary { padding: 8px 10px; color: #a9bbce; background: #151c25; cursor: pointer; font-size: 11.5px; font-weight: 700; }
+.ibis-wizard__results > div { padding: 7px 9px; display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; border-bottom: 1px solid #28323e; color: #8fa1b5; font-size: 11px; }
+.ibis-wizard__results code { overflow: hidden; color: #c5d9eb; text-overflow: ellipsis; white-space: nowrap; }
+.ibis-wizard__result-toolbar { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ibis-wizard__result-toolbar > div { display: flex; align-items: baseline; gap: 8px; }
+.ibis-wizard__result-toolbar strong { color: #e3eef9; font-size: 15px; }
+.ibis-wizard__result-toolbar span { color: #7f93a8; font-size: 11px; }
+.ibis-eye-gallery { margin-top: 8px; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.ibis-eye-gallery article { min-width: 0; padding: 10px; border: 1px solid #303d4b; border-radius: 9px; background: #0d131a; }
+.ibis-eye-gallery article > header { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ibis-eye-gallery article > header > div { display: flex; flex-direction: column; gap: 2px; }
+.ibis-eye-gallery article > header strong { color: #8bdcff; font-size: 14px; }
+.ibis-eye-gallery article > header span { color: #8295a9; font-size: 10.5px; text-transform: uppercase; }
+.ibis-eye-gallery__image { width: 100%; height: 260px; padding: 5px; overflow: hidden; border: 1px solid #344253; border-radius: 7px; background: #fff; cursor: zoom-in; }
+.ibis-eye-gallery__image img { width: 100%; height: 100%; display: block; object-fit: contain; }
+.ibis-eye-gallery__metrics { margin-top: 8px; display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; }
+.ibis-eye-gallery__metrics > div { padding: 7px 8px; display: flex; flex-direction: column; gap: 2px; border: 1px solid #2c3845; border-radius: 6px; background: #151c25; }
+.ibis-eye-gallery__metrics span { color: #8799ad; font-size: 10.5px; }
+.ibis-eye-gallery__metrics strong { color: #e0edf8; font-size: 14px; }
+.ibis-eye-gallery__unavailable { margin-top: 8px; padding: 7px 9px; border: 1px solid #3a3a2c; border-radius: 6px; background: #1d1c15; color: #d6c98a; font-size: 11px; line-height: 1.5; }
+.ibis-eye-gallery article > code { margin-top: 8px; display: block; overflow: hidden; color: #71859a; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px; }
+.ibis-eye-modal { position: fixed; inset: 0; z-index: 5000; padding: 26px; display: flex; align-items: center; justify-content: center; background: rgba(2, 6, 11, .88); backdrop-filter: blur(5px); }
+.ibis-eye-modal__panel { width: min(1500px, 96vw); height: min(920px, 94vh); padding: 12px; display: flex; flex-direction: column; gap: 9px; border: 1px solid #42566b; border-radius: 11px; background: #0d131a; box-shadow: 0 20px 70px rgba(0, 0, 0, .65); }
+.ibis-eye-modal__panel > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ibis-eye-modal__panel > header > div { display: flex; align-items: baseline; gap: 10px; }
+.ibis-eye-modal__panel > header strong { color: #e6f1fb; font-size: 18px; }
+.ibis-eye-modal__panel > header span { color: #8bdcff; font-size: 11px; text-transform: uppercase; }
+.ibis-eye-modal__panel > img { flex: 1; min-height: 0; width: 100%; object-fit: contain; border-radius: 7px; background: #fff; }
+.ibis-eye-modal__panel > code { overflow: hidden; color: #8295a9; text-align: center; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.ibis-wizard__footer { display: grid; grid-template-columns: 130px 1fr 180px; align-items: center; gap: 10px; }
+.ibis-wizard__footer span { color: #8294a8; text-align: center; font-size: 11px; }
+
+.ami-route-decision { margin: 12px 0; padding: 10px 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 7px 16px; color: #9fc9df; border: 1px solid rgba(65, 177, 229, .42); border-radius: 8px; background: rgba(38, 117, 160, .12); font-size: 11.5px; }
+.ami-route-decision strong { color: #8bdcff; font-size: 13px; }
+.ami-route-decision.is-error { color: #ffb3b3; border-color: rgba(230, 72, 82, .45); background: rgba(230, 57, 70, .1); }
+.ami-route-decision.is-error strong { color: #ff9b9b; }
+.ami-parameter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.ami-parameter-panel { min-width: 0; padding: 10px; border: 1px solid #2d3946; border-radius: 8px; background: #131a22; }
+.ami-parameter-panel__title { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; color: #c7d7e7; font-size: 12px; }
+.ami-parameter-panel__title span { color: #7f93a8; font-size: 10.5px; }
+.ami-parameter-panel__empty { padding: 18px 8px; color: #75879a; text-align: center; font-size: 11px; }
+.ami-parameter-panel label { margin-top: 7px; min-width: 0; display: grid; grid-template-columns: minmax(145px, 1fr) minmax(120px, .8fr); gap: 5px 9px; align-items: center; color: #9cafc2; font-size: 10.5px; }
+.ami-parameter-panel label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ami-parameter-panel label .input { min-width: 0; color: #e2edf8; border-color: #344253; background: #0d1117; }
+.ami-parameter-panel label small { grid-column: 1 / -1; color: #71859a; line-height: 1.35; }
+
+@media (max-width: 1050px) {
+  .model-library__metrics { grid-template-columns: repeat(3, minmax(90px, 1fr)); }
+  .model-library__body { grid-template-columns: minmax(210px, 35%) minmax(0, 1fr); }
+  .ibis-wizard__steps { grid-template-columns: repeat(4, minmax(90px, 1fr)); }
+  .ibis-wizard__form-grid.is-four { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+  .ibis-wizard__topology-picker { grid-template-columns: 1fr; }
+  .ami-parameter-grid { grid-template-columns: 1fr; }
+}
+
+/* ── 入口任務卡片圖示 ─────────────────────────────────────────
+   先提供載入電路板與局部裁切兩個 SVG 原型；確認視覺語言後可沿用同一尺寸
+   擴充到 Port、N 段、排程與報告等任務。 */
+.task-picker-root .task-picker-icon {
+  width: 58px;
+  height: 58px;
+  flex: 0 0 58px;
+  margin-top: -1px;
+}
+
+@media (max-width: 980px) {
+  .task-picker-root {
+    padding: 16px 18px 12px !important;
+  }
+
+  .task-picker-root > div:nth-child(2) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .task-picker-root .task-picker-icon {
+    width: 50px;
+    height: 50px;
+    flex-basis: 50px;
+  }
+}
+
+/* ── IBIS 預檢與重用（ADR-0016／0017／0036／0037）────────────────────────── */
+
+.ibis-wizard__preflight-block {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line, #2a3646);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ibis-wizard__preflight-block h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.ibis-wizard__muted {
+  color: var(--muted, #9fb0c3);
+  font-size: 12.5px;
+  margin: 4px 0;
+}
+
+.ibis-wizard__checks {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.ibis-wizard__checks td {
+  padding: 4px 8px 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.ibis-wizard__checks .is-pass { color: #76e38e; }
+.ibis-wizard__checks .is-fail { color: #ff6b6b; font-weight: 700; }
+/* 無法判定不是通過，用警示色而不是灰色 */
+.ibis-wizard__checks .is-unknown { color: #ffb020; }
+
+/* 重用提議刻意不用錯誤色：既有結果是成功的，只是需要使用者決定 */
+.ibis-wizard__reuse {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid #00d4ff;
+  border-radius: 10px;
+  background: rgba(0, 212, 255, 0.06);
+}
+
+.ibis-wizard__reuse h4 { margin: 0 0 6px; font-size: 14px; }
+
+.ibis-wizard__reuse-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* 調整後重跑與前後比較：讓「改一項再跑」與「差在哪」在同一畫面看得完 */
+.ibis-wizard__rerun { margin-top: 11px; padding: 10px 12px; border: 1px solid #2c3845; border-radius: 8px; background: #151c25; }
+.ibis-wizard__rerun strong { display: block; color: #e0edf8; font-size: 13px; }
+.ibis-wizard__rerun span { display: block; margin: 3px 0 8px; color: #8799ad; font-size: 11px; }
+.ibis-wizard__rerun > div { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.ibis-wizard__compare { margin-top: 11px; padding: 10px 12px; border: 1px solid #2c3845; border-radius: 8px; background: #151c25; }
+.ibis-wizard__compare strong { display: block; margin-bottom: 7px; color: #e0edf8; font-size: 13px; }
+.ibis-wizard__compare p { margin: 0 0 8px; color: #8799ad; font-size: 11px; }
+.ibis-wizard__compare table { width: 100%; margin-bottom: 9px; border-collapse: collapse; font-size: 11px; }
+.ibis-wizard__compare th { padding: 4px 7px; color: #8799ad; text-align: left; border-bottom: 1px solid #2c3845; font-weight: 600; }
+.ibis-wizard__compare td { padding: 4px 7px; color: #b9c8d8; border-bottom: 1px solid #202a36; }
+.ibis-wizard__compare td strong { display: inline; color: #7fd4a8; font-size: 11px; }
+
+/* 多埠通道面板。沿用 IBIS 向導的深色版面，但不分步驟——多道的決定彼此相依
+   （道數影響哪些 Port 需要處置、碼型影響涵蓋率），拆成步驟反而看不到全貌。 */
+.multi-lane-wizard { gap: 0; padding: 18px; overflow: auto; border: 1px solid #2b3643; border-radius: 9px; background: #11161d; }
+.multi-lane-wizard section { max-width: 1080px; margin: 0 auto 22px; }
+.multi-lane-wizard h3 { margin: 0 0 6px; color: #e6f1fb; font-size: 18px; }
+.multi-lane-wizard h4 { margin: 12px 0 4px; color: #cfe0f0; font-size: 13px; }
+.multi-lane-wizard label { margin: 0 14px 10px 0; display: inline-flex; flex-direction: column; gap: 4px; color: #9eb0c3; font-size: 11.5px; }
+.multi-lane-wizard .input { color: #e2edf8; border-color: #344253; background: #0d1117; }
+.multi-lane-wizard .input.is-wide { min-width: 460px; }
+.multi-lane-wizard p { margin: 0 0 8px; color: #b9c8d8; font-size: 12px; line-height: 1.6; }
+.multi-lane-wizard .hint { color: #8fa1b5; font-size: 11.5px; }
+.multi-lane-wizard .error { padding: 8px 11px; color: #ffc9c9; border-left: 3px solid #d05353; border-radius: 5px; background: rgba(190, 60, 60, .14); }
+/* 涵蓋率不足與處置未填都用同一種顯著樣式：它們都是「跑得動但結果會被誤讀」
+   的情況，比擋下來更需要看得見。 */
+.multi-lane-wizard .warning { padding: 9px 11px; color: #ffe0a8; border-left: 3px solid #c9942f; border-radius: 5px; background: rgba(190, 140, 40, .13); }
+.multi-lane-wizard .blockers { padding: 10px 13px; border: 1px solid rgba(208, 83, 83, .5); border-radius: 8px; background: rgba(150, 45, 45, .12); }
+.multi-lane-wizard .blockers h3 { color: #ffb4b4; }
+.multi-lane-wizard .blockers li { margin-bottom: 6px; color: #ffd4d4; font-size: 12px; line-height: 1.6; }
+.multi-lane-wizard .required { margin-left: 6px; padding: 1px 6px; color: #ffd9a6; border-radius: 999px; background: rgba(190, 140, 40, .22); font-size: 10px; }
+.multi-lane-wizard details { margin: 8px 0; }
+.multi-lane-wizard summary { color: #9fc6e0; cursor: pointer; font-size: 12px; }
+.multi-lane-wizard table { margin-top: 8px; }

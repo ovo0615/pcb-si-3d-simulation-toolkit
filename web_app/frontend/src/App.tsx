@@ -1,6 +1,6 @@
 // PCB SI 3D 模擬分析工具 — 前端主程式
 // 裁切流程：載入電路板 → 選擇訊號／參考網路 → 裁切設定 → Port 設定 → 執行裁切
-import { useState, useEffect, useRef, type ChangeEvent } from 'react'
+import { useState, useEffect, useMemo, useRef, type CSSProperties, type ChangeEvent } from 'react'
 import { Allotment } from 'allotment'
 import {
   loadLogSplit, loadMainSplit, saveLogSplit, saveMainSplit,
@@ -8,7 +8,23 @@ import {
 } from './splitLayout'
 import { logColor } from './logLevel'
 import 'allotment/dist/style.css'
-import Preview2D, { CleanupOverlay, CleanupRemovedGeometry, PreviewData, SegmentCutsInfo, TdrMarkerSpan } from './components/Preview2D'
+import Preview2D, {
+  CleanupOverlay,
+  CleanupRemovedGeometry,
+  CrossSectionCut,
+  CrossSectionMode,
+  CrossSectionRegion,
+  PreviewData,
+  SegmentCutsInfo,
+  TdrMarkerSpan,
+} from './components/Preview2D'
+import CrossSectionView, {
+  CrossSectionResults,
+  CrossSectionScan,
+} from './components/CrossSectionView'
+import CrossSectionComparison, {
+  ComparisonResult,
+} from './components/CrossSectionComparison'
 import SParamChart, { SParamSeries } from './components/SParamChart'
 import TdrChart from './components/TdrChart'
 import TaskPicker from './components/TaskPicker'
@@ -22,6 +38,7 @@ import {
 import CascadeSchematic, { CascadeGraph } from './components/CascadeSchematic'
 import ReportCenter from './components/ReportCenter'
 import ReportSnapshotButton from './components/ReportSnapshotButton'
+import ModelLibrary from './components/ModelLibrary'
 import { markReportSnapshotsStale } from './reportApi'
 
 const normalizeUserPath = (path: string): string => {
@@ -259,7 +276,30 @@ interface ComponentInfo {
   pin_count: number
 }
 
-type ViewMode = 'full' | 'cut' | 'cleanup' | 'segments' | 'schematic' | 'sparam' | 'eye' | 'tdr' | 'report'
+// 已選網路清單的最小高度。
+//
+// 原本只給 flex: 3 / flex: 2，左側面板一長（多勾幾個任務就會）兩個清單就被
+// 壓到只剩一行——選了兩條訊號網路卻只看得到一條，看起來像是沒選到。
+// 一列約 24 px，另外留 27 px 給標題與內距。訊號五列、參考兩列——夠看出「選了
+// 幾條」，又不會把下面的面板擠掉。清單本身可捲動，超過的看得到。
+/** 側向收斂驗證的加寬倍率。1.5 是常用的起點，也是回報訊息裡那個「加寬 50%」。 */
+const WIDEN_FACTOR = 1.5
+
+const NETLIST_ROW_HEIGHT = 24
+const NETLIST_CHROME_HEIGHT = 27
+const NETLIST_SIGNAL_MIN_HEIGHT = 5 * NETLIST_ROW_HEIGHT + NETLIST_CHROME_HEIGHT
+const NETLIST_REFERENCE_MIN_HEIGHT = 2 * NETLIST_ROW_HEIGHT + NETLIST_CHROME_HEIGHT
+/** 兩個清單加上中間的間距。外層容器也要有這個下限，否則子項會溢位蓋到下面的面板。 */
+const NETLIST_MIN_HEIGHT =
+  NETLIST_SIGNAL_MIN_HEIGHT + NETLIST_REFERENCE_MIN_HEIGHT + 6
+/** 清單上方的標題、說明、匯入匯出按鈕與過濾欄合計高度。 */
+const NETS_HEADER_HEIGHT = 200
+// DDR 分類結果面板的高度上限。實測 433 條網路的板子攤開是 281 px；
+// 這個值同時當作面板自己的 maxHeight 與外層要多留的空間，兩邊用同一個數字，
+// 才不會像上次那樣「面板長高了、外層沒跟上」而讓清單掛到外面。
+const DDR_PANEL_MAX_HEIGHT = 300
+
+type ViewMode = 'full' | 'cut' | 'cleanup' | 'segments' | 'schematic' | 'sparam' | 'eye' | 'models' | 'tdr' | 'crosssection' | 'report'
 
 /** 量測容器實際高度，讓圖表填滿剩餘空間而不需捲動。
  *  分頁高度會隨視窗與 Allotment 分隔線改變，因此以 ResizeObserver 追蹤，
@@ -279,6 +319,17 @@ function useMeasuredHeight<T extends HTMLElement>() {
   }, [])
   return [ref, height] as const
 }
+
+/** 前後端之間的介面版號，必須與後端 `main.py` 的 `API_CONTRACT_VERSION` 相同。
+ *
+ *  前端是靜態檔：`npm run build` 一跑，**還在跑的舊後端就會開始供應新前端**。
+ *  新前端呼叫新端點會撞上根路徑的 StaticFiles，而它只收 GET／HEAD，於是 POST
+ *  得到 `405 Method Not Allowed`——訊息完全沒有指向真正的原因。更難查的是
+ *  另一半：舊後端看不懂新送的欄位會**安靜忽略**，畫面上只表現為「按鈕是灰的」。
+ *  2026-08-19 實測兩種都發生了。
+ *
+ *  加端點或改送出欄位時兩邊一起 +1；`test_api_contract_version.py` 會擋住只改一邊。 */
+const API_CONTRACT_VERSION = 3
 
 /** 結果物件換版後，將同類報告快照標記為可能過期；第一次載入不誤報。 */
 function useReportStaleRevision(
@@ -310,6 +361,14 @@ function riseTimePsFor(dataRateGbps: number): number | null {
   if (!Number.isFinite(dataRateGbps) || dataRateGbps <= 0) return null
   return Math.round(1000 / dataRateGbps * RISE_TIME_UI_RATIO * 1000) / 1000
 }
+/** 背鑽表格的 Net 欄：完整網路名，過長才以刪節號收尾（滑鼠移上去看全名）。
+ *  這欄是使用者判斷「哪一條訊號的 Via 要背鑽」的唯一依據，不可截字元：
+ *  舊版寫死 `net.split('.')[0].slice(7)`，只要第一段不超過 7 個字元整欄就是空白。 */
+const BD_NET_STYLE: CSSProperties = {
+  display: 'block', maxWidth: 150,
+  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+}
+
 type CleanupCompareMode = 'side-by-side' | 'before' | 'after' | 'overlay'
 
 interface ExtFileInfo {
@@ -445,6 +504,10 @@ export default function App() {
   const [bdResult, setBdResult] = useState<any | null>(null)
   const [bdOutputPath, setBdOutputPath] = useState('')
   const [allNets, setAllNets] = useState<string[]>([])
+  // DDR 自動分類的結果與使用者勾選的角色。null = 還沒分類過。
+  const [ddrResult, setDdrResult] = useState<any>(null)
+  const [ddrRoles, setDdrRoles] = useState<string[]>([])
+  const [ddrBusy, setDdrBusy] = useState(false)
   const [components, setComponents] = useState<ComponentInfo[]>([])
 
   // ── 網路選擇 ──
@@ -596,6 +659,30 @@ export default function App() {
   const [tdrAnalysisIdx, setTdrAnalysisIdx] = useState(0)  // A 法／B 法切換
   const [tdrMarkers, setTdrMarkers] = useState<TdrMarkerSpan[] | null>(null)
   const [tdrMapError, setTdrMapError] = useState('')
+
+  // 截面阻抗（Q2D）：在 Layout 上框工作範圍、拉一條切線，從 EDB 還原截面。
+  // 工作範圍同時是二維模型的側向截斷邊界，不只是畫面上的框（ADR-0051）。
+  const [xsMode, setXsMode] = useState<CrossSectionMode>('none')
+  const [xsRegion, setXsRegion] = useState<CrossSectionRegion | null>(null)
+  const [xsCut, setXsCut] = useState<CrossSectionCut | null>(null)
+  const [xsScan, setXsScan] = useState<CrossSectionScan | null>(null)
+  const [xsBusy, setXsBusy] = useState(false)
+  const [xsError, setXsError] = useState('')
+  const [xsResolutionUm, setXsResolutionUm] = useState('2')
+  const [xsHeightUm, setXsHeightUm] = useState('')   // 導體到參考面，判側向截斷用
+  const [xsRoleOverrides, setXsRoleOverrides] = useState<Record<string, string>>({})
+  const [xsSavedCuts, setXsSavedCuts] = useState<any[]>([])
+  const [xsCutsSource, setXsCutsSource] = useState('')
+  const [xsSolveMode, setXsSolveMode] = useState('standard')
+  const [xsFrequency, setXsFrequency] = useState('8GHz')
+  const [xsWidenCheck, setXsWidenCheck] = useState(false)
+  const [xsJob, setXsJob] = useState<any | null>(null)
+  const [xsResultIdx, setXsResultIdx] = useState(0)
+  // TDR 捷徑（第 4 期）：把劇變的距離或沿線取樣直接換成切線
+  const [xsFromTdrBusy, setXsFromTdrBusy] = useState(false)
+  const [xsSampleSpacingMm, setXsSampleSpacingMm] = useState('10')
+  const [xsHalfWidthUm, setXsHalfWidthUm] = useState('7000')
+  const [xsCompare, setXsCompare] = useState<ComparisonResult | null>(null)
   const [spChartRef, spChartHeight] = useMeasuredHeight<HTMLDivElement>()
   // 外部檔案接線模式
   const [extFiles, setExtFiles] = useState<ExtFileInfo[]>([])
@@ -615,6 +702,30 @@ export default function App() {
       }
     }
   }, [sweeps])
+
+  // 切面的接地縫合檢查需要知道要解到幾 GHz——縫合間距的可信上限與頻率相關。
+  // 取目前掃頻設定的最高頻；讀不到就送 null，後端會退回不看頻率的舊規則。
+  const targetFmaxGHz = useMemo(() => {
+    if (!sweeps.length) return null
+    const end = parseFreqToGHz(sweeps[sweeps.length - 1].end)
+    return Number.isFinite(end) && end > 0 ? end : null
+  }, [sweeps])
+
+  /** 這次**真正要用到**的頻寬（GHz）。空字串＝跟著掃頻上限走。
+   *
+   *  為什麼不能直接用掃頻上限：掃頻常常開得比需要的寬（留給 TDR、留餘裕），
+   *  而求解器要不要用 HFSS 取決於「你要用到幾 GHz」。DDR3L-1866 的邊緣拐點
+   *  約 2～3.5 GHz，掃到 10 GHz 只是保險，不代表 10 GHz 的精度要成立。 */
+  /** 後端介面版號與前端對不上（＝後端沒重啟）。 */
+  const [staleBackend, setStaleBackend] = useState<number | null>(null)
+  const [usableBandwidthGHz, setUsableBandwidthGHz] = useState<string>('')
+  /** 資料率（Gbps）。填了就由工具導出可用頻寬，使用者不必自己算拐點。
+   *  DDR 的人知道自己跑幾 Gbps，不見得知道邊緣拐點在哪。 */
+  const [dataRateGbps, setDataRateGbps] = useState<string>('')
+  const [bandwidthBasis, setBandwidthBasis] = useState<string>('')
+  const effectiveFmaxGHz = usableBandwidthGHz
+    ? (Number(usableBandwidthGHz) > 0 ? Number(usableBandwidthGHz) : null)
+    : targetFmaxGHz
 
   // ── 預覽場景 ──
   const [fullScene, setFullScene] = useState<PreviewData | null>(null)
@@ -669,6 +780,19 @@ export default function App() {
 
   // 是否可進行分段：裁切完成、或直接匯入分段模式已載入
   const canSegment = !!cutScene || (directSegmentMode && allNets.length > 0)
+
+  /** 「建立 Port 並套用求解器設定」還缺什麼。
+   *
+   *  這顆按鈕有四個前提，全部滿足才亮。灰掉卻不說原因的話，使用者只能一格
+   *  一格試——實際回報過：板子載入了、Port 類型也選了、元件也勾了，就是按
+   *  不下去，因為**還沒執行裁切**，而那件事發生在畫面另一區。 */
+  const portsSetupBlockers = [
+    !cutScene && !directSegmentMode ? '請先執行裁切' : '',
+    signalNets.length === 0 ? '請選訊號網路' : '',
+    refNets.length === 0 ? '請選參考網路' : '',
+    Object.keys(checkedComps).filter(c => checkedComps[c]).length === 0
+      ? '請勾選要建立 Port 的元件' : '',
+  ].filter(Boolean)
 
   /** 後端 session 目前開著的那個檔。每個會另存新檔的步驟完成後都要更新。
    *
@@ -732,6 +856,30 @@ export default function App() {
   }, [])
 
   // ── API 呼叫 ──────────────────────────────────────────
+  /** 把後端的錯誤攤成一句人看得懂的話。
+   *
+   *  FastAPI 的驗證錯誤（422）`detail` 是一個**陣列**，每項長得像
+   *  `{loc: ["body","metadata_path"], msg: "Field required"}`。
+   *  直接丟進 `new Error()` 會得到 **`[object Object]`**——2026-08-19 實測
+   *  就是這樣：真正的原因是「少送了 metadata_path」，而畫面上完全看不出來。
+   */
+  const describeApiError = (data: any, res: Response): string => {
+    const detail = data?.detail
+    if (typeof detail === 'string' && detail) return detail
+    if (Array.isArray(detail)) {
+      const parts = detail.map((item: any) => {
+        const where = Array.isArray(item?.loc)
+          ? item.loc.filter((x: any) => x !== 'body').join('.')
+          : ''
+        const message = item?.msg || JSON.stringify(item)
+        return where ? `${where}：${message}` : String(message)
+      })
+      return `HTTP ${res.status}　${parts.join('；')}`
+    }
+    if (detail) return JSON.stringify(detail)
+    return res.statusText || `HTTP ${res.status}`
+  }
+
   const api = async (url: string, body?: any) => {
     const res = await fetch(url, body === undefined
       ? undefined
@@ -750,7 +898,7 @@ export default function App() {
       }
       throw new Error(`伺服器回應格式錯誤（非 JSON）：${text.slice(0, 300)}`)
     }
-    if (!res.ok) throw new Error(data?.detail || res.statusText)
+    if (!res.ok) throw new Error(describeApiError(data, res))
     return data
   }
 
@@ -840,6 +988,18 @@ export default function App() {
   }
 
   // 工作檔一換（裁切／疊構／背鑽／清理／Port 任一步完成），所有還沒被使用者
+  // 開場先確認後端不是舊的。這個檢查放在最前面，因為版本對不上時後面每一個
+  // 症狀都會指向錯的方向（405、按鈕灰掉、欄位被安靜忽略）。
+  useEffect(() => {
+    void (async () => {
+      try {
+        const status = await api('/api/status')
+        const version = Number(status?.api_contract_version ?? 0)
+        setStaleBackend(version === API_CONTRACT_VERSION ? null : version)
+      } catch { /* 連不上就讓其他地方去報，不在這裡疊一層 */ }
+    })()
+  }, [])
+
   // 動過的輸出路徑建議都要跟著長出新的一節，檔名才完整記錄做過哪些加工。
   useEffect(() => {
     if (!workingPath) return
@@ -1401,6 +1561,9 @@ ${state.error}` : ''}`)
           signal_nets: signalNets,
           reference_nets: refNets,
           quality_threshold: segmentQuality,
+          // 後端這條路收的是 required_bandwidth_ghz。原本送 target_fmax_ghz，
+          // 名字對不上被 pydantic 靜默丟掉，依複雜度分段因此永遠純看幾何。
+          required_bandwidth_ghz: effectiveFmaxGHz,
           cuts: manualCuts || [],
         })
       setComplexityAnalysis(data)
@@ -1443,6 +1606,7 @@ ${state.error}` : ''}`)
         reference_nets: refNets,
         quality_threshold: segmentQuality,
         hfss_mesh_method: hfssMeshMethod,
+        target_fmax_ghz: targetFmaxGHz,
       })
       setSegAnalysis(data)
       setComplexityAnalysis(null)
@@ -1792,7 +1956,12 @@ ${data.output_path}`)
     const metadataPath = normalizeUserPath(schedMetaPath)
     if (!metadataPath) return
     try {
-      const selected = await api('/api/browse_touchstone_output')
+      // 帶著這次串接的產出當預設檔名與目錄開啟——檔名裡的埠數與日期
+      // 正是之後辨識這個檔的依據，每次要人自己想一個並不合理。
+      const suggested = cascadeResult?.output_path || ''
+      const selected = await api(
+        '/api/browse_touchstone_output'
+        + (suggested ? `?suggested=${encodeURIComponent(suggested)}` : ''))
       if (!selected.path) return
       setCascadeBusy(true)
       const data = await api('/api/cascade/run', {
@@ -1879,7 +2048,8 @@ ${data.output_path}`)
       `模式：${eyeMode === 'differential' ? '差動' : '單端'}\n` +
       `資料速率：${dataRate} Gbps\n` +
       `上升／下降時間：${riseTime} ps\n` +
-      `Port：${mapping}\n\n確認後才會建立並求解 Circuit。`,
+      `Port：${mapping}\n` +
+      `\n確認後才會建立並求解 Circuit。`,
     )) return
     circuitBusyRef.current = true
     setCircuitBusy(true)
@@ -2028,7 +2198,10 @@ ${data.output_path}`)
       try {
         const state = await api('/api/circuit/quick_eye/status')
         if (cancelled) return
-        setEyeJob(state)
+        // 內容沒變就沿用舊物件：求解中每 2.5 秒換一個新物件，會讓報告的
+        // 「結果已更新」偵測反覆誤觸。
+        setEyeJob((previous: any) =>
+          JSON.stringify(previous) === JSON.stringify(state) ? previous : state)
         if (!state.running && (state.status === 'done' || state.status === 'error')) {
           circuitBusyRef.current = false
           setCircuitBusy(false)
@@ -2203,7 +2376,10 @@ ${data.output_path}`)
     const poll = async () => {
       try {
         const state = await api('/api/tdr/status')
-        if (!cancelled) setTdrJob(state)
+        if (cancelled) return
+        // 同上：內容一樣就沿用舊物件，免得下游（例如與 Q2D 的對照）白算一次。
+        setTdrJob((previous: any) =>
+          JSON.stringify(previous) === JSON.stringify(state) ? previous : state)
       } catch { /* 後端暫時忙碌時保留上次狀態 */ }
     }
     poll()
@@ -2306,12 +2482,387 @@ ${data.output_path}`)
     }
   }
 
-  // 排程執行中每秒觸發重繪，讓「求解中」的段耗時平滑跳動（不打 API）
+  // ── 截面阻抗（Q2D）───────────────────────────────────────
+  //
+  // 掃描不呼叫 AEDT：花掉一份 Q2D 授權才發現截面不能用，是最貴的學法。
+
+  // 換板子就把上一片的標註清掉，再讀回這一片自己的（ADR-0053）。留著舊的
+  // 會讓人以為新板已經標註過。
+  //
+  // 相依要看 `fullScene` 而不是只看 `inputPath`：路徑欄一填好 inputPath 就變了，
+  // 但那時使用者還沒按「載入檔案」，後端手上沒有板子，切線集只會回空的——
+  // 結果是存過切線的板子載進來，畫面上一條都沒有。
   useEffect(() => {
-    if (!schedStatus?.running) return
+    setXsRegion(null)
+    setXsCut(null)
+    setXsScan(null)
+    setXsRoleOverrides({})
+    setXsError('')
+    setXsSavedCuts([])
+    setXsCutsSource('')
+    if (!show.crosssection || !inputPath || !fullScene) return
+    let cancelled = false
+    api('/api/cross-section/cuts')
+      .then(data => {
+        if (cancelled) return
+        setXsSavedCuts(data.cuts || [])
+        setXsCutsSource(data.source || '')
+      })
+      .catch(() => { /* 讀不到就是還沒標註過，不是錯誤 */ })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputPath, fullScene, show.crosssection])
+
+  // 範圍或切線一改，上一次的截面就不再對應畫面上的東西了。留著它會讓人拿舊
+  // 截面的判斷去看新的切線。
+  const handleXsRegionDrawn = (region: CrossSectionRegion) => {
+    setXsRegion(region)
+    setXsCut(null)
+    setXsScan(null)
+    setXsRoleOverrides({})
+    setXsMode('cut')
+  }
+
+  const handleXsCutDrawn = (cut: CrossSectionCut) => {
+    setXsCut(cut)
+    setXsScan(null)
+    setXsRoleOverrides({})
+    setXsMode('none')
+  }
+
+  const runCrossSectionScan = async (
+    overrides: Record<string, string> = xsRoleOverrides,
+  ) => {
+    if (!xsRegion || !xsCut) {
+      setXsError('請先在 Layout 上框出工作範圍，再點一條切線。')
+      return
+    }
+    setXsBusy(true)
+    setXsError('')
+    try {
+      const height = xsHeightUm.trim() ? Number(xsHeightUm) : 0
+      const scan: CrossSectionScan = await api('/api/cross-section/scan', {
+        axis: xsCut.axis,
+        coordinate_mm: xsCut.coordinateMm,
+        x0_mm: xsRegion.x0Mm, y0_mm: xsRegion.y0Mm,
+        x1_mm: xsRegion.x1Mm, y1_mm: xsRegion.y1Mm,
+        name: `XS_${xsCut.axis.toUpperCase()}_${xsCut.coordinateMm.toFixed(3)}`,
+        reference_nets: refNets,
+        excluded_nets: [],
+        role_overrides: overrides,
+        resolution_um: Number(xsResolutionUm) || 2,
+        conductor_to_reference_um: Number.isFinite(height) ? height : 0,
+      })
+      setXsScan(scan)
+    } catch (e) {
+      setXsScan(null)
+      setXsError(String(e))
+    } finally {
+      setXsBusy(false)
+    }
+  }
+
+  // 改身分會改變導體的組成（參考的段全部併成一個 GND），所以要重新掃描才
+  // 看得到新的 ImpedancePlan。直接跟著重掃，不要求使用者自己記得按。
+  const handleXsRoleOverride = (key: string, role: string) => {
+    const next = { ...xsRoleOverrides, [key]: role }
+    setXsRoleOverrides(next)
+    runCrossSectionScan(next)
+  }
+
+  const handleXsSaveCut = async () => {
+    if (!xsRegion || !xsCut) return
+    const entry = {
+      name: xsScan?.cut?.name
+        || `XS_${xsCut.axis.toUpperCase()}_${xsCut.coordinateMm.toFixed(3)}`,
+      axis: xsCut.axis,
+      coordinate_mm: xsCut.coordinateMm,
+      region: {
+        x0_mm: xsRegion.x0Mm, y0_mm: xsRegion.y0Mm,
+        x1_mm: xsRegion.x1Mm, y1_mm: xsRegion.y1Mm,
+      },
+      resolution_um: Number(xsResolutionUm) || 2,
+      role_overrides: xsRoleOverrides,
+    }
+    // 同名就覆蓋——同一條切線重標一次是修正，不是新增一條。
+    const cuts = [...xsSavedCuts.filter(c => c.name !== entry.name), entry]
+    try {
+      const result = await api('/api/cross-section/cuts', { cuts })
+      setXsSavedCuts(cuts)
+      setXsCutsSource(result.path || '')
+    } catch (e) {
+      setXsError('切線存檔失敗：' + String(e))
+    }
+  }
+
+  // 背景求解狀態輪詢（仿眼圖與 TDR）。開頁時也問一次：工作是後端在跑的，
+  // 重新整理之後前端沒有這一下就接不上，進度會整個消失。
+  useEffect(() => {
+    if (!show.crosssection) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const state = await api('/api/cross-section/status')
+        if (cancelled) return
+        // 內容一樣就不要換狀態。輪詢回來的永遠是一個**新物件**，而 React 認的是
+        // 物件識別不是內容——照單全收會讓下游每 8 秒重跑一次，畫面整塊閃掉再回來。
+        setXsJob((previous: any) =>
+          JSON.stringify(previous) === JSON.stringify(state) ? previous : state)
+      } catch { /* 後端還沒起來就下次再問 */ }
+    }
+    poll()
+    const timer = window.setInterval(poll, xsJob?.running ? 2000 : 8000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show.crosssection, xsJob?.running])
+
+  // Q2D 與 TDR 兩邊都有結果時自動對照。任一邊沒有就不算——把一條 TDR 曲線
+  // 跟零個 Q2D 點畫在一起沒有意義。
+  useEffect(() => {
+    // 這裡刻意**不先清空**。重算只要一百毫秒，先清空會讓整塊對照消失再出現，
+    // 在輪詢的節奏下就是規律的閃爍。算好再換掉，畫面才不會跳。
+    if (!show.crosssection || !show.tdr) { setXsCompare(null); return }
+    const solved = ((xsJob?.result?.cuts || []) as any[])
+      .filter(c => c.solved && c.single_ended
+        && Object.keys(c.single_ended).length > 0)
+    const analysis = tdrJob?.result?.analyses?.[tdrAnalysisIdx]
+    if (solved.length === 0 || tdrJob?.status !== 'done' || !analysis) {
+      setXsCompare(null)
+      return
+    }
+    if (!tdrScene || !tdrNet || !tdrPath) return
+    const distances = analysis.distance_mm || []
+    const impedance = tdrJob.result.impedance_ohm || []
+    if (distances.length < 2 || impedance.length !== distances.length) return
+    let cancelled = false
+    api('/api/cross-section/compare', {
+      polylines: buildTdrPolylines(tdrScene, tdrNet),
+      net: tdrNet,
+      start_xy_mm: tdrPath.start_mm,
+      cuts: solved,
+      tdr_distance_mm: distances,
+      tdr_impedance_ohm: impedance,
+      // 解析度是每一個分析各自的（A 法與 B 法速度不同，解析度就不同），
+      // 不在 result 頂層。取錯會讓橫帶寬度與實際不符。
+      resolution_mm: analysis.resolution_mm || 0,
+      signal_nets: [tdrNet],
+    })
+      .then(data => { if (!cancelled) setXsCompare(data) })
+      .catch(() => { /* 對不起來就不顯示，不用打擾使用者 */ })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [xsJob?.result, tdrJob?.result, tdrAnalysisIdx, tdrPath, tdrNet,
+      show.crosssection, show.tdr])
+
+  /** 截面阻抗快照要帶進報告的數字。圖上的字縮小後未必讀得出來。 */
+  const crossSectionReportMetadata = (): Record<string, any> => {
+    const meta: Record<string, any> = {}
+    const cuts = (xsJob?.result?.cuts || []) as any[]
+    const solved = cuts.filter(c => c.solved)
+    if (solved.length) {
+      meta['已求解切線'] = solved.length
+      meta['求解精度'] = solved[0].solve_mode || ''
+      const impedances: string[] = []
+      for (const cut of solved) {
+        for (const [name, value] of Object.entries(cut.single_ended || {})) {
+          impedances.push(`${cut.name} ${name} ${Number(value).toFixed(3)} Ω`)
+        }
+      }
+      if (impedances.length) meta['單端阻抗'] = impedances.join('；')
+      const converged = solved.filter(c => c.convergence)
+      if (converged.length) {
+        meta['側向收斂'] = converged
+          .map(c => `${c.name}：加寬 ${(c.convergence.factor - 1) * 100}% 後最大變化 `
+            + `${(c.convergence.worst_relative * 100).toFixed(2)}%`
+            + `（${c.convergence.converged ? '已收斂' : '未收斂'}）`)
+          .join('；')
+      }
+      const pairs = solved.flatMap(c => (c.pairs || [])
+        .filter((p: any) => p.Zdiff != null)
+        .map((p: any) => `${c.name} ${p.positive}／${p.negative} `
+          + `Zdiff ${p.Zdiff.toFixed(3)} Ω（${p.exact ? '精確' : '近似'}）`))
+      if (pairs.length) meta['差分阻抗'] = pairs.join('；')
+    }
+    if (xsScan) {
+      meta['目前切線'] = `${xsScan.cut.name || ''} `
+        + `${xsScan.cut.axis.toUpperCase()} = ${xsScan.cut.coordinate_mm.toFixed(3)} mm`
+      meta['取樣間距'] = `${xsScan.resolution_um.toFixed(1)} µm`
+      meta['導體數'] = xsScan.plan.conductor_count
+    }
+    if (xsCompare?.summary?.comparable) {
+      const s = xsCompare.summary
+      meta['與 TDR 對照'] = `${s.comparable} 條可比，`
+        + `中位差 ${(s.median_delta_ohm ?? 0).toFixed(4)} Ω，`
+        + `最大 ${((s.worst_relative ?? 0) * 100).toFixed(2)}%（${s.worst}）`
+      meta['TDR 空間解析度'] = `${s.resolution_mm.toFixed(3)} mm`
+    }
+    return meta
+  }
+
+  const xsCutSpec = () => {
+    if (!xsRegion || !xsCut) return null
+    return {
+      name: xsScan?.cut?.name
+        || `XS_${xsCut.axis.toUpperCase()}_${xsCut.coordinateMm.toFixed(3)}`,
+      axis: xsCut.axis,
+      coordinate_mm: xsCut.coordinateMm,
+      region: {
+        x0_mm: xsRegion.x0Mm, y0_mm: xsRegion.y0Mm,
+        x1_mm: xsRegion.x1Mm, y1_mm: xsRegion.y1Mm,
+      },
+      resolution_um: Number(xsResolutionUm) || 2,
+      conductor_to_reference_um: Number(xsHeightUm) || 0,
+      role_overrides: xsRoleOverrides,
+    }
+  }
+
+  const handleXsSolve = async (cuts: any[]) => {
+    if (cuts.length === 0) return
+    // 求解要開 AEDT、要花授權，所以把「解幾條、用什麼精度」講清楚再問一次。
+    // 這不是禮貌性確認：accurate 在導體內部解場，時間是 standard 的三倍以上。
+    const label = { fast: '快速', standard: '標準', accurate: '高精度' }[xsSolveMode]
+      || xsSolveMode
+    if (!window.confirm(
+      `即將求解 ${cuts.length} 條切線：\n`
+      + cuts.map(c => `　${c.name}（${c.axis.toUpperCase()} = ${c.coordinate_mm.toFixed(3)} mm）`).join('\n')
+      + `\n\n精度：${label}　自適應頻率：${xsFrequency}\n`
+      + '會開啟 AEDT 並佔用一份 Q2D 授權，一條切線約數分鐘。要繼續嗎？')) return
+    try {
+      const snapshot = await api('/api/cross-section/solve', {
+        cuts,
+        reference_nets: refNets,
+        frequency: xsFrequency,
+        solve_mode: xsSolveMode,
+        widen_factor: xsWidenCheck ? WIDEN_FACTOR : 0,
+      })
+      setXsJob(snapshot)
+      setXsResultIdx(0)
+      setActiveView('crosssection')
+    } catch (e) {
+      setXsError('求解啟動失敗：' + String(e))
+    }
+  }
+
+  const handleXsStop = async () => {
+    try {
+      setXsJob(await api('/api/cross-section/stop', {}))
+    } catch (e) {
+      setXsError('終止失敗：' + String(e))
+    }
+  }
+
+  // ── TDR 捷徑：把距離換成切線 ────────────────────────
+  //
+  // 手拉也拉得到，但拉得準不準看手感——切線斜個 20° 寬度就虛胖 6%、阻抗偏低，
+  // 而畫面上完全看不出來。這裡改成算出來的。
+
+  const tdrShortcutPayload = () => {
+    if (!tdrScene || !tdrNet || !tdrPath) return null
+    return {
+      polylines: buildTdrPolylines(tdrScene, tdrNet),
+      net: tdrNet,
+      start_xy_mm: tdrPath.start_mm,
+      half_width_um: Number(xsHalfWidthUm) || 7000,
+    }
+  }
+
+  /** 劇變表逐列的「取此處截面」。 */
+  const handleCutHere = async (distanceMm: number, label: string) => {
+    const base = tdrShortcutPayload()
+    if (!base) { alert('需要先載入電路板並完成 TDR 路徑計算。'); return }
+    setXsFromTdrBusy(true)
+    try {
+      const data = await api('/api/cross-section/from-tdr', {
+        ...base, distances_mm: [distanceMm], names: [label],
+      })
+      const row = data.rows?.[0]
+      if (!row?.accepted) {
+        alert(`這個位置不能用二維截面看：\n\n${row?.reason || '未知原因'}`)
+        return
+      }
+      handleXsLoadCut(row.cut)
+      setActiveView('crosssection')
+      if (row.severity === 'risk') {
+        setXsError(`切線已定位，但 ${row.reason}`)
+      } else {
+        setXsError('')
+      }
+    } catch (e) {
+      alert('產生切線失敗：' + String(e))
+    } finally {
+      setXsFromTdrBusy(false)
+    }
+  }
+
+  /** 「沿線取樣 N 條」：一次鋪一排，角度過不了的跳過並回報。 */
+  const handleSampleAlongTrace = async () => {
+    const base = tdrShortcutPayload()
+    if (!base) { alert('需要先載入電路板並完成 TDR 路徑計算。'); return }
+    const spacing = Number(xsSampleSpacingMm)
+    if (!(spacing > 0)) { alert('取樣間距要大於 0。'); return }
+    setXsFromTdrBusy(true)
+    try {
+      const data = await api('/api/cross-section/from-tdr', {
+        ...base, spacing_mm: spacing,
+      })
+      const cuts = data.cuts || []
+      const skipped = data.skipped || []
+      if (cuts.length === 0) {
+        alert('沿線沒有任何位置適合取截面。' +
+          (skipped.length ? `\n\n${skipped.length} 個取樣點因為角度過不了被跳過。` : ''))
+        return
+      }
+      // 存進切線集，之後「解全部已存」就能整批送出。
+      const merged = [...xsSavedCuts.filter(
+        (c: any) => !cuts.some((n: any) => n.name === c.name)), ...cuts]
+      const written = await api('/api/cross-section/cuts', { cuts: merged })
+      setXsSavedCuts(merged)
+      setXsCutsSource(written.path || '')
+      handleXsLoadCut(cuts[0])
+      setActiveView('crosssection')
+      // 跳過幾條一定要講出來——靜靜略過會讓人以為那一段沒問題，
+      // 而那一段正好是最可能有問題的地方。
+      const parts = [`沿線取了 ${cuts.length} 條切線（實際間距 ${data.actual_spacing_mm.toFixed(2)} mm）。`]
+      if (data.note) parts.push(data.note)
+      if (skipped.length) {
+        parts.push(`${skipped.length} 個取樣點因為與走線的夾角過大被跳過：`
+          + skipped.map((s: any) => `${s.distance_mm.toFixed(1)} mm（${s.angle_deg?.toFixed(0) ?? '?'}°）`).join('、')
+          + '。那些位置是轉角，二維截面刻畫不了，該用 HFSS 看。')
+      }
+      setXsError(parts.join('\n'))
+    } catch (e) {
+      alert('沿線取樣失敗：' + String(e))
+    } finally {
+      setXsFromTdrBusy(false)
+    }
+  }
+
+  const handleXsLoadCut = (entry: any) => {
+    if (!entry?.region) return
+    setXsRegion({
+      x0Mm: entry.region.x0_mm, y0Mm: entry.region.y0_mm,
+      x1Mm: entry.region.x1_mm, y1Mm: entry.region.y1_mm,
+    })
+    setXsCut({ axis: entry.axis === 'x' ? 'x' : 'y', coordinateMm: entry.coordinate_mm })
+    setXsRoleOverrides(entry.role_overrides || {})
+    if (entry.resolution_um) setXsResolutionUm(String(entry.resolution_um))
+    setXsScan(null)
+    setXsMode('none')
+  }
+
+  // 任何長時間工作執行中都每秒觸發重繪，讓「已耗時」平滑跳動（不打 API）。
+  //
+  // 原本只看分段排程，於是眼圖、TDR 與截面求解的「已耗時」永遠顯示 0 秒——
+  // nowTick 停在開頁那一刻，減去比它晚的 started_at 得到負數，再被
+  // Math.max(0, …) 夾成 0。看起來像計時器壞了，實際上是它根本沒在跳。
+  const anyJobRunning = Boolean(
+    schedStatus?.running || eyeJob?.running || tdrJob?.running || xsJob?.running)
+  useEffect(() => {
+    if (!anyJobRunning) return
+    setNowTick(Date.now() / 1000)          // 立刻對時，不要先顯示一秒的 0
     const t = window.setInterval(() => setNowTick(Date.now() / 1000), 1000)
     return () => window.clearInterval(t)
-  }, [schedStatus?.running])
+  }, [anyJobRunning])
 
   // 開頁（或求解中重新整理）時先問一次：排程是後端在跑的，前端沒有這一下
   // 就接不上下面的輪詢，進度會整個消失。已經停掉或跑完的也照樣接管——那份
@@ -2339,7 +2890,12 @@ ${data.output_path}`)
       inFlight = true
       try {
         const s = await api('/api/schedule/status')
-        if (!cancelled) setSchedStatus(s)
+        if (!cancelled) {
+          // 這個輪詢每 2 秒跑一次而且不分閒忙。照單全收的話，即使什麼都沒發生
+          // 也會每 2 秒換一個新物件、重繪一次，並讓所有相依於它的效應白跑。
+          setSchedStatus((previous: any) =>
+            JSON.stringify(previous) === JSON.stringify(s) ? previous : s)
+        }
       } catch {
         /* 後端暫時忙碌時保留上次狀態，下一輪再試 */
       } finally {
@@ -2374,10 +2930,57 @@ ${data.output_path}`)
       setActiveSegIdx(-1)
       setActiveView('segments')
       setSchedMetaPath(data.metadata_path || '')
+      // 依複雜度分段更需要這張表：每段的求解器本來就不一樣，不讓人看到就
+      // 只能相信它。2026-08-18 之前這裡少了下面兩行，等分分段有表、依複雜度
+      // 沒有——而後者才是混合求解真正的入口。
+      setSegmentSolverPlans((data.segments || []).map((segment: any) => ({
+        index: segment.index,
+        path: segment.path,
+        ...(segment.solver_plan || {}),
+      })))
+      setShowSolverRegionOverlay(true)
     } catch (e) {
       alert('依複雜度分段執行失敗: ' + String(e))
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  /** 由資料率導出可用頻寬，填進欄位並顯示憑什麼填這個數字。 */
+  const deriveBandwidth = async () => {
+    // DDR 的人講的是「1866」（MT/s），不是「1.866」（Gbps）。兩種都收——
+    // 沒有任何 DDR 會跑在 100 Gbps，所以這個門檻不會誤判。
+    const typed = Number(dataRateGbps)
+    const rate = typed >= 100 ? typed / 1000 : typed
+    if (!rate || rate <= 0) { alert('請先填資料率（1866 或 1.866 都可以）'); return }
+    try {
+      const data = await api('/api/bandwidth/derive', { data_rate_gbps: rate })
+      setUsableBandwidthGHz(String(data.usable_bandwidth_ghz))
+      setBandwidthBasis(data.basis || '')
+    } catch (e) {
+      alert('導出頻寬失敗: ' + String(e))
+    }
+  }
+
+  /** 依目前的頻寬重算每段的求解器建議。
+   *
+   *  分段當下使用者常常還不知道自己要用到幾 GHz——那要等他選好 IBIS 模型
+   *  才定得下來，而選模型在分段之後。原本頻寬只在按下分段按鈕那一刻被讀到，
+   *  事後再填等於白填：畫面上什麼都不會變。 */
+  const reassessSolverBandwidth = async (metadataPath?: string) => {
+    const path = normalizeUserPath(metadataPath || schedMetaPath)
+    if (!path) { alert('請先執行分段，或輸入 segments.json 路徑'); return }
+    try {
+      const data = await api('/api/schedule/bandwidth', {
+        metadata_path: path,
+        required_bandwidth_ghz: effectiveFmaxGHz,
+      })
+      setSegmentSolverPlans((data.segments || []).map((segment: any) => ({
+        index: segment.index, path: segment.path, ...segment,
+      })))
+      return data
+    } catch (e) {
+      alert('重新評估求解器失敗: ' + String(e))
     }
   }
 
@@ -2397,6 +3000,7 @@ ${data.output_path}`)
         signal_nets: signalNets,
         reference_nets: refNets,
         output_dir: segOutputDir,
+        target_fmax_ghz: effectiveFmaxGHz,
       })
       setSegRun(data)
       setActiveSegIdx(-1)
@@ -2459,6 +3063,9 @@ ${data.output_path}`)
         ...(segment.solver_plan || {}),
       })))
       setShowSolverRegionOverlay(true)
+      // 等分分段那條路沒有把頻寬送下去，跑完立刻依目前的頻寬重算一次，
+      // 否則畫面上的建議與使用者已經填好的頻寬是脫節的。
+      if (effectiveFmaxGHz) await reassessSolverBandwidth(data.metadata_path)
     } catch (e) {
       alert('分段執行失敗: ' + String(e))
     } finally {
@@ -2478,6 +3085,60 @@ ${data.output_path}`)
   }
   const removeSignal = (net: string) => setSignalNets(prev => prev.filter(n => n !== net))
   const removeRef = (net: string) => setRefNets(prev => prev.filter(n => n !== net))
+
+  // DDR 自動分類。純字串處理，後端不開 AEDT、不讀 EDB，所以按下去就回來。
+  const handleClassifyNets = async () => {
+    if (allNets.length === 0) { alert('請先載入電路板'); return }
+    setDdrBusy(true)
+    try {
+      const res = await fetch('/api/nets/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nets: allNets }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || '分類失敗')
+      setDdrResult(data)
+      // 預設只勾資料、選通與遮罩：那是一個位元組通道實際要一起分析的東西。
+      // 時脈與位址不預設勾選——它們是命令匯流排，跟資料的分析方式不同。
+      setDdrRoles(['DQ', 'DQS_P', 'DQS_N', 'DM'])
+    } catch (err: any) {
+      alert('DDR 自動分類失敗：' + (err?.message || err))
+    } finally {
+      setDdrBusy(false)
+    }
+  }
+
+  // 只加進訊號網路，不動參考網路。參考網路要選哪些是另一個判斷，
+  // 自動替使用者決定 GND／電源會讓人以為工具確認過回流路徑。
+  const applyDdrRoles = () => {
+    if (!ddrResult) return
+    const picked = (ddrResult.rows || [])
+      .filter((r: any) => ddrRoles.includes(r.role))
+      .map((r: any) => r.net)
+    if (picked.length === 0) { alert('目前勾選的角色沒有對應的網路'); return }
+    setSignalNets(prev => {
+      const merged = [...prev]
+      for (const net of picked) if (!merged.includes(net)) merged.push(net)
+      return merged
+    })
+    setRefNets(prev => prev.filter(n => !picked.includes(n)))
+  }
+
+  /** 只選一個位元組通道：資料＋遮罩＋選通，剛好是一次分析的單位。
+   *
+   *  角色勾選會把兩個位元組的 DQ 一起加進來（DQ0–15 共 16 條），那不是
+   *  一次分析的範圍——DDR 是一個位元組通道配一組選通，量到的時序裕度
+   *  以那一組的選通為基準。混在一起裁切與求解只是把模型做大。 */
+  const applyDdrLane = (lane: any) => {
+    const picked: string[] = [
+      ...(lane.data || []), ...(lane.mask || []),
+      ...(lane.strobe_p || []), ...(lane.strobe_n || []),
+    ]
+    if (picked.length === 0) return
+    setSignalNets(picked)
+    setRefNets(prev => prev.filter(n => !picked.includes(n)))
+  }
 
   const handleExportSignalNets = () => {
     if (signalNets.length === 0) { alert('目前沒有已選取的訊號網路'); return }
@@ -2565,6 +3226,7 @@ ${data.output_path}`)
       { label: '完整 Layout', action: () => setActiveView('full') },
       { label: '裁切後 Layout', action: () => setActiveView('cut'), disabled: !cutScene },
       { label: '清理前後對比', action: () => setActiveView('cleanup'), disabled: !cleanupAfterScene },
+      { label: 'IBIS 模型與眼圖分析', action: () => setActiveView('models'), disabled: !show.models },
       { label: '一鍵 HTML 報告中心', action: () => setActiveView('report') },
     ],
     '說明': [
@@ -2580,7 +3242,10 @@ ${data.output_path}`)
     : (segRun.previews?.[activeSegIdx] || cutScene || fullScene)
   const scene = activeView === 'cut' ? cutScene
     : activeView === 'cleanup' ? cleanupAfterScene
-    : activeView === 'segments' ? segScene : fullScene
+    : activeView === 'segments' ? segScene
+    // 截面要切在最終幾何上，所以裁切過就用裁切後的板；裁切外的東西也不會進
+    // 求解，拿完整板來框範圍反而會框到後面根本不存在的銅。
+    : activeView === 'crosssection' ? (cutScene || fullScene) : fullScene
   // 哪些分頁真的在畫 Layout。上方那條「左鍵平移、滾輪縮放…」提示與「請先載入
   // 電路板」浮水印都只對這些成立——原本兩處各自用「不是 A 也不是 B 也不是 C」
   // 的排除清單，新增分頁時必然漏掉：S 參數分頁就同時吃到了那條 Layout 提示
@@ -2605,7 +3270,9 @@ ${data.output_path}`)
     schematic: '串接電路示意圖 · 黃點 = 短路節點 · 虛線框 = 尚未解算',
     sparam: '串接後 S 參數 · 單端／差動可切換',
     eye: 'QuickEye 眼圖 · 眼高與眼寬由 AEDT 量測',
-    tdr: 'TDR 阻抗定位 · 劇變位置以解析度寬度標在 Layout 上',
+    models: 'IBIS 模型與眼圖分析',
+    tdr: 'TDR 阻抗定位 · 劇變位置標在 Layout 上',
+    crosssection: '截面阻抗 · 先框工作範圍，再點一條切線 · 框寬同時是二維模型的側向邊界',
     report: '一鍵 HTML 報告中心',
   }
   const sceneLabel = sceneLabels[activeView]
@@ -2692,6 +3359,7 @@ ${data.output_path}`)
   const reportSectionByView: Record<ViewMode, string> = {
     full: 'board', cut: 'cutout', cleanup: 'cleanup', segments: 'segments',
     schematic: 'schematic', sparam: 'sparam', eye: 'eye', tdr: 'tdr',
+    models: 'models', crosssection: 'crosssection',
     report: 'results',
   }
   const reportSourceRevision = activeView === 'segments'
@@ -2700,17 +3368,21 @@ ${data.output_path}`)
       ? String(cascadeResult?.output_path || schedMetaPath || '')
       : activeView === 'eye'
         ? String(eyeJob?.result?.image_path || '')
+        : activeView === 'models'
+          ? 'ibis-model-eye-analysis-workspace'
         : activeView === 'tdr'
           ? String(tdrJob?.result?.project_path || '')
           : activeView === 'cut' || activeView === 'cleanup'
             ? outputPath
             : inputPath
   const reportSnapshotAvailable = activeView !== 'report' && Boolean(
-    scene
+    activeView === 'models'
+    || scene
     || (activeView === 'schematic' && schematicGraph)
     || (activeView === 'sparam' && cascadeResult)
     || (activeView === 'eye' && eyeJob?.status === 'done')
-    || (activeView === 'tdr' && tdrJob?.status === 'done'),
+    || (activeView === 'tdr' && tdrJob?.status === 'done')
+    || (activeView === 'crosssection' && xsScan),
   )
   useReportStaleRevision(reportWorkspace, ['board'], fullScene, '完整板資料已重新載入')
   useReportStaleRevision(reportWorkspace, ['cutout'], cutScene, '裁切結果已更新')
@@ -2808,7 +3480,7 @@ ${data.output_path}`)
         <div>
           <h1 className="app-title">PCB SI 3D 模擬分析工具</h1>
           <p className="app-sub">
-            HFSS 3D Layout 通道裁切、Port 建立與分段模擬。
+            通道裁切、分段與眼圖分析。
           </p>
         </div>
         <img
@@ -2818,6 +3490,25 @@ ${data.output_path}`)
           onError={(e) => { e.currentTarget.style.display = 'none' }}
         />
       </header>
+
+      {/* 後端沒重啟。這條要擺在最上面而且不能關掉：版本對不上時後面每一個
+          症狀都會指向錯的方向——新端點回 405、舊後端安靜忽略新欄位於是按鈕
+          一直是灰的。看到這一條就不必再查其他東西了。 */}
+      {staleBackend !== null && (
+        <div style={{
+          background: 'var(--danger, #b3261e)', color: '#fff',
+          padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+          margin: '8px 0', fontSize: 13, lineHeight: 1.6,
+        }}>
+          <strong>後端還在跑舊程式，請重新啟動工具。</strong>
+          <div>
+            介面需要版號 {API_CONTRACT_VERSION}，後端回報
+            {staleBackend ? ` ${staleBackend}` : '（沒有版號，更舊）'}。
+          </div>
+          <div>新功能會回「Method Not Allowed」，或是按鈕一直灰著。</div>
+          <div>關掉視窗，用 <code>start.bat</code> 重新啟動即可。</div>
+        </div>
+      )}
 
       {/* 選單列。入口畫面開著時隱藏——那些動作都要先選好項目才有意義。 */}
       <nav className="menubar" hidden={pickerOpen}
@@ -2880,7 +3571,7 @@ ${data.output_path}`)
                         <span className="field-label" style={{ margin: 0, minWidth: 78 }}>
                           AEDT 版本
                         </span>
-                        <select className="input" value={aedtVersion}
+                        <select aria-label="AEDT 版本" className="input" value={aedtVersion}
                           disabled={aedtLocked}
                           onChange={e => void handleSetAedtVersion(e.target.value)}>
                           {aedtVersions.map(v => (
@@ -2905,7 +3596,7 @@ ${data.output_path}`)
                     </div>
                   )}
                   <div className="field-row" style={{ marginTop: 6 }}>
-                    <input
+                    <input aria-label="輸入檔案路徑"
                       type="text"
                       className="input"
                       value={inputPath}
@@ -2928,18 +3619,114 @@ ${data.output_path}`)
                 </div>
 
                 {/* 「選擇網路」：網路選擇 */}
-                <div hidden={!(show.load)} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 220 }}>
+                {/* 這一段的下限要涵蓋兩個網路清單，否則清單會溢出到下面的
+                    「裁切設定」上。原本寫死 220 px，比清單本身還矮。 */}
+                <div hidden={!(show.load)} style={{
+                  flex: 1, display: 'flex', flexDirection: 'column',
+                  // 展開 DDR 分類結果時要把它的高度算進來。這一層是 overflow: visible，
+                  // 不加的話網路清單會直接掛到外面，蓋住下方的「裁切設定」。
+                  minHeight: NETLIST_MIN_HEIGHT + NETS_HEADER_HEIGHT
+                    + (ddrResult ? DDR_PANEL_MAX_HEIGHT + 12 : 0),
+                }}>
                   <h3 className="panel-title">選擇網路（Nets）</h3>
                   <p className="panel-hint">左列雙擊或按「訊」加入訊號網路、按「參」加入參考網路；右列雙擊移除。</p>
                   <div className="field-row" style={{ marginTop: 6 }}>
-                    <input ref={signalFileRef} type="file" accept=".txt,text/plain" hidden
+                    <input aria-label="訊號清單檔案" ref={signalFileRef} type="file" accept=".txt,text/plain" hidden
                       onChange={handleImportSignalFile} />
                     <button className="btn" style={{ flex: 1 }} onClick={() => signalFileRef.current?.click()}
                       disabled={allNets.length === 0}>匯入訊號清單</button>
                     <button className="btn" style={{ flex: 1 }} onClick={handleExportSignalNets}
                       disabled={signalNets.length === 0}>匯出訊號清單</button>
                   </div>
-                  <input
+
+                  {/* DDR 自動分類。DDR 一組 8～16 條要手選，選錯只有等眼圖出來才知道。 */}
+                  <div className="field-row" style={{ marginTop: 6 }}>
+                    <button className="btn" style={{ flex: 1 }} onClick={handleClassifyNets}
+                      disabled={allNets.length === 0 || ddrBusy}>
+                      {ddrBusy ? '分類中…' : 'DDR 自動分類'}
+                    </button>
+                    {ddrResult && (
+                      <button className="btn" style={{ flex: 1 }}
+                        onClick={() => { setDdrResult(null); setDdrRoles([]) }}>收起結果</button>
+                    )}
+                  </div>
+
+                  {ddrResult && (
+                    <div style={{
+                      marginTop: 6, padding: '8px 10px', borderRadius: 6,
+                      background: 'rgba(0,0,0,.04)', fontSize: 12, lineHeight: 1.7,
+                      // 上限＋自己捲動：角色多的板子不會把這一塊撐到無限高，
+                      // 外層才能用一個固定的數字保留空間。
+                      maxHeight: DDR_PANEL_MAX_HEIGHT, overflowY: 'auto',
+                    }}>
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                        勾選要加進訊號網路的角色
+                      </div>
+                      {Object.keys(ddrResult.counts || {})
+                        .filter(role => role !== 'OTHER')
+                        .map(role => (
+                          <label key={role} style={{
+                            display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                          }}>
+                            <input type="checkbox" checked={ddrRoles.includes(role)}
+                              onChange={e => setDdrRoles(prev => e.target.checked
+                                ? [...prev, role]
+                                : prev.filter(r => r !== role))} />
+                            <span>{ddrResult.labels?.[role] || role}</span>
+                            <span style={{ opacity: .6 }}>{ddrResult.counts[role]} 條</span>
+                          </label>
+                        ))}
+
+                      {(ddrResult.lanes || []).length > 0 && (
+                        <div style={{ marginTop: 6 }}>
+                          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                            或直接挑一個位元組通道
+                          </div>
+                          {(ddrResult.lanes || []).map((l: any) => {
+                            const total = (l.data?.length || 0) + (l.mask?.length || 0)
+                              + (l.strobe_p?.length || 0) + (l.strobe_n?.length || 0)
+                            return (
+                              <button key={l.lane} className="btn"
+                                style={{ width: '100%', marginBottom: 4, textAlign: 'left' }}
+                                onClick={() => applyDdrLane(l)}
+                                title={[...(l.data || []), ...(l.mask || []),
+                                        ...(l.strobe_p || []), ...(l.strobe_n || [])].join('、')}>
+                                Byte {l.lane}：{total} 條
+                                {l.has_strobe ? '（含選通）' : '（無選通）'}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+
+                      {/* 沒有選通參考的組不能當位元組通道分析——組內資料訊號的
+                          眼圖沒有共同的時間基準。這一定要講出來。 */}
+                      {(ddrResult.lanes || []).some((l: any) => !l.has_strobe) && (
+                        <div style={{ marginTop: 4, color: '#b45309' }}>
+                          有位元組通道缺選通參考，那一組不能當位元組通道分析。
+                        </div>
+                      )}
+
+                      {(ddrResult.ambiguous || []).length > 0 && (
+                        <div style={{ marginTop: 4, color: '#b45309' }}>
+                          {ddrResult.ambiguous.length} 條同時符合多個角色，請自行確認：
+                          {ddrResult.ambiguous.slice(0, 5).map((r: any) => r.net).join('、')}
+                          {ddrResult.ambiguous.length > 5 ? ' …' : ''}
+                        </div>
+                      )}
+
+                      <div style={{ marginTop: 4, opacity: .7 }}>
+                        另有 {(ddrResult.unmatched || []).length} 條看不出角色（電源、地與
+                        非 DDR 網路都會落在這裡），不會被加入。
+                      </div>
+
+                      <button className="btn--primary" style={{ marginTop: 8, width: '100%' }}
+                        onClick={applyDdrRoles} disabled={ddrRoles.length === 0}>
+                        加入訊號網路
+                      </button>
+                    </div>
+                  )}
+                  <input aria-label="網路名稱過濾關鍵字"
                     type="text"
                     className="input"
                     placeholder="過濾關鍵字…"
@@ -2947,7 +3734,10 @@ ${data.output_path}`)
                     onChange={e => setFilterText(e.target.value)}
                     style={{ margin: '6px 0' }}
                   />
-                  <div style={{ display: 'flex', gap: 8, flex: 1, minHeight: 0 }}>
+                  <div style={{
+                    display: 'flex', gap: 8, flex: 1,
+                    minHeight: NETLIST_MIN_HEIGHT,
+                  }}>
                     {/* 可選網路 */}
                     <div className="netlist" style={{ flex: 1 }}>
                       {availableFiltered.map(net => (
@@ -2959,8 +3749,12 @@ ${data.output_path}`)
                       ))}
                     </div>
                     {/* 已選：訊號 + 參考 */}
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, minHeight: 0 }}>
-                      <div className="netlist" style={{ flex: 3 }}>
+                    <div style={{
+                      flex: 1, display: 'flex', flexDirection: 'column', gap: 6,
+                      minHeight: NETLIST_MIN_HEIGHT,
+                    }}>
+                      <div className="netlist"
+                        style={{ flex: 3, minHeight: NETLIST_SIGNAL_MIN_HEIGHT }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', padding: '2px 6px' }}>
                           訊號網路（{signalNets.length}）
                         </div>
@@ -2970,7 +3764,8 @@ ${data.output_path}`)
                           </div>
                         ))}
                       </div>
-                      <div className="netlist" style={{ flex: 2 }}>
+                      <div className="netlist"
+                        style={{ flex: 2, minHeight: NETLIST_REFERENCE_MIN_HEIGHT }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ok)', padding: '2px 6px' }}>
                           參考網路（{refNets.length}）
                         </div>
@@ -2990,12 +3785,12 @@ ${data.output_path}`)
                   <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                     <div style={{ flex: 1 }}>
                       <div className="field-label">向外擴張距離（mm）</div>
-                      <input type="number" className="input" min="0" step="0.5"
+                      <input aria-label="向外擴張距離（mm）" type="number" className="input" min="0" step="0.5"
                         value={expansionMm} onChange={e => setExpansionMm(e.target.value)} />
                     </div>
                     <div style={{ flex: 1 }}>
                       <div className="field-label">框選範圍形狀</div>
-                      <select className="input" value={extentType} onChange={e => {
+                      <select aria-label="框選範圍形狀" className="input" value={extentType} onChange={e => {
                         setExtentType(e.target.value)
                         setActualCutoutExtentType('')
                       }}>
@@ -3042,7 +3837,7 @@ ${data.output_path}`)
                     只裁出通道，不建立 Port。Port 排在背鑽與清理之後。
                   </p>
                   <div className="field-row" style={{ marginTop: 6 }}>
-                    <input
+                    <input aria-label="裁切輸出路徑"
                       type="text"
                       className="input"
                       value={outputPath}
@@ -3073,7 +3868,7 @@ ${data.output_path}`)
 
                   <div className="field-label" style={{ marginTop: 6 }}>疊構檔</div>
                   <div className="field-row">
-                    <input type="text" className="input" value={stackupFilePath}
+                    <input aria-label="疊構檔" type="text" className="input" value={stackupFilePath}
                       onChange={e => { setStackupFilePath(e.target.value); setStackupDiff(null) }}
                       placeholder="疊構檔路徑…（.xml／.csv／.json）" />
                     <button className="btn" onClick={handleBrowseStackup}>瀏覽…</button>
@@ -3092,7 +3887,7 @@ ${data.output_path}`)
                     <span className="panel-hint" style={{ flex: 1, margin: 0 }}>
                       沒有現成檔案？可先匯出目前疊構當範本再編輯：
                     </span>
-                    <select className="input" style={{ width: 76 }} value={stackupExportFormat}
+                    <select aria-label="疊構範本匯出格式" className="input" style={{ width: 76 }} value={stackupExportFormat}
                       onChange={e => setStackupExportFormat(e.target.value as 'xml' | 'csv' | 'json')}>
                       <option value="xml">XML</option>
                       <option value="csv">CSV</option>
@@ -3169,7 +3964,7 @@ ${data.output_path}`)
                   )}
 
                   <div className="field-row" style={{ marginTop: 6 }}>
-                    <input type="text" className="input" value={stackupOutputPath}
+                    <input aria-label="疊構更換輸出路徑" type="text" className="input" value={stackupOutputPath}
                       onChange={e => setStackupOutputPath(e.target.value)}
                       placeholder="輸出路徑…（例如 xxx_stackup.aedb）" />
                     <button className="btn" onClick={async () => {
@@ -3196,11 +3991,11 @@ ${data.output_path}`)
 
                   <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
                     <div className="field-label" style={{ minWidth: 66 }}>保留殘樁</div>
-                    <input type="number" className="input" style={{ width: 70 }} min="0" step="0.5"
+                    <input aria-label="保留殘樁" type="number" className="input" style={{ width: 70 }} min="0" step="0.5"
                       value={bdTargetStubMil} onChange={e => setBdTargetStubMil(e.target.value)} />
                     <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>mil</span>
                     <div className="field-label" style={{ minWidth: 66, marginLeft: 8 }}>鑽頭加大</div>
-                    <input type="number" className="input" style={{ width: 70 }} min="0" step="1"
+                    <input aria-label="鑽頭加大" type="number" className="input" style={{ width: 70 }} min="0" step="1"
                       value={bdDiameterIncMil} onChange={e => setBdDiameterIncMil(e.target.value)}
                       title="鑽頭直徑 = 原孔徑 + 此增量。回鑽鑽頭與原孔同徑會鑽不乾淨孔壁鍍銅，實際值請依板廠規格。" />
                     <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>mil</span>
@@ -3237,7 +4032,8 @@ ${data.output_path}`)
                               entry.stubs.length === 0 ? (
                                 <tr key={`${entry.id}-none`} style={{ opacity: 0.5 }}>
                                   <td style={{ padding: '3px 5px' }}>—</td>
-                                  <td style={{ padding: '3px 5px' }}>{entry.net.split('.')[0].slice(7)}</td>
+                                  <td style={{ padding: '3px 5px' }}>
+                                    <span style={BD_NET_STYLE} title={entry.net}>{entry.net}</span></td>
                                   <td style={{ padding: '3px 5px', textAlign: 'center' }}>
                                     {entry.connected_layers.join(',') || '-'}</td>
                                   <td colSpan={4} style={{ padding: '3px 5px' }}>{entry.note}</td>
@@ -3245,10 +4041,11 @@ ${data.output_path}`)
                               ) : entry.stubs.map((stub: any, j: number) => (
                                 <tr key={`${entry.id}-${j}`}>
                                   <td style={{ padding: '3px 5px', textAlign: 'center' }}>
-                                    <input type="checkbox" checked={stub.selected !== false}
+                                    <input aria-label={`選取 ${entry.net} 的第 ${j + 1} 個殘樁`} type="checkbox" checked={stub.selected !== false}
                                       onChange={() => toggleBackdrillStub(i, j)} />
                                   </td>
-                                  <td style={{ padding: '3px 5px' }}>{entry.net.split('.')[0].slice(7)}</td>
+                                  <td style={{ padding: '3px 5px' }}>
+                                    <span style={BD_NET_STYLE} title={entry.net}>{entry.net}</span></td>
                                   <td style={{ padding: '3px 5px', textAlign: 'center' }}>
                                     {entry.connected_layers.join(',')}</td>
                                   <td style={{ padding: '3px 5px', textAlign: 'center' }}>
@@ -3266,7 +4063,7 @@ ${data.output_path}`)
                       </div>
 
                       <div className="field-row" style={{ marginTop: 6 }}>
-                        <input type="text" className="input" value={bdOutputPath}
+                        <input aria-label="背鑽輸出路徑" type="text" className="input" value={bdOutputPath}
                           onChange={e => setBdOutputPath(e.target.value)}
                           placeholder="輸出路徑…（例如 xxx_backdrill.aedb）" />
                       </div>
@@ -3286,7 +4083,7 @@ ${data.output_path}`)
                   </p>
                   <div className="field-label" style={{ marginTop: 6 }}>清理等級</div>
                   <div className="field-row">
-                    <select className="input" value={cleanupMode}
+                    <select aria-label="清理等級" className="input" value={cleanupMode}
                       onChange={e => {
                         const mode = e.target.value as 'conservative' | 'em_field'
                         setCleanupMode(mode)
@@ -3312,14 +4109,14 @@ ${data.output_path}`)
                   <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'flex-end' }}>
                     <div style={{ width: 110 }}>
                       <div className="field-label">{cleanupMode === 'em_field' ? '最小保護距離（mm）' : '保護距離（mm）'}</div>
-                      <input type="number" className="input" min="0.1" step="0.1"
+                      <input aria-label={cleanupMode === 'em_field' ? '最小保護距離（mm）' : '保護距離（mm）'} type="number" className="input" min="0.1" step="0.1"
                         value={cleanupGuardMm} onChange={e => { setCleanupGuardMm(e.target.value); setCleanupAnalysis(null) }}
                         disabled={!canSegment} />
                     </div>
                     {cleanupMode === 'em_field' && (
                       <div style={{ width: 105 }}>
                         <div className="field-label">目標隔離度（dB）</div>
-                        <input type="number" className="input" min="20" max="80" step="5"
+                        <input aria-label="目標隔離度（dB）" type="number" className="input" min="20" max="80" step="5"
                           value={cleanupIsolationDb} onChange={e => { setCleanupIsolationDb(e.target.value); setCleanupAnalysis(null) }}
                           disabled={!canSegment} />
                       </div>
@@ -3358,7 +4155,7 @@ ${data.output_path}`)
                     </div>
                   )}
                   <div className="field-row" style={{ marginTop: 6 }}>
-                    <input type="text" className="input" value={cleanupOutputPath}
+                    <input aria-label="Layout 清理輸出路徑" type="text" className="input" value={cleanupOutputPath}
                       onChange={e => setCleanupOutputPath(e.target.value)}
                       placeholder="清理後 .aedb 輸出路徑…" disabled={!canSegment} />
                   </div>
@@ -3378,10 +4175,19 @@ ${data.output_path}`)
                   <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1 }}>
                       <div className="field-label">Port 類型</div>
-                      <select className="input" value={portType} onChange={e => setPortType(e.target.value)}>
+                      <select aria-label="Port 類型" className="input" value={portType} onChange={e => setPortType(e.target.value)}>
                         <option value="coax">Coax（同軸，建議）</option>
                         <option value="circuit">Circuit（電路埠）</option>
+                        <option value="pingroup">Pin Group（細間距 BGA）</option>
                       </select>
+                      {/* 座標型負端在 BGA 底下站不住：訊號球正下方就是 antipad。
+                          SIwave 的失敗方式是靜默丟掉 Port，不報錯照樣解完。 */}
+                      {portType === 'pingroup' && (
+                        <div className="hint" style={{ marginTop: 4 }}>
+                          負端＝該元件所有參考腳，不找座標。整組一致，不與
+                          Coax 混用。
+                        </div>
+                      )}
                     </div>
                     <div style={{ flex: 1.4 }}>
                       <div className="field-label">建立 Port 的元件（{candidateComps.filter(c => checkedComps[c.name]).length}/{candidateComps.length}）</div>
@@ -3425,19 +4231,38 @@ ${data.output_path}`)
                   {/* Sweep Type & Solution Freq */}
                   <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
                     <div className="field-label" style={{ minWidth: 60 }}>掃頻模式</div>
-                    <select className="input" style={{ width: 140 }} value={sweepType} onChange={e => setSweepType(e.target.value)}>
+                    <select aria-label="掃頻模式" className="input" style={{ width: 140 }} value={sweepType} onChange={e => setSweepType(e.target.value)}>
                       <option value="Interpolating">Interpolating</option>
                       <option value="Discrete">Discrete</option>
                       <option value="Fast">Fast</option>
                     </select>
                     <div className="field-label" style={{ minWidth: 80, marginLeft: 12 }}>工作頻率 (GHz)</div>
-                    <input type="number" className="input" style={{ width: 100 }} min="0" step="0.1" value={solutionFreq} onChange={e => setSolutionFreq(e.target.value)} title="預設為掃頻頻寬的一半" />
+                    <input aria-label="工作頻率 (GHz)" type="number" className="input" style={{ width: 100 }} min="0" step="0.1" value={solutionFreq} onChange={e => setSolutionFreq(e.target.value)} title="預設為掃頻頻寬的一半" />
                     <div className="field-label" style={{ minWidth: 100, marginLeft: 12 }}>Error Tolerance (%)</div>
-                    <input type="number" className="input" style={{ width: 80 }} min="0.001" step="0.05" value={errorTolerance} onChange={e => setErrorTolerance(e.target.value)} title="Interpolating Sweep 收斂容差（AEDT 預設 0.5%，本工具預設 0.1%）" />
+                    <input aria-label="Error Tolerance (%)" type="number" className="input" style={{ width: 80 }} min="0.001" step="0.05" value={errorTolerance} onChange={e => setErrorTolerance(e.target.value)} title="Interpolating Sweep 收斂容差（AEDT 預設 0.5%，本工具預設 0.1%）" />
                   </div>
 
                   {/* Sweeps Table */}
                   <div style={{ marginTop: 12 }}>
+                    {/* 求解器建議看的是「要用到幾 GHz」，不是掃到幾 GHz。
+                        掃頻常開得比需要的寬（留 TDR、留餘裕），拿它當依據會把
+                        低頻就夠用的 DDR 通道整段推去 HFSS。 */}
+                    <div style={{ marginBottom: 8 }}>
+                      <div className="field-label">這次要用到的頻寬（GHz）</div>
+                      <input aria-label="這次要用到的頻寬（GHz）" className="input" type="number" step="0.5"
+                        placeholder={targetFmaxGHz ? `留空＝跟掃頻上限 ${targetFmaxGHz} GHz` : '留空＝跟掃頻上限'}
+                        value={usableBandwidthGHz}
+                        onChange={e => { setUsableBandwidthGHz(e.target.value)
+                                         setBandwidthBasis('') }} />
+                      <div className="hint">與分段面板那一格是同一個值。</div>
+                      <div className="hint">只影響求解器建議，不改掃頻範圍。</div>
+                      {schedMetaPath && (
+                        <button className="btn" style={{ marginTop: 4 }}
+                          onClick={() => void reassessSolverBandwidth()}>
+                          用這個頻寬重新評估求解器
+                        </button>
+                      )}
+                    </div>
                     <div className="field-label" style={{ marginBottom: 4 }}>多段式掃頻 (Frequency Sweeps)</div>
                     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
@@ -3454,7 +4279,7 @@ ${data.output_path}`)
                           {sweeps.map((sw, idx) => (
                             <tr key={idx} style={{ borderBottom: idx < sweeps.length - 1 ? '1px solid var(--border)' : 'none' }}>
                               <td style={{ padding: 4 }}>
-                                <select 
+                                <select aria-label={`第 ${idx + 1} 段掃頻的分佈方式`} 
                                   className="input" 
                                   style={{ padding: '2px 4px', height: 24, fontSize: 12 }} 
                                   value={sw.distribution} 
@@ -3470,16 +4295,16 @@ ${data.output_path}`)
                                 </select>
                               </td>
                               <td style={{ padding: 4 }}>
-                                <input className="input" style={{ padding: '2px 4px', height: 24, fontSize: 12 }} value={sw.start} onChange={e => { const ns = [...sweeps]; ns[idx].start = e.target.value; setSweeps(ns); }} />
+                                <input aria-label={`第 ${idx + 1} 段掃頻的起始頻率`} className="input" style={{ padding: '2px 4px', height: 24, fontSize: 12 }} value={sw.start} onChange={e => { const ns = [...sweeps]; ns[idx].start = e.target.value; setSweeps(ns); }} />
                               </td>
                               <td style={{ padding: 4 }}>
-                                <input className="input" style={{ padding: '2px 4px', height: 24, fontSize: 12 }} value={sw.end} onChange={e => { const ns = [...sweeps]; ns[idx].end = e.target.value; setSweeps(ns); }} />
+                                <input aria-label={`第 ${idx + 1} 段掃頻的結束頻率`} className="input" style={{ padding: '2px 4px', height: 24, fontSize: 12 }} value={sw.end} onChange={e => { const ns = [...sweeps]; ns[idx].end = e.target.value; setSweeps(ns); }} />
                               </td>
                               <td style={{ padding: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
                                 <span style={{ fontSize: 11, color: 'var(--faint)', width: 50, flexShrink: 0 }}>
                                   {sw.distribution === 'Linear Count' ? 'Points' : sw.distribution === 'Log Scale' ? 'Samples' : 'Step size'}
                                </span>
-                                <input className="input" style={{ flex: 1, padding: '2px 4px', height: 24, fontSize: 12, minWidth: 0 }} value={sw.value} onChange={e => { const ns = [...sweeps]; ns[idx].value = e.target.value; setSweeps(ns); }} />
+                                <input aria-label={`第 ${idx + 1} 段掃頻的點數或步進`} className="input" style={{ flex: 1, padding: '2px 4px', height: 24, fontSize: 12, minWidth: 0 }} value={sw.value} onChange={e => { const ns = [...sweeps]; ns[idx].value = e.target.value; setSweeps(ns); }} />
                               </td>
                               <td style={{ padding: 4, textAlign: 'center' }}>
                                 <button className="btn--mini" style={{ padding: '2px 6px' }} onClick={() => setSweeps(sweeps.filter((_, i) => i !== idx))}>✕</button>
@@ -3497,7 +4322,7 @@ ${data.output_path}`)
                   {/* HFSS Adaptive Options */}
                   <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                     <div className="field-label" style={{ minWidth: 74 }}>自適應方式</div>
-                    <select className="input" style={{ width: 190 }} value={adaptiveMode}
+                    <select aria-label="自適應方式" className="input" style={{ width: 190 }} value={adaptiveMode}
                       onChange={e => setAdaptiveMode(e.target.value as 'broadband' | 'multi' | 'single')}
                       title="Ansys BKM 建議寬頻自適應：範圍 1 GHz ~ 掃頻上限/2。單點自適應若低於掃頻上限，高頻網格會相對過粗而產生數值反射。">
                       <option value="broadband">寬頻（Ansys BKM 建議）</option>
@@ -3518,14 +4343,14 @@ ${data.output_path}`)
                       「工作頻率」僅在選單一頻率時生效。
                     </div>
                   )}
-                  <div className="panel-hint" style={{ marginTop: 4, fontSize: 10.5, opacity: 0.75 }}>
-                    BKM 的兩項 Beta 選項（low memory mesh adaptive、frequency sweep
-                    acceleration via disk caching）EDB API 無對應設定，需自行在 AEDT 端開啟。
+                  <div className="panel-hint" style={{ marginTop: 4, fontSize: 10.5, opacity: 0.75 }}
+                    title="low memory mesh adaptive、frequency sweep acceleration via disk caching">
+                    兩項 Beta 選項要自行在 AEDT 端開啟。
                   </div>
 
                   <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
                     <div className="field-label" style={{ minWidth: 74 }}>網格方法</div>
-                    <select className="input" style={{ width: 150 }} value={hfssMeshMethod}
+                    <select aria-label="網格方法" className="input" style={{ width: 150 }} value={hfssMeshMethod}
                       onChange={e => setHfssMeshMethod(e.target.value as 'Phi' | 'PhiPlus' | 'Classic')}
                       title="HFSS 3D Layout 的網格產生方法。PhiPlus 對多層複雜結構較不易失敗；Classic 為舊版方法，可在前兩者卡住時嘗試。">
                       <option value="PhiPlus">Phi Plus（建議）</option>
@@ -3542,19 +4367,19 @@ ${data.output_path}`)
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                       <div>
                         <div style={{ fontSize: 11, color: 'var(--faint)' }}>Max Refinement Per Pass (%)</div>
-                        <input type="number" className="input" min="1" step="1" value={maxRefinementPerPass} onChange={e => setMaxRefinementPerPass(e.target.value)} />
+                        <input aria-label="Max Refinement Per Pass (%)" type="number" className="input" min="1" step="1" value={maxRefinementPerPass} onChange={e => setMaxRefinementPerPass(e.target.value)} />
                       </div>
                       <div>
                         <div style={{ fontSize: 11, color: 'var(--faint)' }}>Min Converged Passes</div>
-                        <input type="number" className="input" min="1" step="1" value={minConvergedPasses} onChange={e => setMinConvergedPasses(e.target.value)} />
+                        <input aria-label="Min Converged Passes" type="number" className="input" min="1" step="1" value={minConvergedPasses} onChange={e => setMinConvergedPasses(e.target.value)} />
                       </div>
                       <div>
                         <div style={{ fontSize: 11, color: 'var(--faint)' }}>Max Passes</div>
-                        <input type="number" className="input" min="1" step="1" value={maxPasses} onChange={e => setMaxPasses(e.target.value)} />
+                        <input aria-label="Max Passes" type="number" className="input" min="1" step="1" value={maxPasses} onChange={e => setMaxPasses(e.target.value)} />
                       </div>
                       <div>
                         <div style={{ fontSize: 11, color: 'var(--faint)' }}>Max Delta S</div>
-                        <input type="number" className="input" min="0.001" step="0.01" value={maxDeltaS} onChange={e => setMaxDeltaS(e.target.value)} />
+                        <input aria-label="Max Delta S" type="number" className="input" min="0.001" step="0.01" value={maxDeltaS} onChange={e => setMaxDeltaS(e.target.value)} />
                       </div>
                     </div>
                   </div>
@@ -3570,7 +4395,7 @@ ${data.output_path}`)
                     <b>跳過這一步，通道頭尾不會有 Port</b>，分段與求解都會白做。永遠另存新檔。
                   </p>
                   <div className="field-row" style={{ marginTop: 6 }}>
-                    <input
+                    <input aria-label="Port 與求解器設定的輸出路徑"
                       type="text"
                       className="input"
                       value={portsOutputPath}
@@ -3595,6 +4420,11 @@ ${data.output_path}`)
                   >
                     建立 Port 並套用求解器設定
                   </button>
+                  {portsSetupBlockers.length > 0 && (
+                    <div className="hint" style={{ marginTop: 4 }}>
+                      還不能建立：{portsSetupBlockers.join('、')}
+                    </div>
+                  )}
                 </div>
 
                 {/* 「N 段分割」：N 段分割 */}
@@ -3604,18 +4434,55 @@ ${data.output_path}`)
                     將裁切後的板子分成 N 段，切面自動截斷走線並建立 Gap Port。
                     {directSegmentMode && <span style={{ color: 'var(--accent)' }}>（載入的檔案已是通道，未經裁切）</span>}
                   </p>
+                  {/* 頻寬放在**做決定的地方**。原本它在下面的「模擬設定」，
+                      排在分段之後——按下不分割時它還是空的，於是求解器建議
+                      永遠是純幾何判斷；使用者事後再填，畫面上什麼都不會變。
+
+                      不放進下面那個格線：那個格線是 `80px 1fr` ＋
+                      `alignItems: end`，塞一列三個控制項進去會擠成一團。 */}
+                  <div style={{ marginTop: 7 }}>
+                    <div className="field-label">這次要用到的頻寬（GHz）</div>
+                    <div style={{
+                      display: 'flex', gap: 6, flexWrap: 'wrap',
+                      alignItems: 'center', marginTop: 3,
+                    }}>
+                      <input aria-label="這次要用到的頻寬（GHz）" className="input" type="number" step="0.5"
+                        style={{ width: 90 }}
+                        placeholder="留空＝純看幾何"
+                        value={usableBandwidthGHz}
+                        onChange={e => { setUsableBandwidthGHz(e.target.value)
+                                         setBandwidthBasis('') }} />
+                      <input aria-label="資料率（Gbps 或 MT/s）" className="input" type="number" step="0.1"
+                        style={{ width: 110 }} placeholder="資料率 1866 或 1.866"
+                        value={dataRateGbps}
+                        onChange={e => setDataRateGbps(e.target.value)} />
+                      <button className="btn" onClick={deriveBandwidth}
+                        title="由資料率導出拐點 0.5/Tr">由資料率導出</button>
+                    </div>
+                    <div className="panel-hint" style={{ marginTop: 3 }}>
+                      決定這一段用 SIwave 還是 HFSS，不改掃頻範圍。
+                    </div>
+                    <div className="panel-hint">
+                      資料率填 1866 或 1.866 都可以。
+                    </div>
+                    {bandwidthBasis && (
+                      <div className="status" style={{ fontSize: 11, marginTop: 3 }}>
+                        {bandwidthBasis}
+                      </div>
+                    )}
+                  </div>
                   <div style={{
                     display: 'grid', gridTemplateColumns: '80px 1fr',
                     gap: 8, marginTop: 7, alignItems: 'end',
                   }}>
                     <div>
                       <div className="field-label">分段數 N</div>
-                      <input type="number" className="input" min="2" max="10" step="1"
+                      <input aria-label="分段數 N" type="number" className="input" min="2" max="10" step="1"
                         value={nSegments} onChange={e => setNSegments(e.target.value)} disabled={!canSegment} />
                     </div>
                     <div>
                       <div className="field-label">可接受評分</div>
-                      <select className="input" value={segmentQuality}
+                      <select aria-label="可接受評分" className="input" value={segmentQuality}
                         onChange={e => {
                           setSegmentQuality(e.target.value as QualityThreshold)
                           setSegAnalysis(null)
@@ -3765,10 +4632,8 @@ ${data.output_path}`)
                           以 {segAnalysis.quality_threshold} 級為門檻找不到可行的切點組合。
                           {segAnalysis.threshold_report.some(r => r.feasible)
                             ? `　放寬到 ${segAnalysis.threshold_report.filter(r => r.feasible)
-                                .map(r => `${r.grade} 級（最大段 ${r.max_segment_mm!.toFixed(1)} mm、`
-                                  + `${r.balance_ratio!.toFixed(2)} 倍）`).join('、')}`
-                              + ' 可行，請改選「可接受評分」後重新分析。'
-                            : '　即使放寬到 C 級也無解，請降低分段數 N。下方切面位置僅供參考，不可執行。'}
+                                .map(r => `${r.grade} 級`).join('、')} 可行。`
+                            : '　C 級也無解，請降低分段數 N。'}
                         </strong>
                       )}
 
@@ -3886,7 +4751,7 @@ ${data.output_path}`)
                     </div>
                   )}
                   <div className="field-row" style={{ marginTop: 6 }}>
-                    <input type="text" className="input" value={segOutputDir}
+                    <input aria-label="分段輸出資料夾" type="text" className="input" value={segOutputDir}
                       onChange={e => setSegOutputDir(e.target.value)}
                       placeholder="分段輸出資料夾…" disabled={!canSegment} />
                   </div>
@@ -3926,8 +4791,7 @@ ${data.output_path}`)
                     排程求解{segmentSolverPlans.length > 0 ? '（混合求解區域）' : ''}
                   </h3>
                   <p className="panel-hint">
-                    每個 Segment 為一個求解區域。工具會先完成工作副本與 Port 契約預檢，
-                    再依序執行 SIwave、HFSS，並寫回 segments.json 供「電路串接」使用。
+                    每段依序求解，結果寫回 segments.json。
                   </p>
                   {segmentSolverPlans.length > 0 && (
                     <div className="segment-solver-plan">
@@ -3950,7 +4814,7 @@ ${data.output_path}`)
                                   {plan.recommended_solver.toUpperCase()}
                                 </span></td>
                                 <td>
-                                  <select
+                                  <select aria-label={`第 ${plan.index} 段要用的求解器`}
                                     className="input segment-solver-plan__select"
                                     value={plan.requested_solver}
                                     disabled={schedStatus?.running}
@@ -3978,14 +4842,14 @@ ${data.output_path}`)
                   <div className="field-row" style={{ marginTop: 6 }}>
                     <div style={{ flex: 1 }}>
                       <div className="field-label">求解核心數</div>
-                      <input type="number" className="input" min="1" step="1"
+                      <input aria-label="求解核心數" type="number" className="input" min="1" step="1"
                         value={solverCores}
                         onChange={event => setSolverCores(event.target.value)}
                         disabled={schedStatus?.running} />
                     </div>
                     <div style={{ flex: 1 }}>
                       <div className="field-label">記憶體安全預算（%）</div>
-                      <input type="number" className="input" min="10" max="95" step="5"
+                      <input aria-label="記憶體安全預算（%）" type="number" className="input" min="10" max="95" step="5"
                         value={solverMemoryPercent}
                         onChange={event => setSolverMemoryPercent(event.target.value)}
                         disabled={schedStatus?.running} />
@@ -4000,7 +4864,7 @@ ${data.output_path}`)
                     </div>
                   )}
                   <div className="field-row" style={{ marginTop: 6 }}>
-                    <input type="text" className="input" value={schedMetaPath}
+                    <input aria-label="segments.json 路徑" type="text" className="input" value={schedMetaPath}
                       onChange={e => setSchedMetaPath(e.target.value)}
                       onBlur={() => {
                         const path = normalizeUserPath(schedMetaPath)
@@ -4057,7 +4921,7 @@ ${data.output_path}`)
                                   borderTop: '1px solid rgba(255,255,255,0.08)' }}>
                       <div className="field-label">遠端求解包（求解機不需安裝 Python）</div>
                       <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                        <input className="input" style={{ flex: 1 }} value={packDir}
+                        <input aria-label="遠端求解包輸出資料夾" className="input" style={{ flex: 1 }} value={packDir}
                           onChange={e => setPackDir(e.target.value)}
                           placeholder="輸出資料夾…（需為新資料夾，例如 jobs\\pack1）" />
                         <button className="btn" onClick={handleBuildRemotePack}
@@ -4066,18 +4930,14 @@ ${data.output_path}`)
                         </button>
                       </div>
                       <div className="panel-hint" style={{ marginTop: 4, fontSize: 11 }}>
-                        SIwave 與 HFSS 段可混在同一包。複製到求解機後雙擊
-                        run_all.bat，跑完把 results 複製回來；腳本會自動偵測求解機
-                        本地的 AEDT 版本。
+                        複製到求解機雙擊 run_all.bat，再把 results 複製回來。
                       </div>
                       <div className="panel-hint" style={{ marginTop: 3, fontSize: 11 }}>
-                        <b>上面的求解核心數兩種段都會套用</b>，用的是你填的值，不會被
-                        這台電腦的核心數夾住：SIwave 寫進 .exec 的 SetNumCpus，HFSS 以
-                        ansysedt 的 -batchoptions 傳入。
-                        <b style={{ color: 'var(--warn)' }}>受 HPC 授權限制</b>：HFSS 內含 4 核，超出每核要一張 anshpc。
+                        核心數兩種段都套用。
+                        <b style={{ color: 'var(--warn)' }}>HFSS 超過 4 核需 anshpc 授權</b>。
                       </div>
                       <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                        <input className="input" style={{ flex: 1 }} value={ingestDir}
+                        <input aria-label="求解完成的資料夾" className="input" style={{ flex: 1 }} value={ingestDir}
                           onChange={e => setIngestDir(e.target.value)}
                           placeholder="求解完的資料夾…（求解包或其中的 results）" />
                         <button className="btn" onClick={handleIngestResults}
@@ -4086,8 +4946,7 @@ ${data.output_path}`)
                         </button>
                       </div>
                       <div className="panel-hint" style={{ marginTop: 4, fontSize: 11 }}>
-                        收回時會驗證 Port 數、頻點與格式，通過才寫入 segments.json；
-                        之後串接與眼圖都能直接使用。
+                        驗證 Port 數與格式後才寫入 segments.json。
                       </div>
                     </div>
                   )}
@@ -4250,23 +5109,23 @@ ${data.output_path}`)
                           </div>
                           {extConns.map((c, i) => (
                             <div key={i} style={{ display: 'flex', gap: 3, marginTop: 3, alignItems: 'center' }}>
-                              <select className="input" style={{ width: 46, padding: '2px 3px', fontSize: 10.5 }}
+                              <select aria-label={`第 ${i + 1} 條接線的 A 端檔案`} className="input" style={{ width: 46, padding: '2px 3px', fontSize: 10.5 }}
                                 value={c.a_file}
                                 onChange={e => setExtConns(prev => prev.map((x, k) => k === i ? { ...x, a_file: +e.target.value, a_port: extFiles[+e.target.value]?.port_names[0] || '' } : x))}>
                                 {extFiles.map((_, fi) => <option key={fi} value={fi}>#{fi + 1}</option>)}
                               </select>
-                              <select className="input" style={{ flex: 1, minWidth: 0, padding: '2px 3px', fontSize: 10.5 }}
+                              <select aria-label={`第 ${i + 1} 條接線的 A 端 Port`} className="input" style={{ flex: 1, minWidth: 0, padding: '2px 3px', fontSize: 10.5 }}
                                 value={c.a_port}
                                 onChange={e => setExtConns(prev => prev.map((x, k) => k === i ? { ...x, a_port: e.target.value } : x))}>
                                 {(extFiles[c.a_file]?.port_names || []).map(p => <option key={p} value={p}>{p}</option>)}
                               </select>
                               <span style={{ fontSize: 10 }}>↔</span>
-                              <select className="input" style={{ width: 46, padding: '2px 3px', fontSize: 10.5 }}
+                              <select aria-label={`第 ${i + 1} 條接線的 B 端檔案`} className="input" style={{ width: 46, padding: '2px 3px', fontSize: 10.5 }}
                                 value={c.b_file}
                                 onChange={e => setExtConns(prev => prev.map((x, k) => k === i ? { ...x, b_file: +e.target.value, b_port: extFiles[+e.target.value]?.port_names[0] || '' } : x))}>
                                 {extFiles.map((_, fi) => <option key={fi} value={fi}>#{fi + 1}</option>)}
                               </select>
-                              <select className="input" style={{ flex: 1, minWidth: 0, padding: '2px 3px', fontSize: 10.5 }}
+                              <select aria-label={`第 ${i + 1} 條接線的 B 端 Port`} className="input" style={{ flex: 1, minWidth: 0, padding: '2px 3px', fontSize: 10.5 }}
                                 value={c.b_port}
                                 onChange={e => setExtConns(prev => prev.map((x, k) => k === i ? { ...x, b_port: e.target.value } : x))}>
                                 {(extFiles[c.b_file]?.port_names || []).map(p => <option key={p} value={p}>{p}</option>)}
@@ -4288,7 +5147,7 @@ ${data.output_path}`)
                           </div>
                           {extShorts.map((s, i) => (
                             <div key={i} style={{ display: 'flex', gap: 3, marginTop: 3, alignItems: 'center' }}>
-                              <select className="input" style={{ width: 46, padding: '2px 3px', fontSize: 10.5 }}
+                              <select aria-label={`第 ${i + 1} 組短路的檔案`} className="input" style={{ width: 46, padding: '2px 3px', fontSize: 10.5 }}
                                 value={s.file}
                                 onChange={e => {
                                   const fi = +e.target.value
@@ -4298,7 +5157,7 @@ ${data.output_path}`)
                                 {extFiles.map((_, fi) => <option key={fi} value={fi}>#{fi + 1}</option>)}
                               </select>
                               {[0, 1].map(pi => (
-                                <select key={pi} className="input" style={{ flex: 1, minWidth: 0, padding: '2px 3px', fontSize: 10.5 }}
+                                <select aria-label={`第 ${i + 1} 組短路的第 ${pi + 1} 個 Port`} key={pi} className="input" style={{ flex: 1, minWidth: 0, padding: '2px 3px', fontSize: 10.5 }}
                                   value={s.ports[pi] || ''}
                                   onChange={e => setExtShorts(prev => prev.map((x, k) => {
                                     if (k !== i) return x
@@ -4354,14 +5213,15 @@ ${data.output_path}`)
                           一鍵另存完整 Touchstone
                         </button>
                       )}
-                      <div hidden={!show.eye} style={{
+                      {/* 舊版串接後 QuickEye 設定保留在程式中供既有工作狀態相容，
+                          但 UI 永久隱藏；新工作一律由右側「IBIS 模型與眼圖分析」執行。 */}
+                      <div hidden style={{
                         marginTop: 8, padding: 8, border: '1px solid var(--border)',
                         borderRadius: 7, background: 'rgba(40, 70, 110, 0.08)',
                       }}>
                         <div style={{ fontWeight: 700, fontSize: 12 }}>眼圖（QuickEye）</div>
                         <div className="panel-hint" style={{ marginTop: 3 }}>
-                          直接以上方串接完成的 Touchstone 求解眼圖，不需先輸出 Circuit 專案；
-                          背景執行，結果顯示於「眼圖」分頁。
+                          用上方串接結果直接求解，背景執行。
                         </div>
                         <details style={{ marginTop: 6 }}>
                           <summary className="panel-hint" style={{ cursor: 'pointer' }}>
@@ -4370,7 +5230,7 @@ ${data.output_path}`)
                           <div className="field-row" style={{ marginTop: 6 }}>
                             <div style={{ flex: 1 }}>
                               <div className="field-label">Circuit 形式</div>
-                              <select className="input" value={circuitExportMode}
+                              <select aria-label="Circuit 形式" className="input" value={circuitExportMode}
                                 onChange={event => setCircuitExportMode(event.target.value as 'complete' | 'segments')}>
                                 <option value="complete">完整通道單一元件</option>
                                 <option value="segments" disabled={cascadeMode !== 'tool'}>保留 N 段展示接線</option>
@@ -4392,7 +5252,7 @@ ${data.output_path}`)
                             <div className="field-row" style={{ marginTop: 6 }}>
                               <div style={{ flex: 1 }}>
                                 <div className="field-label">眼圖模式</div>
-                                <select className="input" value={eyeMode}
+                                <select aria-label="眼圖模式" className="input" value={eyeMode}
                                   onChange={event => setEyeMode(event.target.value as 'single' | 'differential')}>
                                   <option value="single" disabled={cascadeResult.n_ports !== 2}>單端（2-Port）</option>
                                   <option value="differential" disabled={cascadeResult.n_ports !== 4}>差動（4-Port）</option>
@@ -4400,7 +5260,7 @@ ${data.output_path}`)
                               </div>
                               <div style={{ flex: 1 }}>
                                 <div className="field-label">資料速率（Gbps）</div>
-                                <input className="input" type="number" min="0.001" step="0.1"
+                                <input aria-label="資料速率（Gbps）" className="input" type="number" min="0.001" step="0.1"
                                   value={eyeDataRate}
                                   onChange={event => {
                                     setEyeDataRate(event.target.value)
@@ -4412,14 +5272,14 @@ ${data.output_path}`)
                               <div style={{ flex: 1 }}
                                 title="Tr = 0.2 × UI，即發送端驅動器的邊緣速率（高速串列連結常見 20～35% UI）。改資料速率會自動重算，也可自行覆寫。">
                                 <div className="field-label">Tr／Tf（ps）</div>
-                                <input className="input" type="number" min="0.001" step="0.1"
+                                <input aria-label="Tr／Tf（ps）" className="input" type="number" min="0.001" step="0.1"
                                   value={eyeRiseTime} onChange={event => setEyeRiseTime(event.target.value)} />
                               </div>
                             </div>
                             <div className="field-row" style={{ marginTop: 5 }}>
                               <div style={{ flex: 1 }}>
                                 <div className="field-label">輸入 P</div>
-                                <select className="input" value={eyeInputP}
+                                <select aria-label="輸入 P" className="input" value={eyeInputP}
                                   onChange={event => setEyeInputP(event.target.value)}>
                                   {cascadeResult.port_names.map((name: string) =>
                                     <option key={name} value={name}>{name}</option>)}
@@ -4428,7 +5288,7 @@ ${data.output_path}`)
                               {eyeMode === 'differential' && (
                                 <div style={{ flex: 1 }}>
                                   <div className="field-label">輸入 N</div>
-                                  <select className="input" value={eyeInputN}
+                                  <select aria-label="輸入 N" className="input" value={eyeInputN}
                                     onChange={event => setEyeInputN(event.target.value)}>
                                     {cascadeResult.port_names.map((name: string) =>
                                       <option key={name} value={name}>{name}</option>)}
@@ -4437,7 +5297,7 @@ ${data.output_path}`)
                               )}
                               <div style={{ flex: 1 }}>
                                 <div className="field-label">輸出 P</div>
-                                <select className="input" value={eyeOutputP}
+                                <select aria-label="輸出 P" className="input" value={eyeOutputP}
                                   onChange={event => setEyeOutputP(event.target.value)}>
                                   {cascadeResult.port_names.map((name: string) =>
                                     <option key={name} value={name}>{name}</option>)}
@@ -4446,7 +5306,7 @@ ${data.output_path}`)
                               {eyeMode === 'differential' && (
                                 <div style={{ flex: 1 }}>
                                   <div className="field-label">輸出 N</div>
-                                  <select className="input" value={eyeOutputN}
+                                  <select aria-label="輸出 N" className="input" value={eyeOutputN}
                                     onChange={event => setEyeOutputN(event.target.value)}>
                                     {cascadeResult.port_names.map((name: string) =>
                                       <option key={name} value={name}>{name}</option>)}
@@ -4492,8 +5352,7 @@ ${data.output_path}`)
                       }}>
                         <div style={{ fontWeight: 700, fontSize: 12 }}>TDR 阻抗定位</div>
                         <div className="panel-hint" style={{ marginTop: 3 }}>
-                          以串接後 Touchstone 求解 TDR，把阻抗劇變換算成 Layout 位置。
-                          上升時間由頻寬自動決定（0.35/f_max），不需輸入。
+                          用串接結果求解 TDR，換算成 Layout 位置。
                         </div>
                         {tdrSuggestion && (
                           <>
@@ -4506,7 +5365,7 @@ ${data.output_path}`)
                             <div className="field-row" style={{ marginTop: 6 }}>
                               <div style={{ flex: 1 }}>
                                 <div className="field-label">模式</div>
-                                <select className="input" value={tdrMode}
+                                <select aria-label="模式" className="input" value={tdrMode}
                                   onChange={event => setTdrMode(event.target.value as 'single' | 'differential')}>
                                   {/* 單端不限 Port 數：4-Port 檔也常要探單一條線
                                       （其餘 Port 自動 50Ω 端接）。 */}
@@ -4530,7 +5389,7 @@ ${data.output_path}`)
                             <div className="field-row" style={{ marginTop: 5 }}>
                               <div style={{ flex: 1 }}>
                                 <div className="field-label">探棒（輸入）P</div>
-                                <select className="input" value={tdrInputP}
+                                <select aria-label="探棒（輸入）P" className="input" value={tdrInputP}
                                   onChange={event => setTdrInputP(event.target.value)}>
                                   {cascadeResult.port_names.map((name: string) =>
                                     <option key={name} value={name}>{name}</option>)}
@@ -4539,7 +5398,7 @@ ${data.output_path}`)
                               {tdrMode === 'differential' && (
                                 <div style={{ flex: 1 }}>
                                   <div className="field-label">輸入 N</div>
-                                  <select className="input" value={tdrInputN}
+                                  <select aria-label="輸入 N" className="input" value={tdrInputN}
                                     onChange={event => setTdrInputN(event.target.value)}>
                                     {cascadeResult.port_names.map((name: string) =>
                                       <option key={name} value={name}>{name}</option>)}
@@ -4548,7 +5407,7 @@ ${data.output_path}`)
                               )}
                               <div style={{ flex: 1 }}>
                                 <div className="field-label">遠端 P</div>
-                                <select className="input" value={tdrOutputP}
+                                <select aria-label="遠端 P" className="input" value={tdrOutputP}
                                   onChange={event => setTdrOutputP(event.target.value)}>
                                   {cascadeResult.port_names.map((name: string) =>
                                     <option key={name} value={name}>{name}</option>)}
@@ -4557,7 +5416,7 @@ ${data.output_path}`)
                               {tdrMode === 'differential' && (
                                 <div style={{ flex: 1 }}>
                                   <div className="field-label">遠端 N</div>
-                                  <select className="input" value={tdrOutputN}
+                                  <select aria-label="遠端 N" className="input" value={tdrOutputN}
                                     onChange={event => setTdrOutputN(event.target.value)}>
                                     {cascadeResult.port_names.map((name: string) =>
                                       <option key={name} value={name}>{name}</option>)}
@@ -4569,7 +5428,7 @@ ${data.output_path}`)
                               <div className="field-row" style={{ marginTop: 5 }}>
                                 <div style={{ flex: 2 }}>
                                   <div className="field-label">被探測的訊號網路（Layout 標記）</div>
-                                  <select className="input" value={tdrNet}
+                                  <select aria-label="被探測的訊號網路（Layout 標記）" className="input" value={tdrNet}
                                     onChange={event => setTdrNet(event.target.value)}>
                                     {signalNets.map(net =>
                                       <option key={net} value={net}>{net}</option>)}
@@ -4612,6 +5471,142 @@ ${data.output_path}`)
                           分頁的自動曲線（IL/RL/NEXT/FEXT、單端／差動切換）
                           已完整取代它。 */}
                     </>
+                  )}
+                </div>
+
+                {/* 「截面阻抗（Q2D）」：從 EDB 還原二維截面，求該處的阻抗 */}
+                <div hidden={!show.crosssection}>
+                  <h3 className="panel-title">截面阻抗（Q2D）</h3>
+                  <p className="panel-hint">
+                    在右側分頁框範圍、拉切線，再回來掃描。掃描只讀 EDB，不佔用 AEDT 授權。
+                  </p>
+                  <div className="panel-hint" style={{ marginTop: 4 }}>
+                    框寬是模型的側向截斷邊界，太窄會讓阻抗算高。建議取導體到參考面高度的 10 倍。
+                  </div>
+                  <div className="field-row" style={{ marginTop: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      <div className="field-label">取樣間距（µm）</div>
+                      <input aria-label="取樣間距（µm）" className="input" value={xsResolutionUm}
+                        onChange={event => setXsResolutionUm(event.target.value)}
+                        title="沿切線每隔多遠問一次「這裡有沒有銅」。比最細的線寬小一個級距就夠。" />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div className="field-label">導體到參考面（µm，選填）</div>
+                      <input aria-label="導體到參考面（µm，選填）" className="input" value={xsHeightUm}
+                        onChange={event => setXsHeightUm(event.target.value)}
+                        title="填了才判定得出側向截斷夠不夠；沒填就不假裝知道。" />
+                    </div>
+                  </div>
+                  <div className="panel-hint" style={{ marginTop: 5 }}>
+                    {xsRegion
+                      ? `工作範圍 ${xsRegion.x0Mm.toFixed(2)}, ${xsRegion.y0Mm.toFixed(2)} → `
+                        + `${xsRegion.x1Mm.toFixed(2)}, ${xsRegion.y1Mm.toFixed(2)} mm`
+                      : '尚未框工作範圍'}
+                    {xsCut
+                      ? `　·　切線 ${xsCut.axis.toUpperCase()} = ${xsCut.coordinateMm.toFixed(3)} mm`
+                      : '　·　尚未拉切線'}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                    <button className="btn btn--primary" style={{ flex: 1.4 }}
+                      disabled={!xsRegion || !xsCut || xsBusy}
+                      onClick={() => runCrossSectionScan()}>
+                      {xsBusy ? '掃描中…' : '掃描截面'}
+                    </button>
+                    <button className="btn" style={{ flex: 1 }}
+                      disabled={!xsRegion || !xsCut}
+                      onClick={handleXsSaveCut}
+                      title="切線是你對這片板子的標註，存在 .aedb 旁邊，複製給同事時一起過去。">
+                      存下這條切線
+                    </button>
+                  </div>
+                  <div className="field-row" style={{ marginTop: 6 }}>
+                    <div style={{ flex: 1 }}>
+                      <div className="field-label">求解精度</div>
+                      <select aria-label="求解精度" className="input" value={xsSolveMode}
+                        onChange={event => setXsSolveMode(event.target.value)}>
+                        <option value="fast">快速（表面阻抗，PerError 1%）</option>
+                        <option value="standard">標準（表面阻抗，PerError 0.2%）</option>
+                        <option value="accurate">高精度（導體內部解場，慢三倍）</option>
+                      </select>
+                    </div>
+                    <div style={{ flex: 1 }}
+                      title="自適應網格用的頻率。要看的是那個頻段的阻抗就填那個頻率。">
+                      <div className="field-label">自適應頻率</div>
+                      <input aria-label="自適應頻率" className="input" value={xsFrequency}
+                        onChange={event => setXsFrequency(event.target.value)} />
+                    </div>
+                  </div>
+                  <div className="panel-hint" style={{ marginTop: 4 }}>
+                    只要阻抗的話三檔差別很小；要頻率相依的串聯電阻才需要高精度。
+                  </div>
+                  <label style={{
+                    display: 'flex', alignItems: 'center', gap: 6, marginTop: 6,
+                    fontSize: 11.5, cursor: 'pointer',
+                  }}
+                    title="判斷側向範圍夠不夠的唯一方法，是加大到數值不再變化。建議留白（導體到參考面高度的 10 倍）只是起點。">
+                    <input type="checkbox" checked={xsWidenCheck}
+                      onChange={event => setXsWidenCheck(event.target.checked)} />
+                    順便驗側向收斂（框加寬 {(WIDEN_FACTOR - 1) * 100}% 再解一次，時間加倍）
+                  </label>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                    <button className="btn btn--primary" style={{ flex: 1.4 }}
+                      disabled={!xsScan?.plan?.solvable || xsJob?.running}
+                      onClick={() => {
+                        const spec = xsCutSpec()
+                        if (spec) handleXsSolve([spec])
+                      }}
+                      title={xsScan?.plan?.solvable
+                        ? '只解目前這一條切線'
+                        : '先掃描一條可以求解的截面'}>
+                      {xsJob?.running ? '求解中…（背景執行）' : '求解這條'}
+                    </button>
+                    <button className="btn" style={{ flex: 1 }}
+                      disabled={xsSavedCuts.length === 0 || xsJob?.running}
+                      onClick={() => handleXsSolve(xsSavedCuts)}
+                      title="把已存的切線整批送去求解，沿線的 Z₀ 剖面就是這樣做出來的">
+                      解全部已存（{xsSavedCuts.length}）
+                    </button>
+                    {xsJob?.running && (
+                      <button className="btn" style={{ flex: 0.7 }}
+                        onClick={handleXsStop}>終止</button>
+                    )}
+                  </div>
+                  {xsJob && xsJob.status !== 'idle' && (
+                    <div className={`status ${xsJob.status === 'error' ? 'status--warn' : ''}`}
+                      style={{ marginTop: 6, fontSize: 11 }}>
+                      {xsJob.phase}
+                      {xsJob.message ? `：${xsJob.message}` : ''}
+                      {xsJob.running && xsJob.started_at
+                        ? `　已耗時 ${Math.max(0, Math.round(nowTick - xsJob.started_at))} 秒`
+                        : ''}
+                    </div>
+                  )}
+                  {xsError && (
+                    <div className="status status--warn"
+                      style={{ marginTop: 6, fontSize: 11, wordBreak: 'break-all' }}>
+                      {xsError}
+                    </div>
+                  )}
+                  {xsSavedCuts.length > 0 && (
+                    <div style={{ marginTop: 6 }}>
+                      <div className="field-label">
+                        已存的切線（{xsSavedCuts.length} 條）
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 3 }}>
+                        {xsSavedCuts.map(entry => (
+                          <button key={entry.name} className="btn"
+                            style={{ fontSize: 11, padding: '2px 8px' }}
+                            onClick={() => handleXsLoadCut(entry)}>
+                            {entry.name}
+                          </button>
+                        ))}
+                      </div>
+                      {xsCutsSource && (
+                        <div className="panel-hint" style={{ marginTop: 3, wordBreak: 'break-all' }}>
+                          存放位置：{xsCutsSource}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
 
@@ -4658,18 +5653,30 @@ ${data.output_path}`)
                   onClick={() => setActiveView('sparam')}
                   disabled={!cascadeResult}
                 >S 參數</button>
+                {/* 舊版單一 QuickEye 結果頁不再作為入口；新眼圖直接在 IBIS 分析向導顯示。 */}
                 <button
-                  hidden={!(show.eye)}
+                  hidden
                   className={'viewtab' + (activeView === 'eye' ? ' viewtab--active' : '')}
                   onClick={() => setActiveView('eye')}
                   disabled={!eyeJob || eyeJob.status === 'idle'}
                 >眼圖</button>
+                <button
+                  hidden={!(show.models)}
+                  className={'viewtab' + (activeView === 'models' ? ' viewtab--active' : '')}
+                  onClick={() => setActiveView('models')}
+                >IBIS 模型與眼圖分析</button>
                 <button
                   hidden={!(show.tdr)}
                   className={'viewtab' + (activeView === 'tdr' ? ' viewtab--active' : '')}
                   onClick={() => setActiveView('tdr')}
                   disabled={!tdrJob || tdrJob.status === 'idle'}
                 >TDR</button>
+                <button
+                  hidden={!(show.crosssection)}
+                  className={'viewtab' + (activeView === 'crosssection' ? ' viewtab--active' : '')}
+                  onClick={() => setActiveView('crosssection')}
+                  disabled={!fullScene}
+                >截面阻抗</button>
                 <button
                   hidden={!(show.report)}
                   className={'viewtab' + (activeView === 'report' ? ' viewtab--active' : '')}
@@ -4690,6 +5697,11 @@ ${data.output_path}`)
                         signal_net_count: signalNets.length,
                         reference_net_count: refNets.length,
                         segment_count: segRun?.segments?.length || segAnalysis?.n_segments || 0,
+                        // 截面阻抗分頁另外帶上實際數字。快照是一張圖，
+                        // 圖上的字在報告裡縮小之後未必讀得出來；數字進中繼資料
+                        // 表格才會以文字保留下來。
+                        ...(activeView === 'crosssection'
+                          ? crossSectionReportMetadata() : {}),
                       }}
                       onSaved={rememberReportWorkspace}
                     />
@@ -4712,7 +5724,9 @@ ${data.output_path}`)
                             ? ` · 外框最大差異 ${completedBoundary.comparison.max_boundary_error_mm?.toFixed(3)} mm`
                             : ''}
                         </div>}
-                        {activeView === 'report' ? (
+                        {activeView === 'models' ? (
+                          <ModelLibrary />
+                        ) : activeView === 'report' ? (
                           <ReportCenter basePath={reportBasePath} projectName={reportProjectName}
                             onWorkspaceChange={rememberReportWorkspace} />
                         ) : activeView === 'eye' ? (
@@ -4761,12 +5775,22 @@ ${data.output_path}`)
                               </div>
                             )}
 
-                            {eyeJob?.result?.measurements && Object.keys(eyeJob.result.measurements).length > 0 && (
+                            {/* 量測在 measurements.metrics 底下，不是 measurements 本身。
+                                外層是 ADR-0039 的可得性包裝（available／source／api／
+                                unavailable_reason／attempted），直接展開會列出六張沒有
+                                意義的卡，而真正的 11 項一個都不會出現。 */}
+                            {eyeJob?.result?.measurements?.available === false && (
+                              <div className="status status--warn" style={{ marginTop: 14 }}>
+                                取不到眼圖量測：{eyeJob.result.measurements.unavailable_reason}
+                              </div>
+                            )}
+                            {eyeJob?.result?.measurements?.metrics
+                              && Object.keys(eyeJob.result.measurements.metrics).length > 0 && (
                               <div style={{
                                 display: 'grid', gap: 8,
                                 gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
                               }}>
-                                {Object.entries(eyeJob.result.measurements).map(([key, item]: [string, any]) => (
+                                {Object.entries(eyeJob.result.measurements.metrics).map(([key, item]: [string, any]) => (
                                   <div key={key} style={{
                                     border: '1px solid #303a48', borderRadius: 7,
                                     background: '#131820', padding: '8px 10px',
@@ -4954,6 +5978,9 @@ ${data.output_path}`)
                                               <th style={{ padding: '3px 6px' }}>阻抗</th>
                                               <th style={{ padding: '3px 6px' }}>ΔZ</th>
                                               <th style={{ padding: '3px 6px' }}>|Γ|</th>
+                                              {show.crosssection && (
+                                                <th style={{ padding: '3px 6px' }}>截面</th>
+                                              )}
                                             </tr>
                                           </thead>
                                           <tbody>
@@ -4971,6 +5998,17 @@ ${data.output_path}`)
                                                   <td style={{ padding: '4px 6px' }}>{peak.impedance_ohm.toFixed(1)} Ω</td>
                                                   <td style={{ padding: '4px 6px' }}>{peak.delta_z_ohm > 0 ? '+' : ''}{peak.delta_z_ohm.toFixed(1)} Ω</td>
                                                   <td style={{ padding: '4px 6px' }}>{peak.reflection_mag.toFixed(3)}</td>
+                                                  {show.crosssection && (
+                                                    <td style={{ padding: '4px 6px' }}>
+                                                      <button className="btn--mini"
+                                                        disabled={xsFromTdrBusy || !tdrPath}
+                                                        onClick={() => handleCutHere(
+                                                          peak.distance_mm, `XS_${methodTag}${index + 1}`)}
+                                                        title="在這個距離上生一條垂直於走線的切線，切到「截面阻抗」分頁">
+                                                        取此處截面
+                                                      </button>
+                                                    </td>
+                                                  )}
                                                 </tr>
                                               )
                                             })}
@@ -4980,6 +6018,45 @@ ${data.output_path}`)
                                       {tdrMarkers?.some(m => m.excluded) && (
                                         <div style={{ fontSize: 10.5, color: '#8fa1b5', marginTop: 6 }}>
                                           ⚠＝落在分段切面的排除區內——多半是接縫假象，不是板上真實的劇變。
+                                        </div>
+                                      )}
+                                      {show.crosssection && tdrPath && (
+                                        <div style={{
+                                          marginTop: 10, paddingTop: 8,
+                                          borderTop: '1px solid #232b36',
+                                        }}>
+                                          <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 4 }}>
+                                            沿線取樣截面
+                                          </div>
+                                          <div style={{ fontSize: 10.5, color: '#8fa1b5', marginBottom: 6 }}>
+                                            沿走線每隔一段取一條切線，做出 Z₀(x) 剖面。轉角會跳過。
+                                          </div>
+                                          <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+                                            <div style={{ flex: 1 }}>
+                                              <div className="field-label">間距（mm）</div>
+                                              <input aria-label="間距（mm）" className="input" style={{ height: 26 }}
+                                                value={xsSampleSpacingMm}
+                                                onChange={e => setXsSampleSpacingMm(e.target.value)} />
+                                            </div>
+                                            <div style={{ flex: 1 }}
+                                              title="側向半寬，也就是二維模型的物理邊界。經驗值是導體到參考面高度的 10 倍。">
+                                              <div className="field-label">側向半寬（µm）</div>
+                                              <input aria-label="側向半寬（µm）" className="input" style={{ height: 26 }}
+                                                value={xsHalfWidthUm}
+                                                onChange={e => setXsHalfWidthUm(e.target.value)} />
+                                            </div>
+                                            <button className="btn" style={{ height: 26, whiteSpace: 'nowrap' }}
+                                              disabled={xsFromTdrBusy}
+                                              onClick={handleSampleAlongTrace}>
+                                              {xsFromTdrBusy ? '產生中…' : '沿線取樣'}
+                                            </button>
+                                          </div>
+                                          <div style={{ fontSize: 10.5, color: '#8fa1b5', marginTop: 4 }}>
+                                            走線長 {Number(tdrPath.length_mm).toFixed(2)} mm，
+                                            間距 {xsSampleSpacingMm} mm 約
+                                            {' '}{Math.max(1, Math.round(Number(tdrPath.length_mm) / (Number(xsSampleSpacingMm) || 1)))} 條。
+                                            切線會存進切線集，之後按「解全部已存」整批求解。
+                                          </div>
                                         </div>
                                       )}
                                     </div>
@@ -5112,12 +6189,12 @@ ${data.output_path}`)
                             </div>
                             {cleanupCompareMode === 'overlay' && (
                               <div className="cleanup-compare__filters">
-                                <select value={cleanupDiffKind} onChange={e => setCleanupDiffKind(e.target.value as 'all' | 'primitive' | 'via')}>
+                                <select aria-label="差異類型篩選" value={cleanupDiffKind} onChange={e => setCleanupDiffKind(e.target.value as 'all' | 'primitive' | 'via')}>
                                   <option value="all">全部差異</option>
                                   <option value="primitive">僅銅箔／走線</option>
                                   <option value="via">僅 Via</option>
                                 </select>
-                                <select value={cleanupDiffLayer} onChange={e => setCleanupDiffLayer(e.target.value)}>
+                                <select aria-label="Layer 篩選" value={cleanupDiffLayer} onChange={e => setCleanupDiffLayer(e.target.value)}>
                                   <option value="">全部 Layer</option>
                                   {cleanupDifferenceLayers.map(layer => <option key={layer} value={layer}>{layer}</option>)}
                                 </select>
@@ -5171,6 +6248,88 @@ ${data.output_path}`)
                                       差異物件過多，已高亮前 {cleanupAnalysis.removed_geometry.rendered.toLocaleString()} 個；統計仍包含全部物件。
                                     </div>
                                   )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ) : activeView === 'crosssection' ? (
+                          <div style={{
+                            height: '100%', paddingTop: 34, display: 'flex', gap: 8,
+                            minHeight: 0,
+                          }}>
+                            <div style={{
+                              flex: 1.2, minWidth: 0, border: '1px solid #303a48',
+                              borderRadius: 8, overflow: 'hidden', position: 'relative',
+                            }}>
+                              <Preview2D
+                                data={scene}
+                                fitKey={`xs-${inputPath}`}
+                                signalNets={signalNets} refNets={refNets}
+                                highlightNets={[...signalNets, ...refNets]}
+                                layerPanelInitiallyOpen={false}
+                                crossSectionMode={xsMode}
+                                onCrossSectionModeChange={setXsMode}
+                                crossSectionRegion={xsRegion}
+                                crossSectionCut={xsCut}
+                                onCrossSectionRegionDrawn={handleXsRegionDrawn}
+                                onCrossSectionCutDrawn={handleXsCutDrawn}
+                              />
+                            </div>
+                            <div style={{
+                              flex: 1, minWidth: 340, maxWidth: 700, overflowY: 'auto',
+                              border: '1px solid #303a48', borderRadius: 8, padding: 10,
+                            }}>
+                              {(xsJob?.result?.cuts || []).length > 0 && (
+                                <div style={{
+                                  marginBottom: 12, paddingBottom: 12,
+                                  borderBottom: '1px solid #27313d',
+                                }}>
+                                  <div style={{
+                                    fontWeight: 700, fontSize: 13, marginBottom: 6,
+                                    color: '#e8eef5',
+                                  }}>
+                                    求解結果
+                                    {xsJob.running ? '（還在跑，先給已經解完的）' : ''}
+                                  </div>
+                                  <CrossSectionResults
+                                    rows={xsJob.result.cuts}
+                                    selected={xsResultIdx}
+                                    onSelect={setXsResultIdx} />
+                                </div>
+                              )}
+                              {xsCompare && (
+                                <div style={{
+                                  marginBottom: 12, paddingBottom: 12,
+                                  borderBottom: '1px solid #27313d',
+                                }}>
+                                  <CrossSectionComparison
+                                    result={xsCompare}
+                                    tdrDistanceMm={
+                                      tdrJob?.result?.analyses?.[tdrAnalysisIdx]?.distance_mm || []}
+                                    tdrImpedanceOhm={tdrJob?.result?.impedance_ohm || []} />
+                                </div>
+                              )}
+                              {xsScan ? (
+                                <CrossSectionView
+                                  scan={xsScan}
+                                  roleOverrides={xsRoleOverrides}
+                                  onRoleOverride={handleXsRoleOverride}
+                                  busy={xsBusy} />
+                              ) : (xsJob?.result?.cuts || []).length > 0 ? (
+                                <div style={{ color: '#8fa1b5', fontSize: 12 }}>
+                                  要再看一次截面本身，回左側面板按「掃描截面」。
+                                </div>
+                              ) : (
+                                <div style={{ color: '#8fa1b5', fontSize: 12, lineHeight: 1.7 }}>
+                                  <div style={{ fontWeight: 700, fontSize: 13, color: '#c9d5e2' }}>
+                                    還沒有截面
+                                  </div>
+                                  <ol style={{ paddingLeft: 18, marginTop: 8 }}>
+                                    <li>按左圖左上的「框工作範圍」，拉一個涵蓋走線與兩側參考面的矩形。</li>
+                                    <li>按「拉切線」，在要看阻抗的位置點一下。切線方向由框的長邊決定。</li>
+                                    <li>回左側面板按「掃描截面」。</li>
+                                  </ol>
+                                  {xsBusy && <div style={{ marginTop: 8 }}>掃描中…</div>}
                                 </div>
                               )}
                             </div>
