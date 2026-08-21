@@ -98,6 +98,23 @@ export interface CleanupRemovedGeometry {
   truncated: boolean
 }
 
+/** 截面阻抗的互動模式。'region' 框工作範圍、'cut' 拉切線。 */
+export type CrossSectionMode = 'none' | 'region' | 'cut'
+
+/** 工作範圍：同時是注意力的範圍、切線可放置的區域，以及截面的側向截斷邊界。 */
+export interface CrossSectionRegion {
+  x0Mm: number
+  y0Mm: number
+  x1Mm: number
+  y1Mm: number
+}
+
+/** 切線：軸向＋單一座標。斜向一律不允許——斜切會讓導體寬度看起來變寬。 */
+export interface CrossSectionCut {
+  axis: 'x' | 'y'
+  coordinateMm: number
+}
+
 interface Preview2DProps {
   data: PreviewData | null
   fitKey?: string
@@ -117,12 +134,23 @@ interface Preview2DProps {
   onCutDrag?: (cutIndex: number, positionMm: number) => void
   cleanupOverlay?: CleanupOverlay | null // Layout 清理：預計移除物件紅框
   layerPanelEnabled?: boolean // 比較模式可關閉側欄，保留更多畫布空間
+  /** 側欄一開始是收合的。畫布本身就被右側結果面板分掉一半時（截面阻抗），
+   *  展開的圖層面板會把剩下的畫布再吃掉一大塊。仍可用 ▶ 展開。 */
+  layerPanelInitiallyOpen?: boolean
   removedGeometry?: CleanupRemovedGeometry | null // 清理時實際刪除的原始幾何
   dimBase?: boolean // 差異模式：壓暗未變更 Layout
   differenceKind?: 'all' | 'primitive' | 'via'
   differenceLayer?: string
   focusBounds?: { min: [number, number]; max: [number, number] } | null
   tdrMarkers?: TdrMarkerSpan[] | null // TDR 阻抗劇變位置標記（mm）
+  /** 截面阻抗：目前的互動模式。'none' 時滑鼠行為與其他分頁完全相同。
+   *  用模式按鈕而不是修飾鍵——修飾鍵沒有任何視覺提示，不看手冊就不會知道。 */
+  crossSectionMode?: CrossSectionMode
+  onCrossSectionModeChange?: (mode: CrossSectionMode) => void
+  crossSectionRegion?: CrossSectionRegion | null
+  crossSectionCut?: CrossSectionCut | null
+  onCrossSectionRegionDrawn?: (region: CrossSectionRegion) => void
+  onCrossSectionCutDrawn?: (cut: CrossSectionCut) => void
   estimatedCutoutBoundary?: number[][] | null // PyEDB 唯讀預檢外框（mm）
   actualCutoutBoundary?: number[][] | null // 正式裁切回傳外框（mm）
   showBoundaryDifferenceFill?: boolean // 正式裁切比對：是否顯示橘／藍／綠半透明差異填色
@@ -198,6 +226,7 @@ export default function Preview2D({
   onCutDrag,
   cleanupOverlay = null,
   layerPanelEnabled = true,
+  layerPanelInitiallyOpen = true,
   removedGeometry = null,
   dimBase = false,
   differenceKind = 'all',
@@ -209,9 +238,19 @@ export default function Preview2D({
   showBoundaryDifferenceFill = true,
   onBoundaryDifferenceFillChange,
   boundaryComparison = null,
+  crossSectionMode = 'none',
+  onCrossSectionModeChange,
+  crossSectionRegion = null,
+  crossSectionCut = null,
+  onCrossSectionRegionDrawn,
+  onCrossSectionCutDrawn,
 }: Preview2DProps) {
   const canvasRef    = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  // 拖曳中的暫時矩形（mm）。放開滑鼠才回報，拖曳過程只是預覽。
+  const [drawingRegion, setDrawingRegion] =
+    useState<CrossSectionRegion | null>(null)
+  const regionAnchor = useRef<{ x: number; y: number } | null>(null)
 
   // Viewport
   const [transform,  setTransform]  = useState({ x: 0, y: 0, scale: 1 })
@@ -231,7 +270,7 @@ export default function Preview2D({
   const [visibleNets,  setVisibleNets]  = useState<Record<string, boolean>>({})
 
   // 面板折疊
-  const [panelOpen, setPanelOpen] = useState(true)
+  const [panelOpen, setPanelOpen] = useState(layerPanelInitiallyOpen)
 
   // 分頁 / 搜尋
   const [activeTab,   setActiveTab]   = useState<'Layers' | 'Components' | 'Nets'>('Layers')
@@ -836,6 +875,38 @@ export default function Preview2D({
     // ── TDR 阻抗劇變位置標記 ─────────────────────────
     // 每個標記是一段「解析度寬度」的走線片段而不是一個點——TDR 的空間解析度
     // 是物理極限（v·Tr/2），畫成點會暗示不存在的精度。
+    // ── 截面阻抗：工作範圍與切線 ─────────────────────────────
+    const shownRegion = drawingRegion || crossSectionRegion
+    if (shownRegion) {
+      ctx.save()
+      ctx.translate(transform.x, transform.y + rect.height)
+      ctx.scale(transform.scale, -transform.scale)
+      const w = shownRegion.x1Mm - shownRegion.x0Mm
+      const h = shownRegion.y1Mm - shownRegion.y0Mm
+      ctx.fillStyle = 'rgba(0, 200, 255, 0.10)'
+      ctx.fillRect(shownRegion.x0Mm, shownRegion.y0Mm, w, h)
+      ctx.strokeStyle = drawingRegion ? '#00e5ff' : '#00b8d4'
+      ctx.lineWidth = 1.5 / transform.scale
+      ctx.setLineDash(drawingRegion ? [6 / transform.scale, 4 / transform.scale] : [])
+      ctx.strokeRect(shownRegion.x0Mm, shownRegion.y0Mm, w, h)
+      ctx.setLineDash([])
+      // 切線兩端必定貼齊工作範圍，所以直接畫滿整個範圍（ADR-0002 的沿用）
+      if (crossSectionCut && !drawingRegion) {
+        ctx.strokeStyle = '#ffd600'
+        ctx.lineWidth = 2 / transform.scale
+        ctx.beginPath()
+        if (crossSectionCut.axis === 'x') {
+          ctx.moveTo(crossSectionCut.coordinateMm, shownRegion.y0Mm)
+          ctx.lineTo(crossSectionCut.coordinateMm, shownRegion.y1Mm)
+        } else {
+          ctx.moveTo(shownRegion.x0Mm, crossSectionCut.coordinateMm)
+          ctx.lineTo(shownRegion.x1Mm, crossSectionCut.coordinateMm)
+        }
+        ctx.stroke()
+      }
+      ctx.restore()
+    }
+
     if (tdrMarkers && tdrMarkers.length > 0) {
       ctx.save()
       ctx.translate(transform.x, transform.y + rect.height)
@@ -895,7 +966,6 @@ export default function Preview2D({
       let sx1 = Infinity, sy1 = Infinity, sx2 = -Infinity, sy2 = -Infinity
       {
         const exp = expansionMm || 0
-        const isConvexHull = extentType === 'ConvexHull'
         const previewPoly: number[][] = estimatedCutoutBoundary || []
         const actualPoly = hasActualBoundary ? actualCutoutBoundary! : null
         const outlinePoints = actualPoly || previewPoly
@@ -973,7 +1043,10 @@ export default function Preview2D({
 
         ctx.save()
         ctx.font = 'bold 12px "Microsoft JhengHei","Calibri",sans-serif'
-        const modeLabel = isConvexHull ? 'ConvexHull' : 'Bounding'
+        // 直接顯示實際的形狀名。舊寫法是「非凸包就標 Bounding」的布林，
+        // Conforming 加入後會把貼合外框標成 Bounding——畫布上的說明與
+        // 系統日誌矛盾，截進文件的圖會自打嘴巴。
+        const modeLabel = extentType || 'Bounding'
         if (actualPoly) {
           const errorText = boundaryComparison?.available
             ? `最大差異 ${boundaryComparison.max_boundary_error_mm?.toFixed(3)} mm／容差 ${boundaryComparison.tolerance_mm.toFixed(3)} mm`
@@ -990,7 +1063,7 @@ export default function Preview2D({
         ctx.restore()
       }
     }
-  }, [data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, actualCutoutBoundary, showBoundaryDifferenceFill, boundaryComparison, segmentCuts, draggingCut, showSegmentSafetyOverlay, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, tdrMarkers, getLayerColor, getStackupLayers, computeContentBounds])
+  }, [data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, actualCutoutBoundary, showBoundaryDifferenceFill, boundaryComparison, segmentCuts, draggingCut, showSegmentSafetyOverlay, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, tdrMarkers, crossSectionRegion, crossSectionCut, drawingRegion, getLayerColor, getStackupLayers, computeContentBounds])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
@@ -1042,6 +1115,29 @@ export default function Preview2D({
 
   const handleMouseDown = (e: React.MouseEvent) => {
     mouseDownPoint.current = { x: e.clientX, y: e.clientY }
+    if (crossSectionMode === 'region') {
+      const world = toWorld(e)
+      if (world) {
+        regionAnchor.current = world
+        setDrawingRegion({ x0Mm: world.x, y0Mm: world.y,
+                           x1Mm: world.x, y1Mm: world.y })
+      }
+      return
+    }
+    if (crossSectionMode === 'cut') {
+      // 切線只有 X／Y 兩種，所以按下去就決定位置；軸向由工作範圍的長邊決定
+      // ——長邊方向是通道走向，垂直於它切才是對的。
+      const world = toWorld(e)
+      if (world && crossSectionRegion && onCrossSectionCutDrawn) {
+        const wide = (crossSectionRegion.x1Mm - crossSectionRegion.x0Mm) >=
+                     (crossSectionRegion.y1Mm - crossSectionRegion.y0Mm)
+        onCrossSectionCutDrawn({
+          axis: wide ? 'x' : 'y',
+          coordinateMm: wide ? world.x : world.y,
+        })
+      }
+      return
+    }
     const target = cutUnderCursor(e)
     if (target) {
       // 抓到刀就只拖刀，不要同時平移畫面。
@@ -1056,6 +1152,17 @@ export default function Preview2D({
     setDragStart({ x: e.clientX-transform.x, y: e.clientY-transform.y })
   }
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (regionAnchor.current) {
+      const world = toWorld(e)
+      if (world) {
+        const a = regionAnchor.current
+        setDrawingRegion({
+          x0Mm: Math.min(a.x, world.x), y0Mm: Math.min(a.y, world.y),
+          x1Mm: Math.max(a.x, world.x), y1Mm: Math.max(a.y, world.y),
+        })
+      }
+      return
+    }
     if (draggingCut) {
       const world = toWorld(e)
       const cut = segmentCuts?.cuts?.[draggingCut.index]
@@ -1079,6 +1186,18 @@ export default function Preview2D({
       e.clientX - mouseDownPoint.current.x,
       e.clientY - mouseDownPoint.current.y,
     )
+    if (regionAnchor.current) {
+      const pending = drawingRegion
+      regionAnchor.current = null
+      setDrawingRegion(null)
+      // 只是點一下、沒有拖出面積的話不當成框選——零面積的工作範圍會讓
+      // 後端直接拒絕，而使用者只會覺得「按了沒反應」。
+      if (pending && movement > 4 &&
+          pending.x1Mm > pending.x0Mm && pending.y1Mm > pending.y0Mm) {
+        onCrossSectionRegionDrawn?.(pending)
+      }
+      return
+    }
     if (draggingCut) {
       const pending = draggingCut
       setDraggingCut(null)
@@ -1227,9 +1346,40 @@ export default function Preview2D({
             ? ((draggingCut
                 ? (segmentCuts?.cuts?.[draggingCut.index]?.direction === 'x' ? 0 : 1)
                 : hoverCutAxis) === 0 ? 'col-resize' : 'row-resize')
+            : crossSectionMode !== 'none' ? 'crosshair'
             : isDragging ? 'grabbing' : 'grab',
           display: 'block',
         }} />
+
+        {/* 截面阻抗的兩種互動模式。用看得見的按鈕而不是修飾鍵：Shift／Ctrl
+            拖曳沒有任何視覺提示，不看手冊就不會知道，而且按下去之後畫面
+            行為變了卻沒有東西告訴使用者現在是什麼狀態。 */}
+        {onCrossSectionModeChange && (
+          <div
+            style={{ position: 'absolute', left: 16, top: 70, zIndex: 20,
+                     display: 'flex', gap: 6 }}
+            onMouseDown={event => event.stopPropagation()}
+          >
+            {([
+              ['region', '框工作範圍', '拖曳框出範圍。它也是截面的側向截斷邊界，太窄會讓阻抗偏高。'],
+              ['cut', '拉切線', '在範圍內點一下。軸向由範圍的長邊決定，不允許斜切。'],
+            ] as [CrossSectionMode, string, string][]).map(([mode, label, hint]) => (
+              <button
+                key={mode}
+                className={'boundary-fill-toggle'
+                  + (crossSectionMode === mode ? ' boundary-fill-toggle--active' : '')}
+                type="button"
+                aria-pressed={crossSectionMode === mode}
+                title={hint}
+                disabled={mode === 'cut' && !crossSectionRegion}
+                onClick={event => {
+                  event.stopPropagation()
+                  onCrossSectionModeChange(crossSectionMode === mode ? 'none' : mode)
+                }}
+              >{label}</button>
+            ))}
+          </div>
+        )}
 
         {/* 裁切外框差異填色開關：與 Canvas 同層，避免被預覽畫布遮住。 */}
         {onBoundaryDifferenceFillChange && (
@@ -1431,6 +1581,7 @@ export default function Preview2D({
                             <td key={col.key} style={{ textAlign:'center', padding:'3px 2px' }}>
                               <input
                                 type="checkbox"
+                                aria-label={`${layer} 的 ${col.title}`}
                                 checked={!!mode[col.key]}
                                 onChange={() => toggleLayerCol(layer, col.key)}
                                 style={{
@@ -1456,7 +1607,7 @@ export default function Preview2D({
             <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0 }}>
               <div style={{ padding:'8px 10px', display:'flex', gap:6, alignItems:'center', flexShrink:0 }}>
                 <input
-                  type="text" placeholder="搜尋元件…" value={compFilter}
+                  type="text" aria-label="搜尋元件" placeholder="搜尋元件…" value={compFilter}
                   onChange={e=>setCompFilter(e.target.value)} style={searchInput}
                 />
                 <button onClick={()=>setAllItems('comps',true)}  style={smallBtn}>全選</button>
@@ -1531,7 +1682,7 @@ export default function Preview2D({
               {/* 搜尋 + 全選 */}
               <div style={{ padding:'8px 10px', display:'flex', gap:6, alignItems:'center', flexShrink:0 }}>
                 <input
-                  type="text" placeholder="搜尋網路…" value={netFilter}
+                  type="text" aria-label="搜尋網路" placeholder="搜尋網路…" value={netFilter}
                   onChange={e=>setNetFilter(e.target.value)} style={searchInput}
                 />
                 <button onClick={()=>setAllItems('nets',true)}  style={smallBtn}>全選</button>

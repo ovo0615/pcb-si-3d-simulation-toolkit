@@ -6,8 +6,8 @@
 //    「我要看裁切設定面板」。
 //  * 任務與面板**不是一對一**：「模擬設定」面板被設定 Port 與求解器、
 //    N 段分割、排程求解共用，任一個勾了就得顯示。
-//  * 有三個任務不是獨立面板，而是別的面板裡的區塊（遠端求解包在排程面板內、
-//    眼圖在串接面板內）。
+//  * 遠端求解包不是獨立面板，而是排程面板裡的區塊。
+//  * 舊版的 `eye` 鍵只保留做 localStorage 遷移；眼圖設定已整合進右側 IBIS 分析頁。
 
 export type TaskKey =
   | 'load'
@@ -22,7 +22,9 @@ export type TaskKey =
   | 'cascade'
   | 'sparam'
   | 'eye'
+  | 'models'
   | 'tdr'
+  | 'crosssection'
   | 'report'
 
 export interface TaskDef {
@@ -73,10 +75,7 @@ export const TASK_GROUPS: TaskGroup[] = [
                 + '建議在裁切之後做，快非常多。',
             requires: ['load'],
             requiresNote:
-              '排在裁切之後：pyedb 換疊構時會把每一個 padstack instance 的 '
-              + 'layer_map 讀出再寫回（每個兩次 gRPC 往返），耗時與板上 Via '
-              + '數量成正比。全板要十幾分鐘，裁完只剩通道範圍就快得多。'
-              + '但一定要在背鑽與設定 Port 之前——那兩件事都必須建立在最終疊構上。',
+              '排在裁切之後（快很多），但要在背鑽與設定 Port 之前。',
           },
         ],
       },
@@ -112,9 +111,7 @@ export const TASK_GROUPS: TaskGroup[] = [
       {
         key: 'segment',
         label: 'N 段分割（可選擇不分割）',
-        hint: '沿通道主方向切成 N 段，於切面建立 Port；'
-          + '也可以按「不分割，整片求解」把整條通道當成一段，'
-          + '拿來當分段結果的對照基準。',
+        hint: '沿通道主方向切成 N 段，於切面建立 Port；也可不分割。',
         requires: ['load'],
       },
       {
@@ -123,8 +120,7 @@ export const TASK_GROUPS: TaskGroup[] = [
         hint: '逐段指定 HFSS／SIwave 並依序求解，完成後匯出 Touchstone。',
         requires: ['segment'],
         requiresNote:
-          '或直接指向先前產生的 segments.json——分段一次要二十分鐘以上，'
-          + '換求解器設定、改核心數或重打一次包都不需要重跑分段。',
+          '或直接指向先前產生的 segments.json，不必重跑分段。',
       },
       {
         key: 'remotepack',
@@ -151,10 +147,9 @@ export const TASK_GROUPS: TaskGroup[] = [
         requires: ['cascade'],
       },
       {
-        key: 'eye',
-        label: '眼圖',
-        hint: '以串接後 Touchstone 直接求解 QuickEye 眼圖。',
-        requires: ['cascade'],
+        key: 'models',
+        label: 'IBIS 模型與眼圖分析',
+        hint: '管理 IBIS 模型，綁定通道並執行眼圖分析。',
       },
       {
         key: 'tdr',
@@ -162,6 +157,14 @@ export const TASK_GROUPS: TaskGroup[] = [
         hint: '以串接後 Touchstone 求解 TDR 阻抗曲線，'
           + '把阻抗劇變換算成 Layout 上的位置標記。',
         requires: ['cascade'],
+      },
+      {
+        key: 'crosssection',
+        label: '截面阻抗（Q2D）',
+        hint: '框範圍、拉切線，從 EDB 還原截面並求阻抗。',
+        requires: ['load'],
+        requiresNote:
+          '只需要板子，不需要求解結果——它算的是幾何。',
       },
       {
         key: 'report',
@@ -226,8 +229,12 @@ export function loadSavedTasks(): TaskKey[] | null {
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return null
     const valid = new Set(ALL_TASKS.map(task => task.key))
+    // 舊版把眼圖放在左側串接工作列。新版統一搬到右側 IBIS 分析頁，
+    // 曾勾選 `eye` 的使用者自動改成啟用 `models`，不要求重設入口選項。
+    const migrated = parsed.includes('eye') && !parsed.includes('models')
+      ? [...parsed, 'models'] : parsed
     // 過濾掉已不存在的鍵：舊版存下來的項目若被移除，不該讓整份設定失效。
-    return parsed.filter((key): key is TaskKey => valid.has(key))
+    return migrated.filter((key): key is TaskKey => valid.has(key))
   } catch {
     return null
   }

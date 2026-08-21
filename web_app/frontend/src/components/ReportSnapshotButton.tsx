@@ -2,7 +2,11 @@
 import { useState } from 'react'
 import { toPng } from 'html-to-image'
 
-import { createReportSnapshot, openReportWorkspace } from '../reportApi'
+import {
+  createReportSnapshot,
+  openReportWorkspace,
+  type CreateSnapshotPayload,
+} from '../reportApi'
 import type { ReportQuality, SnapshotStatus } from '../reportTypes'
 
 interface Props {
@@ -26,6 +30,15 @@ const PIXEL_RATIO: Record<ReportQuality, number> = {
 // 快照一律用最高品質，不開放選。報告裡的圖是拿來看細節的，沒有人會刻意要
 // 低解析度的版本；多一個選項只是多一個選錯、事後才發現要重拍的機會。
 const SNAPSHOT_QUALITY: ReportQuality = 'high'
+const snapshotFilter = (node: HTMLElement) => node.dataset.reportIgnore !== 'true'
+
+function detailKind(parentKind: string, element: HTMLElement, index: number): string {
+  const token = (element.dataset.reportKind || `detail-${index + 1}`)
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase()
+  return `${parentKind}-${token || `detail-${index + 1}`}`
+}
 
 export default function ReportSnapshotButton({
   basePath, projectName, targetId, kind, title, section,
@@ -51,13 +64,24 @@ export default function ReportSnapshotButton({
     setMessage('正在建立高解析度快照…')
     try {
       const workspaceResult = await openReportWorkspace(basePath, projectName || 'PCB SI 分析專案')
-      const dataUrl = await toPng(target, {
+      const save = async (payload: CreateSnapshotPayload) => {
+        try {
+          await createReportSnapshot(payload)
+        } catch (error) {
+          const typed = error as Error & { status?: number }
+          if (typed.status !== 409 || !window.confirm(`${typed.message}\n\n是否移除最舊版本並建立新快照？`)) throw error
+          await createReportSnapshot({ ...payload, prune_confirmed: true })
+        }
+      }
+      const render = (element: HTMLElement) => toPng(element, {
         cacheBust: true,
         pixelRatio: PIXEL_RATIO[SNAPSHOT_QUALITY],
         backgroundColor: '#0c0e12',
-        filter: node => !(node instanceof HTMLElement && node.dataset.reportIgnore === 'true'),
+        filter: node => !(node instanceof HTMLElement) || snapshotFilter(node),
       })
-      const payload = {
+
+      const dataUrl = await render(target)
+      const payload: CreateSnapshotPayload = {
         workspace: workspaceResult.workspace,
         kind,
         title,
@@ -68,14 +92,36 @@ export default function ReportSnapshotButton({
         source_revision: sourceRevision,
         source_metadata: { ...sourceMetadata, quality: SNAPSHOT_QUALITY },
       }
-      try {
-        await createReportSnapshot(payload)
-      } catch (error) {
-        const typed = error as Error & { status?: number }
-        if (typed.status !== 409 || !window.confirm(`${typed.message}\n\n是否移除最舊版本並建立新快照？`)) throw error
-        await createReportSnapshot({ ...payload, prune_confirmed: true })
+
+      await save(payload)
+
+      // 有捲動容器時，整頁快照只能呈現目前視窗。結果元件可用這個標記要求
+      // 另存獨立快照；以元件本身作為根節點就不受外層 overflow 裁切。
+      const details = Array.from(target.querySelectorAll<HTMLElement>(
+        '[data-report-separate-snapshot="true"]',
+      ))
+      for (let index = 0; index < details.length; index += 1) {
+        const element = details[index]
+        const detailTitle = element.dataset.reportTitle || `${title}—結果 ${index + 1}`
+        setMessage(`正在建立獨立結果快照（${index + 1}／${details.length}）…`)
+        const detailDataUrl = await render(element)
+        await save({
+          ...payload,
+          kind: detailKind(kind, element, index),
+          title: detailTitle,
+          image_data_url: detailDataUrl,
+          caption: caption
+            ? `${caption}\n獨立結果：${detailTitle}`
+            : `獨立結果：${detailTitle}`,
+          source_metadata: {
+            ...payload.source_metadata,
+            parent_kind: kind,
+            detail_index: index + 1,
+            detail_title: detailTitle,
+          },
+        })
       }
-      setMessage('快照已保存，報告將使用這個畫面的最新版本。')
+      setMessage(`快照已保存，共 ${details.length + 1} 張；眼圖已各自完整輸出。`)
       window.dispatchEvent(new CustomEvent('pcbsi-report-snapshot-saved', {
         detail: { workspace: workspaceResult.workspace, kind },
       }))
@@ -104,6 +150,9 @@ export default function ReportSnapshotButton({
           <div className="report-modal" role="dialog" aria-modal="true" aria-label="更新報告快照">
             <h3>更新報告快照</h3>
             <div className="report-muted">{title}</div>
+            <div className="report-muted">
+              若畫面含多張眼圖，系統會同時保存工作畫面總覽與每張眼圖的獨立完整快照。
+            </div>
             <label>工程狀態
               <select value={status} onChange={event => setStatus(event.target.value as SnapshotStatus)}>
                 <option value="display">僅供展示</option>
