@@ -1,5 +1,6 @@
 // IBIS 模型與眼圖分析：模型管理、通道綁定與眼圖求解整合介面。
 import { useEffect, useMemo, useState } from 'react'
+import AmiChannelPanel from './AmiChannelPanel'
 import MultiLaneWizard from './MultiLaneWizard'
 
 type CompatibilityState = 'ready' | 'warning' | 'block'
@@ -59,6 +60,8 @@ export interface ModelPackage {
     capabilities: AmiCapabilities
   }>
   native_libraries: NativeLibrary[]
+  /** 後端讀取時計算：可當 Tx／Rx 的模型各有幾個。配對判定的依據。 */
+  capabilities?: { tx_models: number; rx_models: number }
   ibis_checker: {
     available: boolean
     status: string
@@ -72,6 +75,8 @@ export interface ModelPackage {
     target: string
     qualification: string
   }
+  /** 匯入或遷移時自動修掉的機械性缺陷；修的是受管副本，來源檔不動。 */
+  repairs?: { rule: string; detail: string; impact: string }[]
 }
 
 export interface AmiParameter {
@@ -190,12 +195,18 @@ const trustText: Record<string, string> = {
 export default function ModelLibrary() {
   // 只剩兩個面板。點對點與 AMI 兩條路徑（各自只吃 2／4 埠）已於 2026-08-19
   // 移除，理由見 ADR-0055。
-  const [activePanel, setActivePanel] = useState<'library' | 'multilane'>('library')
+  const [activePanel, setActivePanel] = useState<'library' | 'multilane' | 'ami'>('library')
   const [library, setLibrary] = useState<LibraryResponse | null>(null)
   const [selectedId, setSelectedId] = useState('')
   const [importPathText, setImportPathText] = useState('')
   const [busy, setBusy] = useState(false)
   const [actionBusy, setActionBusy] = useState('')
+  // 健檢：{applicable, blocker, record}。選到哪個套件就抓哪個的快取。
+  const [health, setHealth] = useState<{
+    applicable: boolean; blocker: string
+    record: null | { status: string; seconds?: number; reason?: string; at?: string }
+  } | null>(null)
+  const [healthRunning, setHealthRunning] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -228,6 +239,43 @@ export default function ModelLibrary() {
   }
 
   useEffect(() => { void refresh() }, [])
+
+  // 健檢結果跟著選取的套件走；執行中每 3 秒看一次狀態。
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      if (!selected) { setHealth(null); return }
+      try {
+        const data = await api<typeof health>(
+          `/api/models/${encodeURIComponent(selected.package_id)}/healthcheck`)
+        if (!cancelled) setHealth(data)
+      } catch { if (!cancelled) setHealth(null) }
+    }
+    void load()
+    if (!healthRunning) return () => { cancelled = true }
+    const timer = window.setInterval(async () => {
+      try {
+        const s = await api<{ running: boolean }>('/api/models/healthcheck/status')
+        if (!s.running) { setHealthRunning(false); void load() }
+      } catch { /* 下一輪再試 */ }
+    }, 3000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.package_id, healthRunning])
+
+  const startHealthcheck = async () => {
+    if (!selected) return
+    setError('')
+    try {
+      await api(`/api/models/${encodeURIComponent(selected.package_id)}/healthcheck`,
+        { method: 'POST' })
+      setHealthRunning(true)
+      setMessage('健檢中：用參考通道實際求解一次，約一分鐘…')
+    } catch (reason) {
+      setError(`健檢啟動失敗：${apiErrorText(reason)}`)
+    }
+  }
+
 
   const browse = async () => {
     setError('')
@@ -346,6 +394,8 @@ export default function ModelLibrary() {
               onClick={() => setActivePanel('library')}>模型庫</button>
             <button className={activePanel === 'multilane' ? 'is-active' : ''}
               onClick={() => setActivePanel('multilane')}>多埠通道</button>
+            <button className={activePanel === 'ami' ? 'is-active' : ''}
+              onClick={() => setActivePanel('ami')}>AMI 通道</button>
           </div>
           <div className="model-library__count">
             <strong>{library?.count ?? 0}</strong><span>個模型版本</span>
@@ -420,6 +470,14 @@ export default function ModelLibrary() {
               </span>
             </div>
 
+            {/* AMI 面板 2026-08-28 重建：IBIS-AMI 的分析路徑在「AMI 通道」
+                分頁。多埠通道仍只吃一般 IBIS，所以要指路，不能讓人去那裡找。 */}
+            {selected.kind !== 'ibis' && (
+              <div className="model-library__notice">
+                IBIS-AMI 的分析走「AMI 通道」分頁；DLL 要先在下方掃描並信任。
+              </div>
+            )}
+
             <div className="model-library__metrics">
               <div><span>IBIS 版本</span><strong>{selected.ibis?.ibis_version || '—'}</strong></div>
               <div><span>AMI 版本</span><strong>{Object.values(selected.ami)[0]?.ami_version || '—'}</strong></div>
@@ -433,14 +491,58 @@ export default function ModelLibrary() {
               )}
             </div>
 
+            {/* 健檢：唯二靜態檢查抓不到的失敗（AMI_Init 拒絕、步階響應算不出）
+                只有真的開 AEDT 才現形。一顆按鈕、零設定，結果以 SHA-256 快取。 */}
+            <section className="model-library__section">
+              <h4>健檢</h4>
+              <div className="model-library__health">
+                {healthRunning ? <span>健檢中…（約一分鐘）</span>
+                  : health?.record ? (
+                    health.record.status === 'passed'
+                      ? <span className="is-pass">通過（{health.record.seconds} 秒，{health.record.at}）</span>
+                      : health.record.status === 'not_applicable'
+                        ? <span>{health.record.reason}</span>
+                        : <span className="is-fail" title={health.record.reason}>
+                            失敗：{(health.record.reason || '').slice(0, 80)}
+                          </span>
+                  ) : <span>尚未健檢。</span>}
+                <button className="btn" onClick={() => void startHealthcheck()}
+                  disabled={healthRunning || Boolean(health && !health.applicable)}
+                  title={health?.blocker || '用參考通道實際求解一次'}>
+                  {healthRunning ? '健檢中…' : '用參考通道健檢'}
+                </button>
+              </div>
+              <p className="hint">健檢過、真通道失敗＝通道問題；健檢不過＝模型問題。</p>
+            </section>
+
             {(selected.compatibility.errors.length > 0 || selected.compatibility.warnings.length > 0) && (
               <section className="model-library__section">
                 <h4>相容性預檢</h4>
+                {/* 錯誤不再擋分析（帶錯誤放行，AEDT 是最終裁判），所以字眼
+                    不能再寫「阻止」——那會讓人以為這份模型選不下去。 */}
                 {selected.compatibility.errors.map(item => (
-                  <div className="model-library__issue is-error" key={item}>阻止：{item}</div>
+                  <div className="model-library__issue is-error" key={item}>錯誤：{item}</div>
                 ))}
+                {selected.compatibility.errors.length > 0 && (
+                  <p className="hint">
+                    分析不會被這些錯誤擋下（帶錯誤放行）；AEDT 若拒收會如實回報。
+                  </p>
+                )}
                 {selected.compatibility.warnings.map(item => (
                   <div className="model-library__issue is-warning" key={item}>注意：{item}</div>
+                ))}
+              </section>
+            )}
+
+            {(selected.repairs?.length ?? 0) > 0 && (
+              <section className="model-library__section">
+                <h4>自動修正（{selected.repairs!.length} 處）</h4>
+                <p className="hint">修的是模型庫裡的受管副本；你的來源檔一個位元都沒動。</p>
+                {selected.repairs!.map((item, index) => (
+                  <div className="model-library__issue is-warning" key={index}>
+                    <strong>{item.detail}</strong>
+                    <div>{item.impact}</div>
+                  </div>
                 ))}
               </section>
             )}
@@ -525,8 +627,11 @@ export default function ModelLibrary() {
           </>}
         </main>
       </div>
-      </> : <MultiLaneWizard packages={library?.packages || []}
-              onLibraryChanged={refresh} />}
+      </> : activePanel === 'multilane'
+        ? <MultiLaneWizard packages={library?.packages || []}
+            onLibraryChanged={refresh} />
+        : <AmiChannelPanel packages={library?.packages || []}
+            onLibraryChanged={refresh} />}
     </div>
   )
 }

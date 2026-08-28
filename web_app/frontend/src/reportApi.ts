@@ -1,7 +1,6 @@
 // 一鍵 HTML 報告 API 與圖片轉換工具。
 import type {
   ReportBrand,
-  ReportManifest,
   ReportSettings,
   ReportSnapshot,
   ReportWorkspaceResponse,
@@ -131,12 +130,4 @@ export function fileToDataUrl(file: File): Promise<string> {
     reader.onload = () => resolve(String(reader.result || ''))
     reader.readAsDataURL(file)
   })
-}
-
-export function mergeManifest(current: ReportManifest, snapshot: ReportSnapshot): ReportManifest {
-  const snapshots = current.snapshots
-    .map(item => item.kind === snapshot.kind ? { ...item, active: item.id === snapshot.id } : item)
-    .filter(item => item.id !== snapshot.id)
-  snapshots.push(snapshot)
-  return { ...current, snapshots, updated_at: new Date().toISOString() }
 }

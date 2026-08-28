@@ -145,6 +145,7 @@ function worstCaseExpectation(laneCount: number, uiCount: number): number {
 }
 
 interface ChannelJob {
+  running?: boolean
   status?: string
   phase?: string
   message?: string
@@ -154,6 +155,37 @@ interface ChannelJob {
   finished_at?: number | null
   result?: any
 }
+
+/** 選單上要看得出這份模型能不能用。
+ *
+ * 2026-08-24 實測模型庫：ansys_ddr4_controller 與 ansys_ddr4_memory 的
+ * DQ0／DQS± 在 .ibs 裡指向未定義的模型（IBIS Checker 明講），套件狀態是
+ * `block`。選單只印名字的話，使用者會選下去，然後在綁定那一步才發現那幾支
+ * 腳配不到模型——而那時已經走了三個步驟。
+ */
+/** 這一側根本用不了的原因；能用回空字串。
+ *
+ * 2026-08-28 掃描 209 個客戶模型：第二層 86% 的失敗集中在配對——單角色模型
+ * （只有 Tx 或只有 Rx）被選到不該去的那一側，跑到求解才爆。判定材料全在
+ * manifest 裡，所以在選單上**當場**擋掉，而不是讓人走完流程才知道。
+ */
+function sideBlocker(item: ModelPackage, side: 'tx' | 'rx'): string {
+  const caps = item.capabilities
+  if (!caps) return ''
+  if (side === 'tx' && caps.tx_models === 0) return '沒有驅動器模型'
+  if (side === 'rx' && caps.rx_models === 0) return '沒有接收器模型'
+  return ''
+}
+
+function packageLabel(item: ModelPackage, side: 'tx' | 'rx'): string {
+  const blocker = sideBlocker(item, side)
+  if (blocker) return `${item.display_name}（${blocker}）`
+  const status = item.compatibility?.status
+  if (status === 'block') return `${item.display_name}（有錯誤）`
+  if (status === 'warning') return `${item.display_name}（有警告）`
+  return item.display_name
+}
+
 
 export default function MultiLaneWizard(
   { packages, onLibraryChanged }:
@@ -246,9 +278,16 @@ export default function MultiLaneWizard(
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [started, setStarted] = useState('')
+  /** 快速檢驗（無損直連）這一輪的 job 與實際用到的兩顆模型。
+   *  結果沿用同一個 /api/ibis-channel/status，靠 job_id 認出它是基準眼圖。 */
+  const [quickCheck, setQuickCheck] = useState<
+    { jobId: string; txModel: string; rxModel: string } | null>(null)
 
   const ibisPackages = useMemo(
     () => packages.filter(item => item.kind === 'ibis'), [packages])
+  // 被這一頁排除掉的套件。有幾個、為什麼看不到，要說出來。
+  const amiPackages = useMemo(
+    () => packages.filter(item => item.kind !== 'ibis'), [packages])
 
   const lanes = suggestion?.binding.lanes ?? []
   const selectedLanes = laneCount === null ? lanes.length : Math.min(laneCount, lanes.length)
@@ -484,6 +523,34 @@ export default function MultiLaneWizard(
     } finally { setBusy(false) }
   }
 
+  /** 快速檢驗：TX 與 RX 背對背接無損參考通道，先看基準眼圖。
+   *
+   *  不需要 Touchstone——它回答的是「這對模型本來給多大的眼」。之後接上
+   *  真實通道，看到的劣化才有歸因：基準眼就不好＝模型或資料率的問題；
+   *  基準眼好、真通道壞＝通道的問題。模型由套件角色自動挑，零新設定。 */
+  async function runQuickCheck() {
+    setBusy(true); setError('')
+    try {
+      const response = await fetch('/api/ibis-channel/quick-check', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tx_package_id: packageId,
+          rx_package_id: rxPackageId || packageId,
+          data_rate_gbps: dataRate,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data?.detail || '快速檢驗啟動失敗')
+      setQuickCheck({
+        jobId: data.job_id || '',
+        txModel: data.quick_check?.tx_model || '',
+        rxModel: data.quick_check?.rx_model || '',
+      })
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : String(exc))
+    } finally { setBusy(false) }
+  }
+
   async function start(sweep = false) {
     if (!suggestion) return
     setBusy(true); setError(''); setStarted('')
@@ -635,13 +702,25 @@ export default function MultiLaneWizard(
     : (jobResult?.timing?.why || '')
   const fmtPs = (value: unknown) =>
     typeof value === 'number' ? value.toFixed(1) : '—'
+  /** 目前顯示的結果是不是快速檢驗那一輪（無損直連基準）。 */
+  const isQuickCheck = Boolean(quickCheck && job?.job_id === quickCheck.jobId)
+  /** 快速檢驗的眼圖量測（眼高、眼寬…）；點對點結果的第一條 Lane。 */
+  const quickMeasurements = isQuickCheck
+    ? jobResult?.results?.[0]?.lanes?.[0]?.measurements ?? null
+    : null
   /** 眼圖卡片。掃描時每個 Corner 各一組，單次執行就一組。 */
   const eyeCards = useMemo(() => {
     if (!jobResult) return []
+    // 三種結果形狀（與後端 resolve_standard_ibis_result_image 對齊）：
+    //   Corner 掃描   runs[i].result.lanes、點對點 results[i].lanes（快速檢驗
+    //   走這一種）、多道單次 lanes。少了中間那種，快速檢驗只會有狀態沒有圖。
     const groups: { lanes: any[]; corner: string }[] = jobResult.sweep
       ? (jobResult.runs || []).map((run: any) => ({
         lanes: run?.result?.lanes || [], corner: run?.label || '' }))
-      : [{ lanes: jobResult.lanes || [], corner: '' }]
+      : jobResult.results
+        ? (jobResult.results || []).map((res: any) => ({
+          lanes: res?.lanes || [], corner: '' }))
+        : [{ lanes: jobResult.lanes || [], corner: '' }]
     const cards: { key: string; title: string; corner: string; imageUrl: string }[] = []
     groups.forEach((group, analysisIndex) => {
       group.lanes.forEach((lane: any, laneIndex: number) => {
@@ -649,15 +728,17 @@ export default function MultiLaneWizard(
         const imageIndex = (lane.image_paths || []).length > 1 ? 1 : 0
         cards.push({
           key: `${analysisIndex}-${laneIndex}`,
-          title: lane.label || `Lane ${laneIndex + 1}`,
-          corner: group.corner,
+          title: isQuickCheck ? '基準眼圖（無損直連）'
+            : lane.label || `Lane ${laneIndex + 1}`,
+          corner: isQuickCheck && quickCheck
+            ? `${quickCheck.txModel} → ${quickCheck.rxModel}` : group.corner,
           imageUrl: `/api/ibis-channel/image?analysis_index=${analysisIndex}`
             + `&lane_index=${laneIndex}&image_index=${imageIndex}`,
         })
       })
     })
     return cards
-  }, [jobResult])
+  }, [jobResult, isQuickCheck, quickCheck])
 
   const missingDisposition = portsNeedingDisposition.filter(item => {
     const plan = dispositions[item.index]
@@ -715,7 +796,10 @@ export default function MultiLaneWizard(
             onChange={event => setPackageId(event.target.value)}>
             <option value="">請選擇…</option>
             {ibisPackages.map(item => (
-              <option key={item.package_id} value={item.package_id}>{item.display_name}</option>
+              <option key={item.package_id} value={item.package_id}
+                disabled={Boolean(sideBlocker(item, 'tx'))}>
+                {packageLabel(item, 'tx')}
+              </option>
             ))}
           </select>
         </label>
@@ -731,15 +815,28 @@ export default function MultiLaneWizard(
             onChange={event => setRxPackageId(event.target.value)}>
             <option value="">同上（兩側同一料號）</option>
             {ibisPackages.map(item => (
-              <option key={item.package_id} value={item.package_id}>{item.display_name}</option>
+              <option key={item.package_id} value={item.package_id}
+                disabled={Boolean(sideBlocker(item, 'rx'))}>
+                {packageLabel(item, 'rx')}
+              </option>
             ))}
           </select>
         </label>
         <button className="btn" disabled={busy} onClick={() => void importIbis('rx')}>
           瀏覽並匯入另一側 .ibs…
         </button>
-        {ibisPackages.length === 0 && <p className="hint">
-          模型庫是空的，用上面兩顆「瀏覽並匯入」各挑一份 .ibs 檔。
+        {/* 這裡只收 kind === 'ibis'。ADR-0055 收掉 AMI 面板之後，IBIS-AMI 套件
+            在整個介面上已經沒有分析路徑——但模型庫照樣讓人匯入、掃描、信任。
+            不講的話，使用者匯完 AMI 套件回到這一頁，只會看到選單裡沒有它。
+            2026-08-24 實測：模型庫六個套件，兩個是 AMI，這一頁只看得到四個。 */}
+        {ibisPackages.length === 0 && amiPackages.length > 0 && <p className="hint">
+          這裡只吃一般 IBIS，AMI 目前沒有分析路徑。
+        </p>}
+        {ibisPackages.length === 0 && amiPackages.length === 0 && <p className="hint">
+          模型庫是空的，用上面兩顆按鈕各挑一份 .ibs。
+        </p>}
+        {ibisPackages.length > 0 && amiPackages.length > 0 && <p className="hint">
+          另有 {amiPackages.length} 個 AMI 套件，這裡用不到。
         </p>}
         <p className="hint">DDR 兩端是兩家料號，兩個都要選。</p>
         <label>資料率（Gbps）
@@ -757,6 +854,24 @@ export default function MultiLaneWizard(
         <button className="btn" disabled={!touchstone || !packageId || busy}
           onClick={() => void runSuggest()}>{busy ? '處理中…' : '執行預檢'}</button>
         {error && <p className="error">{error}</p>}
+      </section>
+
+      <section>
+        <h3>快速檢驗：無損直連基準眼圖</h3>
+        {/* 不接任何通道：TX 與 RX 之間放的是工具自產的無損 50Ω 參考線。
+            先知道這對模型在此資料率下本來給多大的眼，之後接上真實通道，
+            看到的劣化才有歸因。模型由套件角色自動挑，不需要 Touchstone。 */}
+        <p className="hint">把上面選的兩側模型背對背直連，中間零損耗。</p>
+        <p className="hint">基準眼就不好＝模型或資料率的問題，跟通道無關。</p>
+        <p className="hint">基準眼好、接上通道才壞＝通道的問題。</p>
+        <button className="btn" disabled={!packageId || busy || Boolean(job?.running)}
+          onClick={() => void runQuickCheck()}>
+          {busy ? '處理中…' : '快速檢驗（不需 Touchstone）'}
+        </button>
+        {quickCheck && <p className="hint">
+          已排入背景：{quickCheck.txModel} → {quickCheck.rxModel}，
+          結果顯示在下方「分析狀態與結果」。
+        </p>}
       </section>
 
       {suggestion && <>
@@ -1361,6 +1476,17 @@ export default function MultiLaneWizard(
           {job?.error && <div className="model-library__issue is-error">
             失敗：{job.error}</div>}
 
+          {/* 執行警告要跟著結果一起看——特別是「帶錯誤放行」：這份眼圖
+              是帶著相容性錯誤跑出來的，判讀時要對照原話。 */}
+          {(jobResult?.warnings?.length ?? 0) > 0 && (
+            <details open={jobResult.warnings.some((w: string) => w.includes('放行'))}>
+              <summary>執行警告（{jobResult.warnings.length} 則）</summary>
+              <ul>{jobResult.warnings.map((w: string) => (
+                <li key={w} className="hint">{w}</li>
+              ))}</ul>
+            </details>
+          )}
+
           {/* Corner 掃描：先給排序表——看的人第一個問題是「哪個最差」。 */}
           {ranking?.ranked?.length > 0 && <>
             <h4>Corner 排序（最差在最上面）</h4>
@@ -1405,6 +1531,31 @@ export default function MultiLaneWizard(
 
           {/* 沒量到時要講清楚是哪一種「沒量到」，三種要做的事完全不同。 */}
           {timingWhy && <p className="hint">{timingWhy}</p>}
+
+          {/* 快速檢驗的重點是數字：眼高眼寬是基準線，之後接上真實通道
+              比的就是這一組。量測在 measurements.metrics 底下，外層是
+              ADR-0039 的可得性包裝，取不到時要把原因印出來。 */}
+          {quickMeasurements && quickMeasurements.available === false && (
+            <p className="hint">
+              取不到眼圖量測：{quickMeasurements.unavailable_reason}
+            </p>
+          )}
+          {quickMeasurements
+            && Object.keys(quickMeasurements.metrics || {}).length > 0 && <>
+            <h4>基準眼圖量測（無損直連）</h4>
+            <table className="model-library__table">
+              <thead><tr><th>量測</th><th>數值</th></tr></thead>
+              <tbody>{Object.entries(quickMeasurements.metrics)
+                .map(([key, item]: [string, any]) => (
+                  <tr key={key}>
+                    <td>{item.label || key}</td>
+                    <td>{item.value !== undefined
+                      ? `${Number(item.value).toPrecision(4)} ${item.unit || ''}`
+                      : item.text}</td>
+                  </tr>
+                ))}</tbody>
+            </table>
+          </>}
 
           {eyeCards.length > 0 && <>
             <h4>眼圖（{eyeCards.length} 張）</h4>

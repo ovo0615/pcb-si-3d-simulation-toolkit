@@ -33,6 +33,15 @@
   --radius: 14px;
   --radius-sm: 9px;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+
+  /* 動效：三個時長、兩條曲線，全站只有這一組。
+     時長分級的依據是「移動的距離」而不是「元素的重要性」——覆蓋層要跨越
+     整個畫面，所以慢；按鈕只變個顏色，所以快。混用會讓畫面看起來各走各的。 */
+  --dur-1: 110ms;  /* 微互動：hover、按下、核取 */
+  --dur-2: 190ms;  /* 一般進場：面板、列、下拉 */
+  --dur-3: 300ms;  /* 覆蓋層：入口、遮罩、對話框 */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);   /* 進場：衝出去再收住 */
+  --ease-in: cubic-bezier(0.55, 0, 0.68, 0.28); /* 退場：慢慢起步再閃掉 */
 }
 
 * {
@@ -169,13 +178,50 @@ pre {
 }
 
 /* ── 檢視分頁（完整 / 裁切後 / N 段分割） ───────────── */
+/* 分頁列會被擠。圖層面板一展開，右側可用寬度就少了兩百多 px，十一個分頁的
+   標籤全部折成兩行——「清理對比」變成「清理對／比」、「S 參數」變成
+   「S 參／數」。分頁名稱是這個工具最需要一眼掃過的東西，折行等於掃不動。
+   改成不折、不縮，放不下就水平捲；分頁本來就是可以捲的東西，折行不是。 */
 .viewtabs {
   display: flex;
   gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  /* 選中的分頁往上抬 1px 加陰影，容器裁掉的話會看不到那層影子。 */
+  padding-top: 2px;
 }
 
+.viewtabs::-webkit-scrollbar {
+  height: 6px;
+}
+
+/* 分頁列的外框：左邊是會捲的分頁，右邊是釘住的「更新報告快照」。 */
+.viewtabs-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.viewtabs-row > .viewtabs {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.viewtabs-aside {
+  flex: 0 0 auto;
+  align-self: center;
+}
+
+/* 左右內距由 16 收到 11：十個分頁在展開圖層面板後需要 941 px，可用只有
+   842 px。每一顆省 10 px 剛好補上這個差，全部一行放得下，也不必捲。
+   放不下時（視窗更窄、或分頁更多）還是會捲，那是保底不是常態。 */
 .viewtab {
-  padding: 6px 16px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 6px 11px;
   border-radius: 8px 8px 0 0;
   border: 1px solid var(--border);
   border-bottom: none;
@@ -429,11 +475,28 @@ pre {
   backdrop-filter: blur(12px);
 }
 
+/* 左側設定面板是一長條垂直堆疊，十幾個段落只靠粗體字分隔，捲動時很難一眼
+   認出「現在在哪一段」。標題左邊加一條 3px 的色棒——不加線、不加底色、不加
+   框，只給眼睛一個對齊的錨點。 */
 .panel-title {
+  position: relative;
   margin: 0 0 4px;
+  padding-left: 10px;
   font-size: 14.5px;
   font-weight: 700;
   color: var(--text);
+}
+
+.panel-title::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.18em;
+  bottom: 0.18em;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.75;
 }
 
 .panel-hint {
@@ -1324,3 +1387,367 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .multi-lane-wizard details { margin: 8px 0; }
 .multi-lane-wizard summary { color: #9fc6e0; cursor: pointer; font-size: 12px; }
 .multi-lane-wizard table { margin-top: 8px; }
+
+/* ══ 動效 ══════════════════════════════════════════════════════════
+   進場動畫用 `animation`（掛載時跑一次），狀態變化用 `transition`。
+   兩者不要混：把進場也寫成 transition 的話，元素一掛上來就已經在終點，
+   看不到任何東西。
+
+   **退場動畫只給覆蓋層。** React 條件渲染一移除節點就沒了，要有退場就得
+   讓元件多活一段時間——那是要改狀態的，不能白改。值得改的只有蓋住整個
+   畫面的那幾個（入口、載入遮罩）：它們突然消失會讓人以為畫面閃了一下。
+   下拉選單、狀態列這種小東西反而要「說消失就消失」，慢半拍會像卡住。
+   ═════════════════════════════════════════════════════════════════ */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes drop-in {
+  from { opacity: 0; transform: translateY(-7px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes overlay-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(1.008); }
+}
+
+@keyframes banner-in {
+  from { opacity: 0; transform: translateY(-100%); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* 執行中的呼吸感。用 opacity 不用 box-shadow：後者每一格都要重畫陰影。 */
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+/* ── 覆蓋層 ─────────────────────────────────────────── */
+
+.task-picker-root {
+  animation: pop-in var(--dur-3) var(--ease-out) both;
+}
+
+.task-picker-root--closing {
+  animation: overlay-out var(--dur-2) var(--ease-in) both;
+}
+
+/* 入口的四組卡片依序浮上來。只有 15 張，逐張延遲讀得出「這裡有四組」；
+   超過二十來個就不該這樣做，那會變成等它跑完。 */
+.task-picker-group {
+  animation: rise-in var(--dur-2) var(--ease-out) both;
+}
+
+.task-picker-group:nth-child(1) { animation-delay: 40ms; }
+.task-picker-group:nth-child(2) { animation-delay: 80ms; }
+.task-picker-group:nth-child(3) { animation-delay: 120ms; }
+.task-picker-group:nth-child(4) { animation-delay: 160ms; }
+
+.app-overlay {
+  animation: fade-in var(--dur-2) var(--ease-out) both;
+}
+
+.app-overlay--closing {
+  animation: fade-in var(--dur-2) var(--ease-in) reverse both;
+}
+
+.ibis-eye-modal,
+.report-modal-backdrop {
+  animation: fade-in var(--dur-2) var(--ease-out) both;
+}
+
+.ibis-eye-modal__panel,
+.report-modal {
+  animation: pop-in var(--dur-3) var(--ease-out) both;
+}
+
+/* ── 橫幅：從畫面上緣滑進來 ─────────────────────────── */
+
+.app-banner {
+  animation: banner-in var(--dur-3) var(--ease-out) both;
+}
+
+/* ── 選單列下拉 ─────────────────────────────────────── */
+
+.menubar__dropdown {
+  transform-origin: top left;
+  animation: drop-in var(--dur-1) var(--ease-out) both;
+}
+
+/* ── 面板與分頁 ─────────────────────────────────────── */
+
+.panel {
+  animation: rise-in var(--dur-2) var(--ease-out) both;
+}
+
+.viewtab {
+  transition:
+    color var(--dur-1) var(--ease-out),
+    background-color var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-out);
+}
+
+/* 選中的分頁往上抬 1px 並加一層淺影，像資料夾標籤被抽出來一點。
+   刻意不另外畫底線：這排分頁的選中樣式已經是整塊藍底，再加一條線是重複說明。
+   `transform` 只在合成階段做，不會讓整排分頁重算版面。 */
+.viewtab {
+  position: relative;
+}
+
+.viewtab--active {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(51, 102, 255, 0.28);
+}
+
+/* ── 換頁：內容淡入，不要硬切 ─────────────────────────
+   規則下在**子元素**而不是這一層，是因為 2D 預覽在切分頁時刻意不重新掛載
+   （重新掛載會把使用者的平移與縮放丟掉，而那正是他剛剛調好的東西）。沒有
+   重新掛載就不會重播動畫，所以預覽只在第一次出現時淡入一次——正確：它後續
+   的變化是畫布內部的事，整塊再閃一次只會干擾。
+   模型庫、報告中心、眼圖那幾個分頁本來就是各自掛載的，切過去就會淡入。 */
+
+.view-stage > * {
+  animation: fade-in var(--dur-2) var(--ease-out) both;
+}
+
+/* ── 狀態訊息與結果區塊 ─────────────────────────────── */
+
+.status,
+.segment-analysis,
+.segment-solver-plan,
+.cleanup-compare,
+.result-paths,
+.model-library__notice,
+.ibis-wizard__preflight-block {
+  animation: rise-in var(--dur-2) var(--ease-out) both;
+}
+
+/* 表格列逐列浮上來。**只做前十列**：長表格全部加延遲的話，第五十列要等
+   一秒才出現，看起來像在慢慢載入而不是在動。第十列之後直接就位。 */
+.segment-analysis__row {
+  animation: rise-in var(--dur-2) var(--ease-out) both;
+}
+
+.segment-analysis__row:nth-child(1)  { animation-delay: 0ms; }
+.segment-analysis__row:nth-child(2)  { animation-delay: 18ms; }
+.segment-analysis__row:nth-child(3)  { animation-delay: 36ms; }
+.segment-analysis__row:nth-child(4)  { animation-delay: 54ms; }
+.segment-analysis__row:nth-child(5)  { animation-delay: 72ms; }
+.segment-analysis__row:nth-child(6)  { animation-delay: 90ms; }
+.segment-analysis__row:nth-child(7)  { animation-delay: 108ms; }
+.segment-analysis__row:nth-child(8)  { animation-delay: 126ms; }
+.segment-analysis__row:nth-child(9)  { animation-delay: 144ms; }
+.segment-analysis__row:nth-child(10) { animation-delay: 162ms; }
+
+/* ── 微互動 ─────────────────────────────────────────── */
+
+/* `transition: all` 會連 width、height 一起補間，改版面時會拖出奇怪的位移。
+   逐項列出來，順便讓瀏覽器知道只有這幾樣要動。 */
+.btn,
+.btn--primary,
+.btn--mini {
+  transition:
+    color var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out),
+    background-color var(--dur-1) var(--ease-out),
+    box-shadow var(--dur-1) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
+}
+
+/* 按下去要有回應。位移只有 1px——再多就變成玩具。 */
+.btn:active:not(:disabled),
+.btn--mini:active:not(:disabled),
+.viewtab:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn--primary:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 4px 12px rgba(51, 102, 255, 0.28);
+}
+
+.menubar__btn,
+.menubar__entry,
+.netlist__row,
+.model-library__card,
+.cleanup-regions button {
+  transition:
+    color var(--dur-1) var(--ease-out),
+    background-color var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
+}
+
+/* 焦點框也要跟著長出來，鍵盤使用者才看得出焦點是「移過去」的。 */
+.btn:focus-visible,
+.btn--primary:focus-visible,
+.btn--mini:focus-visible,
+.viewtab:focus-visible,
+.input:focus-visible,
+.menubar__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  transition: outline-offset var(--dur-1) var(--ease-out);
+}
+
+/* ── 執行中 ─────────────────────────────────────────── */
+
+.is-running {
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+/* ── 會動的東西一律可以關掉 ─────────────────────────────
+   前庭功能障礙的人看到大面積位移會不舒服，這是作業系統層級的設定，
+   不是偏好。**不要只把時間改短**——`animation: none` 會讓 `both` 填充的
+   起始狀態（opacity: 0）留在畫面上，元素就永遠不見了。改成極短的時間，
+   動畫照跑但看不出來。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── 入口的項目卡 ─────────────────────────────────────
+   顏色從行內樣式搬到這裡，才有辦法加 :hover——行內樣式蓋得過 class。 */
+
+.task-card {
+  border: 1px solid #242c36;
+  background: #12161c;
+  transition:
+    border-color var(--dur-1) var(--ease-out),
+    background-color var(--dur-1) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
+}
+
+.task-card[data-on="yes"] {
+  border-color: #2f6d8f;
+  background: #152430;
+}
+
+.task-card:hover {
+  border-color: #4b8fb5;
+  background: #18202a;
+}
+
+.task-card[data-on="yes"]:hover {
+  background: #193042;
+}
+
+.task-card:active {
+  transform: scale(0.995);
+}
+
+.task-card:focus-within {
+  outline: 2px solid #4b8fb5;
+  outline-offset: 2px;
+}
+
+/* ── 日誌與空狀態 ─────────────────────────────────────
+   日誌每一行是 `key={i}`，附加新行只會掛載最後那一個節點，所以動畫只跑在
+   新來的那一行——既有的行不重新掛載就不會重播。**載入遮罩裡那份日誌尾巴
+   （`logs.slice(-60)`）刻意不加這個 class**：它每來一行索引就整個位移，
+   六十行會一起閃。 */
+
+.log-line {
+  animation: fade-in var(--dur-1) var(--ease-out) both;
+}
+
+.empty-hint {
+  color: var(--faint);
+}
+
+/* 畫布的空狀態：一句話講清楚現在要做什麼，外加接受哪些檔案。
+   線框圖示刻意畫得很淡——它是背景，不是要人去讀的東西。 */
+.stage-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: #6b7787;
+  text-align: center;
+  pointer-events: none;
+  animation: rise-in var(--dur-3) var(--ease-out) both;
+}
+
+.stage-empty svg {
+  width: 54px;
+  height: 54px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  opacity: 0.5;
+}
+
+.stage-empty div {
+  font-size: 14px;
+}
+
+.stage-empty small {
+  font-size: 11.5px;
+  color: #55606f;
+}
+
+/* ── field-row 裡的按鈕不准被壓扁 ─────────────────────
+   `.input` 是 `width: 100%`，在 flex 列裡會先把整條佔走，旁邊那顆按鈕只剩
+   壓縮的份——「瀏覽…」就這樣被折成「瀏／覽…」兩行。輸入框改成可縮
+   （`min-width: 0` 缺一不可，flex 項目的預設最小尺寸是內容寬度），
+   按鈕改成不縮。
+   同一個坑在入口的底列也踩過一次（`.btn--primary` 的 `width: 100%`）。 */
+
+.field-row > .input,
+.field-row > select.input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.field-row > .btn,
+.field-row > .btn--mini {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* ── 圖層面板：內容淡入，寬度不動 ─────────────────────
+   寬度做成動畫的話，畫布的 ResizeObserver 會逐格觸發全板重繪（這片板
+   三萬多個圖元），動畫還沒播完就先卡住。 */
+
+.layer-panel {
+  animation: fade-in var(--dur-2) var(--ease-out) both;
+}
+
+/* ── 模型庫與報告：卡片、圖片浮上來 ─────────────────── */
+
+.model-library__card,
+.ibis-eye-gallery article {
+  animation: rise-in var(--dur-2) var(--ease-out) both;
+}
+
+/* 模型健檢：一行狀態＋一顆按鈕。 */
+.model-library__health { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: #b9c8d8; }
+.model-library__health .btn { width: auto; }
+.model-library__health .is-pass { color: #9ff0c4; }
+.model-library__health .is-fail { color: #ffb4a8; }
