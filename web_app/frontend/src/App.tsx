@@ -591,6 +591,8 @@ export default function App() {
   // 每次啟動都先顯示入口（帶出上次勾選），按「開始」才進主畫面。
   const [pickerOpen, setPickerOpen] = useState(true)
   const [pickerReturning, setPickerReturning] = useState(false)
+  const [pickerClosing, setPickerClosing] = useState(false)
+  const pickerCloseTimer = useRef<number | null>(null)
   const show = makeFlags(enabledTasks)
   // 「模擬設定」被四個任務共用，任一個勾了就要顯示。
   // 裁切已不再建立 Port／Setup（見 create_ports），所以「模擬設定」不再跟
@@ -2611,7 +2613,11 @@ ${data.output_path}`)
       } catch { /* 後端還沒起來就下次再問 */ }
     }
     poll()
-    const timer = window.setInterval(poll, xsJob?.running ? 2000 : 8000)
+    // 沒有工作在跑就不要一直問。開頁那一次（上面的 `poll()`）已經接上後端
+    // 既有的工作；之後 running 為 false 還每 8 秒問一次，是在對一個永遠不會
+    // 變的答案發請求——實測閒置 17 分鐘打了 132 次，後端日誌整片都是它，
+    // 真正在發生的事反而看不到。TDR 與眼圖那兩條輪詢本來就是這個形狀。
+    const timer = window.setInterval(() => { if (xsJob?.running) poll() }, 2000)
     return () => { cancelled = true; window.clearInterval(timer) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show.crosssection, xsJob?.running])
@@ -3402,10 +3408,25 @@ ${data.output_path}`)
       ? (prev.includes(key) ? prev : [...prev, key])
       : prev.filter(item => item !== key)))
 
+  // 入口是整個畫面，直接消失會像閃了一下。先播退場動畫，動畫結束才卸載。
+  //
+  // 保險絲：動畫理論上一定會結束（`prefers-reduced-motion` 也只是縮成 1ms，
+  // 不是 `animation: none`），但入口卡住＝整個工具打不開，代價太高。所以
+  // 另外掛一個逾時，動畫沒回報也照樣關掉。
+  const finishClosingPicker = () => {
+    if (pickerCloseTimer.current !== null) {
+      window.clearTimeout(pickerCloseTimer.current)
+      pickerCloseTimer.current = null
+    }
+    setPickerOpen(false)
+    setPickerClosing(false)
+    setPickerReturning(false)
+  }
+
   const closePicker = () => {
     saveTasks(enabledTasks)
-    setPickerOpen(false)
-    setPickerReturning(false)
+    setPickerClosing(true)
+    pickerCloseTimer.current = window.setTimeout(finishClosingPicker, 600)
   }
 
   // 被隱藏但仍在執行的工作：不提示的話，長時間求解會變成黑箱。
@@ -3423,10 +3444,13 @@ ${data.output_path}`)
           onSetAll={keys => setEnabledTasks([...keys])}
           onStart={closePicker}
           returning={pickerReturning}
+          closing={pickerClosing}
+          onClosed={finishClosingPicker}
         />
       )}
       {hiddenRunning.length > 0 && (
         <div
+          className="app-banner"
           onClick={() => { setPickerReturning(true); setPickerOpen(true) }}
           title="點此回到入口，重新勾選以顯示該項目"
           style={{
@@ -3441,7 +3465,7 @@ ${data.output_path}`)
         </div>
       )}
       {isLoading && (
-        <div style={{
+        <div className="app-overlay" style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(4px)',
           display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center', justifyContent: 'center',
@@ -3495,7 +3519,7 @@ ${data.output_path}`)
           症狀都會指向錯的方向——新端點回 405、舊後端安靜忽略新欄位於是按鈕
           一直是灰的。看到這一條就不必再查其他東西了。 */}
       {staleBackend !== null && (
-        <div style={{
+        <div className="app-banner" style={{
           background: 'var(--danger, #b3261e)', color: '#fff',
           padding: '10px 14px', borderRadius: 'var(--radius-sm)',
           margin: '8px 0', fontSize: 13, lineHeight: 1.6,
@@ -3740,6 +3764,17 @@ ${data.output_path}`)
                   }}>
                     {/* 可選網路 */}
                     <div className="netlist" style={{ flex: 1 }}>
+                      {/* 三個框只有這個沒有標題，空的時候就是一塊純白，看不出
+                          它在等什麼。左右兩邊都標出來，一眼就知道是「從左邊挑
+                          到右邊」。 */}
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', padding: '2px 6px' }}>
+                        可選網路（{availableFiltered.length}）
+                      </div>
+                      {availableFiltered.length === 0 && (
+                        <div className="empty-hint" style={{ padding: '10px 8px', fontSize: 11.5, lineHeight: 1.6 }}>
+                          {allNets.length === 0 ? '載入電路板後，網路會列在這裡。' : '沒有符合過濾關鍵字的網路。'}
+                        </div>
+                      )}
                       {availableFiltered.map(net => (
                         <div key={net} className="netlist__row" onDoubleClick={() => addSignal(net)}>
                           <span className="netlist__name" title={net}>{net}</span>
@@ -5617,7 +5652,10 @@ ${data.output_path}`)
           {/* 右側：預覽與日誌 */}
           <Allotment.Pane>
             <div style={{ paddingLeft: 7, height: '100%', display: 'flex', flexDirection: 'column' }}>
-              {/* 檢視分頁 */}
+              {/* 檢視分頁。分頁本身放在會水平捲動的容器裡，「更新報告快照」
+                  則釘在外面——放進去的話，分頁一多它就被推出可視範圍，
+                  而那顆按鈕是每個分頁都用得到的。 */}
+              <div className="viewtabs-row">
               <div className="viewtabs" style={{ marginBottom: 0 }}>
                 <button
                   className={'viewtab' + (activeView === 'full' ? ' viewtab--active' : '')}
@@ -5682,8 +5720,9 @@ ${data.output_path}`)
                   className={'viewtab' + (activeView === 'report' ? ' viewtab--active' : '')}
                   onClick={() => setActiveView('report')}
                 >報告</button>
+                </div>
                 {show.report && reportSnapshotAvailable && (
-                  <div style={{ marginLeft: 'auto', alignSelf: 'center' }}>
+                  <div className="viewtabs-aside">
                     <ReportSnapshotButton
                       basePath={reportBasePath}
                       projectName={reportProjectName}
@@ -5715,7 +5754,7 @@ ${data.output_path}`)
                   {/* 2D 預覽 */}
                   <Allotment.Pane minSize={200}>
                     <div style={{ paddingBottom: showLogs ? 7 : 0, height: '100%' }}>
-                      <div id="report-result-capture" className="panel" style={{ overflow: 'hidden', position: 'relative', height: '100%', background: '#0c0e12', borderTopLeftRadius: 0 }}>
+                      <div id="report-result-capture" className="panel view-stage" style={{ overflow: 'hidden', position: 'relative', height: '100%', background: '#0c0e12', borderTopLeftRadius: 0 }}>
                         {(isLayoutView || activeView === 'schematic') && <div style={{ position: 'absolute', top: 12, left: 16, zIndex: 1, fontSize: 12.5, fontWeight: 700, color: activeView === 'cut' ? '#7ee787' : '#9fb0c3', pointerEvents: 'none' }}>
                           {sceneLabel}
                           {scene?.preview_mode === 'coarse' ? ' · 大板快速預覽（實際 EDB 未簡化）' : ''}
@@ -6404,8 +6443,13 @@ ${data.output_path}`)
                         )}
 
                         {!scene && isLayoutView && (
-                          <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: '#5c677d', fontSize: 14, pointerEvents: 'none' }}>
-                            請先於左側載入電路板檔案
+                          <div className="stage-empty">
+                            <svg viewBox="0 0 48 48" aria-hidden="true">
+                              <rect x="6.5" y="10.5" width="35" height="27" rx="2.5" />
+                              <path d="M6.5 18.5h35M15.5 18.5v19M24 18.5v19M32.5 18.5v19" />
+                            </svg>
+                            <div>請先於左側載入電路板檔案</div>
+                            <small>支援 .aedb／.brd／.tgz</small>
                           </div>
                         )}
                       </div>
@@ -6428,9 +6472,9 @@ ${data.output_path}`)
                           </div>
                           <div ref={logBoxRef} style={{ flex: 1, overflowY: 'auto', fontSize: '12px', fontFamily: '"Cascadia Mono", monospace', color: 'var(--muted)', background: 'rgba(255,255,255,0.5)', padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
                             {logs.map((l, i) => (
-                              <div key={i} style={{ color: logColor(l) }}>{l}</div>
+                              <div key={i} className="log-line" style={{ color: logColor(l) }}>{l}</div>
                             ))}
-                            {logs.length === 0 && <div style={{ color: 'var(--faint)' }}>目前無日誌…</div>}
+                            {logs.length === 0 && <div className="empty-hint">目前無日誌…</div>}
                           </div>
                         </div>
                       </div>

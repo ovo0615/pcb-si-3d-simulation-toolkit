@@ -20,6 +20,10 @@ interface Props {
   onStart: () => void
   /** 由主畫面回來調整時為 true，用來把「開始」改成「回到工具」。 */
   returning?: boolean
+  /** 退場中：播完淡出動畫才真的卸載，畫面不會直接閃掉。 */
+  closing?: boolean
+  /** 退場動畫播完了，呼叫端可以卸載本元件。 */
+  onClosed?: () => void
 }
 
 const FONT = '"Calibri", "Microsoft JhengHei", sans-serif'
@@ -173,13 +177,15 @@ function renderTask(
   return (
     <div key={task.key}>
       <label
+        className="task-card"
+        data-on={on ? 'yes' : 'no'}
         style={{
           display: 'flex', gap: 10, alignItems: 'flex-start',
           padding: depth ? '10px 14px' : '15px 18px',
           minHeight: depth ? 72 : 88,
           borderRadius: 8, cursor: 'pointer',
-          border: '1px solid ' + (on ? '#2f6d8f' : '#242c36'),
-          background: on ? '#152430' : '#12161c',
+          // 邊框與底色交給 CSS 的 `[data-on]`：行內樣式蓋得過 class，
+          // 寫在這裡就沒辦法再加 :hover。
         }}
       >
         <input
@@ -228,13 +234,20 @@ function renderTask(
 }
 
 export default function TaskPicker(
-  { flags, onToggle, onSetAll, onStart, returning }: Props,
+  { flags, onToggle, onSetAll, onStart, returning, closing, onClosed }: Props,
 ) {
   const chosen = ALL_TASKS.filter(task => flags[task.key])
   const gaps = missingPrerequisites(flags)
 
   return (
-    <div className="task-picker-root" style={{
+    <div
+      className={'task-picker-root' + (closing ? ' task-picker-root--closing' : '')}
+      // 只認自己那一顆動畫。裡面四組卡片各自有進場動畫，它們的 animationend
+      // 一樣會冒泡上來——不過濾的話，入口會在第一組卡片浮完就整個消失。
+      onAnimationEnd={event => {
+        if (closing && event.target === event.currentTarget) onClosed?.()
+      }}
+      style={{
       // fixed 而非 absolute：要蓋掉標題列與選單列，不受任何定位祖先影響。
       position: 'fixed', inset: 0, zIndex: 9998,
       background: '#0f1216', color: '#d8e1ec', fontFamily: FONT,
@@ -260,7 +273,7 @@ export default function TaskPicker(
         alignItems: 'start',
       }}>
         {TASK_GROUPS.map(group => (
-          <div key={group.title}>
+          <div key={group.title} className="task-picker-group">
             <div style={{
               fontSize: 16, fontWeight: 700, color: '#7fd1ff',
               letterSpacing: 0.5, marginBottom: 9,
@@ -292,6 +305,10 @@ export default function TaskPicker(
         </div>
       )}
 
+      {/* 這一列的每一顆按鈕都要 `flex: 0 0 auto`。`.btn--primary` 的樣式帶著
+          `width: 100%`（它在左側面板是整條的主要動作），放進 flex 列裡會把
+          自己撐滿、把旁邊兩顆擠到只剩兩個字寬——「全選」斷成兩行、「還原預設組」
+          斷成「還原預設／組」。不會報錯，只是看起來壞掉。 */}
       <div style={{
         flexShrink: 0, display: 'flex', gap: 10, alignItems: 'center',
         borderTop: '1px solid #242c36', paddingTop: 10, marginTop: 10,
@@ -300,20 +317,32 @@ export default function TaskPicker(
           className="btn--primary"
           onClick={onStart}
           disabled={chosen.length === 0}
-        style={{ padding: '11px 30px', fontSize: 16, fontWeight: 700 }}
+          style={{
+            flex: '0 0 auto', width: 'auto', minWidth: 180,
+            padding: '11px 30px', fontSize: 16, fontWeight: 700,
+            whiteSpace: 'nowrap',
+          }}
         >
           {returning ? '回到工具' : '開始'}
         </button>
         <button
           className="btn"
+          style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }}
           onClick={() => onSetAll(ALL_TASKS.map(task => task.key))}
         >
           全選
         </button>
-        <button className="btn" onClick={() => onSetAll(DEFAULT_TASKS)}>
+        <button
+          className="btn"
+          style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }}
+          onClick={() => onSetAll(DEFAULT_TASKS)}
+        >
           還原預設組
         </button>
-        <span style={{ fontSize: 11.5, color: '#8d9db0', marginLeft: 'auto' }}>
+        <span style={{
+          flex: '0 1 auto', marginLeft: 'auto', textAlign: 'right',
+          fontSize: 11.5, color: '#8d9db0', lineHeight: 1.5,
+        }}>
           {chosen.length === 0 ? '請至少勾選一項' : `已選 ${chosen.length} 項`}
           　·　勾選記在這台瀏覽器
         </span>

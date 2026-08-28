@@ -166,7 +166,6 @@ interface Preview2DProps {
 
 // ── 顏色常數 ────────────────────────────────────────────────
 const BG_COLOR   = '#0c0e12'
-const BOARD_FILL = 'rgba(18, 62, 28, 0.85)'
 const BOARD_STROKE = '#4caf50'
 const PORT_COLOR = '#ff5252'
 const FALLBACK_PALETTE = [
@@ -314,6 +313,24 @@ export default function Preview2D({
       }
     }
     if (!isFinite(minX) || maxX-minX <= 0 || maxY-minY <= 0) return null
+
+    // 板外的東西不該決定取景。這片板（EXSU-Q911）在板框下方 34 mm 處還有
+    // 兩個物件，Fit All 為了框住它們把整片板縮成畫面的一半，SIwave 則是滿版
+    // 顯示板子。內容框與板框取交集：裁切後內容比板小時照樣以內容為準（那正是
+    // 這個函式存在的理由），板外的零星物件則不再把畫面撐開。
+    const board = data.layers['Board']
+    if (board && board.length) {
+      let bx1 = Infinity, by1 = Infinity, bx2 = -Infinity, by2 = -Infinity
+      for (const p of board) {
+        if (p.kind === 'rect') { bx1=Math.min(bx1,p.x); by1=Math.min(by1,p.y); bx2=Math.max(bx2,p.x+p.w); by2=Math.max(by2,p.y+p.h) }
+        else if (p.points) for (const pt of p.points) { bx1=Math.min(bx1,pt[0]); by1=Math.min(by1,pt[1]); bx2=Math.max(bx2,pt[0]); by2=Math.max(by2,pt[1]) }
+      }
+      const cx1 = Math.max(minX, bx1), cy1 = Math.max(minY, by1)
+      const cx2 = Math.min(maxX, bx2), cy2 = Math.min(maxY, by2)
+      if (isFinite(cx1) && cx2 - cx1 > 0 && cy2 - cy1 > 0) {
+        return { min:[cx1,cy1], max:[cx2,cy2] }
+      }
+    }
     return { min:[minX,minY], max:[maxX,maxY] }
   }, [data])
 
@@ -462,12 +479,24 @@ export default function Preview2D({
         if (prim.kind === 'comp'    && !mode.components) return
 
         // ── 板框 ──
-        if (layerName === 'Board' && prim.kind === 'rect') {
-          ctx.fillStyle = BOARD_FILL
-          ctx.fillRect(prim.x, prim.y, prim.w, prim.h)
+        // 後端拿得到真實外框時送的是 polygon（可能帶挖空），拿不到才退回
+        // bounding box 的 rect。兩種都只描一圈線、板內不填色——SIwave 就是
+        // 這樣畫的，而且真實外框的缺角本身就說明了板子的形狀，再鋪一層底色
+        // 只會把上面的銅箔一起染綠。
+        if (layerName === 'Board') {
           ctx.strokeStyle = BOARD_STROKE
-          ctx.lineWidth   = px(1.2)
-          ctx.strokeRect(prim.x, prim.y, prim.w, prim.h)
+          ctx.lineWidth   = px(1.6)
+          if (prim.kind === 'rect') {
+            ctx.strokeRect(prim.x, prim.y, prim.w, prim.h)
+          } else if (prim.kind === 'polygon' && prim.points && prim.points.length >= 3) {
+            tracePoly(prim.points, prim.holes)
+            ctx.stroke()
+          } else if (prim.kind === 'path' && prim.points && prim.points.length >= 2) {
+            ctx.beginPath()
+            ctx.moveTo(prim.points[0][0], prim.points[0][1])
+            for (let i=1;i<prim.points.length;i++) ctx.lineTo(prim.points[i][0], prim.points[i][1])
+            ctx.stroke()
+          }
           ctx.fillStyle   = color
           ctx.strokeStyle = color
           return
@@ -501,8 +530,17 @@ export default function Preview2D({
           ctx.globalAlpha = 1.0
 
         } else if (prim.kind === 'rect') {
-          ctx.globalAlpha = 0.8
-          ctx.fillRect(prim.x, prim.y, prim.w, prim.h)
+          // rect 是「讀不到頂點」時的退路，語意上仍是一塊銅箔，所以跟 polygon
+          // 一樣受 Fill/Unfill 管。舊版無視這一欄一律實心：只要有一塊銅箔退回
+          // bbox，整片板就被那個矩形塗滿，而使用者關掉 Fill 也救不回來。
+          if (mode.filled) {
+            ctx.globalAlpha = 0.8
+            ctx.fillRect(prim.x, prim.y, prim.w, prim.h)
+          } else {
+            ctx.globalAlpha = 0.9
+            ctx.lineWidth   = px(0.8)
+            ctx.strokeRect(prim.x, prim.y, prim.w, prim.h)
+          }
           ctx.globalAlpha = 1.0
 
         } else if (prim.kind === 'comp') {
@@ -1496,9 +1534,14 @@ export default function Preview2D({
             </span>
           </div>
 
-          {/* 面板主體（panelOpen 時顯示） */}
+          {/* 面板主體（panelOpen 時顯示）。
+              **只淡入內容，不動寬度。** 寬度做成動畫的話畫布會跟著逐格改變
+              尺寸，而畫布的 ResizeObserver 每次都會把三萬多個圖元重畫一次
+              ——那是每秒六十次全板重繪，動畫還沒播完就先卡住了。
+              空間瞬間讓出來、內容淡進去，看起來一樣順，代價是零。 */}
           {panelOpen && (
             <div
+              className="layer-panel"
               style={{
                 width: PANEL_WIDTH,
                 display:'flex', flexDirection:'column',
