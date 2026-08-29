@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import AmiChannelPanel from './AmiChannelPanel'
 import MultiLaneWizard from './MultiLaneWizard'
+import SpisimToolboxPanel from './SpisimToolboxPanel'
+import { QuickProbeResult, QuickProbeView } from './AmiQuickProbe'
 
 type CompatibilityState = 'ready' | 'warning' | 'block'
 
@@ -195,12 +197,64 @@ const trustText: Record<string, string> = {
 export default function ModelLibrary() {
   // 只剩兩個面板。點對點與 AMI 兩條路徑（各自只吃 2／4 埠）已於 2026-08-19
   // 移除，理由見 ADR-0055。
-  const [activePanel, setActivePanel] = useState<'library' | 'multilane' | 'ami'>('library')
+  const [activePanel, setActivePanel] =
+    useState<'library' | 'multilane' | 'ami' | 'toolbox'>('library')
   const [library, setLibrary] = useState<LibraryResponse | null>(null)
   const [selectedId, setSelectedId] = useState('')
   const [importPathText, setImportPathText] = useState('')
   const [busy, setBusy] = useState(false)
   const [actionBusy, setActionBusy] = useState('')
+  // 規格模型產生器（SPISim 範本，2026-08-29）
+  const [specTemplates, setSpecTemplates] = useState<{
+    available: boolean
+    standards: { name: string; label: string; pam4: boolean }[]
+    license_note: string
+  } | null>(null)
+  const [specStandard, setSpecStandard] = useState('PCIeG6')
+  const [specBusy, setSpecBusy] = useState(false)
+  const [specMsg, setSpecMsg] = useState('')
+  useEffect(() => {
+    void (async () => {
+      try {
+        setSpecTemplates(await api<any>('/api/models/spec-templates'))
+      } catch { /* 沒有範本就不顯示區塊 */ }
+    })()
+  }, [])
+  const generateSpec = async () => {
+    setSpecBusy(true); setSpecMsg('')
+    try {
+      const data = await api<any>('/api/models/generate-spec', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ standard: specStandard }),
+      })
+      const names = (data.packages || [])
+        .map((p: any) => p.display_name).join('、')
+      setSpecMsg(`已產生並匯入：${names}。${(data.notes || []).join(' ')}`)
+      await refresh()
+    } catch (e) {
+      setSpecMsg('產生失敗：' + String(e))
+    } finally { setSpecBusy(false) }
+  }
+  // 秒測（SPISimAMI 引擎，2026-08-29）：不開 AEDT、免授權，一秒看到
+  // 模型等化真的有沒有動作。跟著選取的套件走，換套件就清結果。
+  const [probeResult, setProbeResult] = useState<QuickProbeResult | null>(null)
+  const [probeBusy, setProbeBusy] = useState(false)
+  const [probeError, setProbeError] = useState('')
+  const runQuickProbe = async () => {
+    if (!selected) return
+    setProbeBusy(true); setProbeError(''); setProbeResult(null)
+    try {
+      const data = await api<QuickProbeResult>(
+        `/api/models/${encodeURIComponent(selected.package_id)}/ami-quick-test`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        })
+      setProbeResult(data)
+    } catch (reason) {
+      setProbeError(apiErrorText(reason))
+    } finally { setProbeBusy(false) }
+  }
+
   // 健檢：{applicable, blocker, record}。選到哪個套件就抓哪個的快取。
   const [health, setHealth] = useState<{
     applicable: boolean; blocker: string
@@ -239,6 +293,11 @@ export default function ModelLibrary() {
   }
 
   useEffect(() => { void refresh() }, [])
+
+  // 換套件就清秒測結果，避免拿 A 模型的波形對著 B 模型看。
+  useEffect(() => {
+    setProbeResult(null); setProbeError('')
+  }, [selected?.package_id])
 
   // 健檢結果跟著選取的套件走；執行中每 3 秒看一次狀態。
   useEffect(() => {
@@ -396,6 +455,8 @@ export default function ModelLibrary() {
               onClick={() => setActivePanel('multilane')}>多埠通道</button>
             <button className={activePanel === 'ami' ? 'is-active' : ''}
               onClick={() => setActivePanel('ami')}>AMI 通道</button>
+            <button className={activePanel === 'toolbox' ? 'is-active' : ''}
+              onClick={() => setActivePanel('toolbox')}>S 參數工具箱</button>
           </div>
           <div className="model-library__count">
             <strong>{library?.count ?? 0}</strong><span>個模型版本</span>
@@ -426,6 +487,32 @@ export default function ModelLibrary() {
           {busy ? '批次匯入中…' : `匯入${importPaths.length > 1 ? ` ${importPaths.length} 個` : ''}模型`}
         </button>
       </section>
+
+      {/* 手上沒有模型也能開工：AEDT 內建的 SPISim 規格範本一鍵產生
+          （2026-08-29）。素材授權綁 AEDT，只在本機用。 */}
+      {specTemplates && specTemplates.available && (
+        <details className="model-library__import" style={{ padding: '8px 12px' }}>
+          <summary>沒有模型？從 AEDT 內建規格產生（SPISim）</summary>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
+            <select className="input" value={specStandard}
+              onChange={e => setSpecStandard(e.target.value)} style={{ flex: 1 }}>
+              {specTemplates.standards.map(item => (
+                <option key={item.name} value={item.name}>
+                  {item.label}{item.pam4 ? '　·　PAM4' : ''}
+                </option>
+              ))}
+            </select>
+            <button className="btn btn--primary" disabled={busy || specBusy}
+              onClick={() => void generateSpec()}>
+              {specBusy ? '產生中…' : '產生並匯入'}
+            </button>
+          </div>
+          <p className="model-library__hint" style={{ marginTop: 4 }}>
+            {specTemplates.license_note}
+          </p>
+          {specMsg && <div className="model-library__notice">{specMsg}</div>}
+        </details>
+      )}
 
       {message && <div className="model-library__notice">{message}</div>}
       {error && <div className="model-library__notice model-library__notice--error">{error}</div>}
@@ -490,6 +577,29 @@ export default function ModelLibrary() {
                 <div><span>原生程式庫</span><strong>{selected.native_libraries.length}</strong></div>
               )}
             </div>
+
+            {/* 秒測（2026-08-29）：SPISimAMI 引擎直接驅動模型 DLL——
+                免授權、不開 AEDT、一秒回波形。健檢是「AEDT 解不解得動」，
+                秒測是「等化真的有沒有動作」，兩者互補。 */}
+            {selected.kind === 'ibis_ami' && selected.native_libraries.length > 0 && (
+              <section className="model-library__section">
+                <h4>秒測（不開 AEDT）</h4>
+                <div className="model-library__health">
+                  <span>用 AEDT 內建 SPISim 引擎驅動 DLL，一秒看等化前後波形。</span>
+                  <button className="btn" onClick={() => void runQuickProbe()}
+                    disabled={probeBusy
+                      || selected.native_libraries.some(item => item.trust_status !== 'trusted')}
+                    title={selected.native_libraries.some(item => item.trust_status !== 'trusted')
+                      ? '秒測會實際執行 DLL；先在下方掃描並建立信任' : ''}>
+                    {probeBusy ? '秒測中…' : '秒測'}
+                  </button>
+                </div>
+                {probeError && (
+                  <div className="model-library__issue is-error">{probeError}</div>
+                )}
+                {probeResult && <QuickProbeView result={probeResult} />}
+              </section>
+            )}
 
             {/* 健檢：唯二靜態檢查抓不到的失敗（AMI_Init 拒絕、步階響應算不出）
                 只有真的開 AEDT 才現形。一顆按鈕、零設定，結果以 SHA-256 快取。 */}
@@ -630,8 +740,10 @@ export default function ModelLibrary() {
       </> : activePanel === 'multilane'
         ? <MultiLaneWizard packages={library?.packages || []}
             onLibraryChanged={refresh} />
-        : <AmiChannelPanel packages={library?.packages || []}
-            onLibraryChanged={refresh} />}
+        : activePanel === 'ami'
+          ? <AmiChannelPanel packages={library?.packages || []}
+              onLibraryChanged={refresh} />
+          : <SpisimToolboxPanel />}
     </div>
   )
 }

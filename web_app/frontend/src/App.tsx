@@ -527,18 +527,30 @@ export default function App() {
   const [boundaryAreaSaving, setBoundaryAreaSaving] = useState<number | null>(null)
   const [completedBoundary, setCompletedBoundary] = useState<CutoutBoundaryResult | null>(null)
   const [showCutoutDifferenceFill, setShowCutoutDifferenceFill] = useState(true)
-  const [portType, setPortType] = useState('coax')
+  // 甲1（2026-08-29 拍板）：預設自動——細間距陣列整板 Pin Group，其餘 Coax。
+  const [portType, setPortType] = useState('auto')
   const [checkedComps, setCheckedComps] = useState<Record<string, boolean>>({})
   const [cutoutJobId, setCutoutJobId] = useState('')
   const [cutoutStopping, setCutoutStopping] = useState(false)
 
   // ── 模擬設定（HFSS 3D Layout／SIwave SYZ）──
   const [sweepType, setSweepType] = useState('Interpolating')
-  const [sweeps, setSweeps] = useState([
+  // 預設抽成常數：「由資料率導出」要判斷掃頻表是不是還維持預設形狀，
+  // 是的話把上限一併帶入（50 GHz 對 DDR3L 是白算五倍頻寬）。
+  const DEFAULT_SWEEPS = [
     { distribution: 'Linear Count', start: '0Hz', end: '1Hz', value: '2' },
     { distribution: 'Log Scale', start: '1Hz', end: '100MHz', value: '20' },
     { distribution: 'Linear Step', start: '100MHz', end: '50GHz', value: '0.05GHz' }
-  ])
+  ]
+  const [sweeps, setSweeps] = useState(DEFAULT_SWEEPS)
+  /** 掃頻表是否仍是預設形狀（末段上限可以是我們上次帶入的值）。
+   *  使用者親手改過的表**絕不自動更動**——那是他的設定，不是預設。 */
+  const sweepsFollowDefault = (rows: typeof DEFAULT_SWEEPS) =>
+    rows.length === 3
+    && JSON.stringify(rows.slice(0, 2)) === JSON.stringify(DEFAULT_SWEEPS.slice(0, 2))
+    && rows[2].distribution === 'Linear Step'
+    && rows[2].start === '100MHz'
+    && rows[2].value === '0.05GHz'
   const [solutionFreq, setSolutionFreq] = useState('25')
   const [errorTolerance, setErrorTolerance] = useState('0.1')
   const [maxPasses, setMaxPasses] = useState('20')
@@ -2962,7 +2974,21 @@ ${data.output_path}`)
     try {
       const data = await api('/api/bandwidth/derive', { data_rate_gbps: rate })
       setUsableBandwidthGHz(String(data.usable_bandwidth_ghz))
-      setBandwidthBasis(data.basis || '')
+      // 掃頻上限一併處理（HANDOFF 第 8 條）：固定 50 GHz 對 DDR3L-1866
+      // 是白算五倍頻寬。表還是預設形狀就帶入導出的上限並講明；
+      // 使用者改過的表不動，只附建議。
+      const cap = Number(data.sweep_max_ghz)
+      let note = ''
+      if (cap > 0) {
+        const end = `${Math.round(cap * 100) / 100}GHz`
+        if (sweepsFollowDefault(sweeps)) {
+          setSweeps(prev => [...prev.slice(0, 2), { ...prev[2], end }])
+          note = `　掃頻表末段上限已一併帶入 ${end}（取代固定 50 GHz 的預設）。`
+        } else if (sweeps.some(row => row.end !== end)) {
+          note = `　掃頻表已被你改過，未自動更動；要對齊的話上限建議 ${end}。`
+        }
+      }
+      setBandwidthBasis((data.basis || '') + note)
     } catch (e) {
       alert('導出頻寬失敗: ' + String(e))
     }
@@ -3091,6 +3117,84 @@ ${data.output_path}`)
   }
   const removeSignal = (net: string) => setSignalNets(prev => prev.filter(n => n !== net))
   const removeRef = (net: string) => setRefNets(prev => prev.filter(n => n !== net))
+
+  // ── 設定檔（HANDOFF 乙6）──────────────────────────────────────────
+  const [profileNames, setProfileNames] = useState<string[]>([])
+  const [selectedProfile, setSelectedProfile] = useState('')
+  const [profileMsg, setProfileMsg] = useState('')
+  /** 存進設定檔的欄位。語意欄位對（getter, setter）——套用是**合併**：
+   *  舊設定檔缺的欄位保持現值，訊息講套用了哪些，不做無聲的重設。 */
+  const profileFields: Record<string, [() => any, (v: any) => void]> = {
+    sweepType: [() => sweepType, setSweepType],
+    sweeps: [() => sweeps, setSweeps],
+    solutionFreq: [() => solutionFreq, setSolutionFreq],
+    errorTolerance: [() => errorTolerance, setErrorTolerance],
+    maxPasses: [() => maxPasses, setMaxPasses],
+    maxDeltaS: [() => maxDeltaS, setMaxDeltaS],
+    maxRefinementPerPass: [() => maxRefinementPerPass, setMaxRefinementPerPass],
+    minConvergedPasses: [() => minConvergedPasses, setMinConvergedPasses],
+    hfssMeshMethod: [() => hfssMeshMethod, setHfssMeshMethod],
+    expansionMm: [() => expansionMm, setExpansionMm],
+    extentType: [() => extentType, setExtentType],
+    portType: [() => portType, setPortType],
+    dataRateGbps: [() => dataRateGbps, setDataRateGbps],
+    usableBandwidthGHz: [() => usableBandwidthGHz, setUsableBandwidthGHz],
+  }
+  const refreshProfiles = async () => {
+    try {
+      const data = await api('/api/settings-profiles')
+      setProfileNames((data.profiles || []).map((p: any) => p.name))
+    } catch { /* 清單失敗不打斷畫面 */ }
+  }
+  useEffect(() => { void refreshProfiles() }, [])
+  const saveProfile = async () => {
+    const name = window.prompt('設定檔名稱（例如「DDR3L-1866 標準條件」）：')
+    if (!name) return
+    const settings: Record<string, any> = {}
+    for (const [key, [get]] of Object.entries(profileFields)) settings[key] = get()
+    try {
+      await api('/api/settings-profiles/save', { name, settings })
+      await refreshProfiles()
+      setSelectedProfile(name)
+      setProfileMsg(`已儲存「${name}」（${Object.keys(settings).length} 個欄位）。`)
+    } catch (e) { alert('儲存失敗: ' + String(e)) }
+  }
+  const applyProfile = async (name: string) => {
+    try {
+      const data = await api('/api/settings-profiles/get', { name })
+      const settings = data.settings || {}
+      const applied: string[] = []
+      for (const [key, value] of Object.entries(settings)) {
+        const field = profileFields[key]
+        if (field && value !== undefined) { field[1](value); applied.push(key) }
+      }
+      const skipped = Object.keys(profileFields).filter(k => !(k in settings))
+      setProfileMsg(`已套用「${name}」的 ${applied.length} 個欄位`
+        + (skipped.length ? `；${skipped.length} 個欄位設定檔裡沒有，保持現值。` : '。'))
+    } catch (e) { alert('套用失敗: ' + String(e)) }
+  }
+  const deleteProfile = async (name: string) => {
+    if (!window.confirm(`刪除設定檔「${name}」？`)) return
+    try {
+      await api('/api/settings-profiles/delete', { name })
+      setSelectedProfile('')
+      await refreshProfiles()
+      setProfileMsg(`已刪除「${name}」。`)
+    } catch (e) { alert('刪除失敗: ' + String(e)) }
+  }
+
+  /** 依平面銅面積建議參考網路（HANDOFF 第 9 條）。
+   *  名稱猜得到 GND，猜不到 1V35 這種電源參考；面積是看得到的證據。 */
+  const [refSuggestions, setRefSuggestions] = useState<
+    { net: string; area_cm2: number; polygons: number }[] | null>(null)
+  const suggestRefsByCopper = async () => {
+    try {
+      const data = await api('/api/nets/reference-suggestions', {})
+      setRefSuggestions(data.suggestions || [])
+    } catch (e) {
+      alert('建議失敗: ' + String(e))
+    }
+  }
 
   // DDR 自動分類。純字串處理，後端不開 AEDT、不讀 EDB，所以按下去就回來。
   const handleClassifyNets = async () => {
@@ -3801,9 +3905,32 @@ ${data.output_path}`)
                       </div>
                       <div className="netlist"
                         style={{ flex: 2, minHeight: NETLIST_REFERENCE_MIN_HEIGHT }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ok)', padding: '2px 6px' }}>
-                          參考網路（{refNets.length}）
+                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ok)', padding: '2px 6px',
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>參考網路（{refNets.length}）</span>
+                          <button className="btn" style={{ fontSize: 10.5, padding: '1px 6px' }}
+                            onClick={suggestRefsByCopper}
+                            title="依平面銅面積排序建議；回流路徑必然是大片銅">
+                            依銅面積建議
+                          </button>
                         </div>
+                        {refSuggestions && (
+                          <div style={{ padding: '2px 6px', display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                            {refSuggestions.length === 0 && (
+                              <span style={{ fontSize: 11, opacity: 0.7 }}>讀不到平面銅面積。</span>
+                            )}
+                            {refSuggestions.map(item => (
+                              <button key={item.net} className="btn"
+                                style={{ fontSize: 10.5, padding: '1px 6px',
+                                  opacity: refNets.includes(item.net) ? 0.45 : 1 }}
+                                disabled={refNets.includes(item.net)}
+                                onClick={() => addRef(item.net)}
+                                title={`平面銅 ${item.area_cm2} cm²（${item.polygons} 個多邊形）；點擊加入參考網路`}>
+                                {item.net}（{item.area_cm2} cm²）
+                              </button>
+                            ))}
+                          </div>
+                        )}
                         {refNets.map(net => (
                           <div key={net} className="netlist__row netlist__row--ref" onDoubleClick={() => removeRef(net)} title="雙擊移除">
                             <span className="netlist__name">{net}</span>
@@ -4211,10 +4338,17 @@ ${data.output_path}`)
                     <div style={{ flex: 1 }}>
                       <div className="field-label">Port 類型</div>
                       <select aria-label="Port 類型" className="input" value={portType} onChange={e => setPortType(e.target.value)}>
-                        <option value="coax">Coax（同軸，建議）</option>
+                        <option value="auto">自動（建議）：細間距陣列走 Pin Group，其餘 Coax</option>
+                        <option value="coax">Coax（同軸）</option>
                         <option value="circuit">Circuit（電路埠）</option>
                         <option value="pingroup">Pin Group（細間距 BGA）</option>
                       </select>
+                      {portType === 'auto' && (
+                        <div className="status" style={{ marginTop: 4, fontSize: 11.5 }}>
+                          腳數破百的元件會讓整板走 Pin Group，其餘 Coax。
+                          判定依據寫進系統日誌。
+                        </div>
+                      )}
                       {/* 座標型負端在 BGA 底下站不住：訊號球正下方就是 antipad。
                           SIwave 的失敗方式是靜默丟掉 Port，不報錯照樣解完。 */}
                       {portType === 'pingroup' && (
@@ -4262,6 +4396,25 @@ ${data.output_path}`)
                   <p className="panel-hint" style={{ marginTop: 4 }}>
                     <b>掃頻 SIwave 與 HFSS 共用</b>；Solution Frequency 與收斂條件只有 HFSS 用得到。
                   </p>
+
+                  {/* 設定檔（HANDOFF 乙6）：同案子板子一片接一片，條件每次
+                      重填一遍，填錯一格不報錯、只讓兩片解在不同條件下。 */}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
+                    <div className="field-label" style={{ minWidth: 60 }}>設定檔</div>
+                    <select aria-label="設定檔" className="input" style={{ flex: 1 }}
+                      value={selectedProfile} onChange={e => setSelectedProfile(e.target.value)}>
+                      <option value="">（未選擇）</option>
+                      {profileNames.map(name => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                    <button className="btn" disabled={!selectedProfile}
+                      onClick={() => void applyProfile(selectedProfile)}
+                      title="把選定設定檔的欄位套進目前畫面（合併，不清空未存的欄位）">套用</button>
+                    <button className="btn" onClick={() => void saveProfile()}
+                      title="把目前的掃頻、收斂、裁切與 Port 設定存成有名字的一組">儲存為…</button>
+                    <button className="btn" disabled={!selectedProfile}
+                      onClick={() => void deleteProfile(selectedProfile)}>刪除</button>
+                  </div>
+                  {profileMsg && <p className="panel-hint" style={{ marginTop: 2 }}>{profileMsg}</p>}
 
                   {/* Sweep Type & Solution Freq */}
                   <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
