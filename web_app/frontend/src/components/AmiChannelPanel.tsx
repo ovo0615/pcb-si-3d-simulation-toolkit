@@ -108,6 +108,8 @@ export default function AmiChannelPanel(
   const [preview, setPreview] = useState<QuickProbeResult | null>(null)
   const [previewBusy, setPreviewBusy] = useState(false)
   const [previewError, setPreviewError] = useState('')
+  // 快速檢驗的參考通道檔位（2026-08-29 下午）
+  const [lossyReference, setLossyReference] = useState(false)
 
   const amiPackages = useMemo(
     () => packages.filter(item => item.kind === 'ibis_ami'), [packages])
@@ -171,6 +173,7 @@ export default function AmiChannelPanel(
           tx_package_id: txPackageId,
           rx_package_id: rxPackageId || txPackageId,
           data_rate_gbps: dataRate,
+          reference: lossyReference ? 'lossy' : 'lossless',
         }),
       })
       const data = await response.json()
@@ -196,6 +199,10 @@ export default function AmiChannelPanel(
             model: txModel || '',
             touchstone_path: touchstone,
             data_rate_gbps: dataRate,
+            // 有 Rx 就做 Tx→Rx 串跑＋秒級統計眼（不開 AEDT）。
+            rx_package_id: rxPackageId || txPackageId,
+            rx_model: rxModel || '',
+            modulation,
           }),
         })
       const data = await response.json()
@@ -379,9 +386,16 @@ export default function AmiChannelPanel(
       </section>
 
       <section>
-        <h3>快速檢驗：無損直連基準眼圖</h3>
-        <p className="hint">不接任何通道，先知道這對 AMI 模型本來給多大的眼。</p>
+        <h3>快速檢驗：參考通道基準眼圖</h3>
+        <p className="hint">不接使用者通道，先知道這對 AMI 模型本來給多大的眼。</p>
         <p className="hint">基準眼好、接上通道才壞＝通道的問題；歸因從這裡開始。</p>
+        <label style={{ display: 'flex', flexDirection: 'row', gap: 6,
+          alignItems: 'center' }}>
+          <input type="checkbox" checked={lossyReference}
+            style={{ width: 'auto' }}
+            onChange={event => setLossyReference(event.target.checked)} />
+          用有損參考通道（Nyquist −10 dB 趨膚模型；預設是無損直連）
+        </label>
         <button className="btn" disabled={!txPackageId || busy || Boolean(job?.running)}
           onClick={() => void runQuickCheck()}>
           {busy ? '處理中…' : '快速檢驗（不需 Touchstone）'}

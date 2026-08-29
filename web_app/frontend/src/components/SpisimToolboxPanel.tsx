@@ -9,6 +9,20 @@ import { useEffect, useState } from 'react'
 interface ToolboxOperation { name: string; description: string }
 interface BatchStatus { available: boolean; checked_at: string; detail: string }
 interface ComStandard { name: string; description: string }
+interface ComJobState {
+  running?: boolean
+  status?: string
+  message?: string
+  standard?: string
+  elapsed_seconds?: number
+  error?: string
+  result?: {
+    reports: Record<string, string>
+    artifacts?: string[]
+    messages?: string[]
+    stdout_tail?: string
+  }
+}
 
 const OPTION_HINTS: Record<string, string> = {
   renormalize: '目標阻抗（Ω），例如差分半邊 42.5、單端 50',
@@ -46,8 +60,36 @@ export default function SpisimToolboxPanel() {
   const [probing, setProbing] = useState(false)
   const [comStandards, setComStandards] = useState<ComStandard[]>([])
   const [comStandard, setComStandard] = useState('')
-  const [comBusy, setComBusy] = useState(false)
+  const [comJob, setComJob] = useState<ComJobState | null>(null)
   const [comResult, setComResult] = useState('')
+
+  // COM 是背景工作（時域計算分鐘級起跳）：跑著就每 5 秒問一次狀態。
+  useEffect(() => {
+    if (!comJob?.running) return
+    const timer = window.setInterval(async () => {
+      try {
+        const state = await api<ComJobState>('/api/spisim/com/status')
+        setComJob(state)
+        if (!state.running) renderComOutcome(state)
+      } catch { /* 下一輪再試 */ }
+    }, 5000)
+    return () => window.clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comJob?.running])
+
+  function renderComOutcome(state: ComJobState) {
+    if (state.status === 'failed') { setError(state.error || 'COM 計算失敗'); return }
+    if (state.status === 'cancelled') { setComResult('已取消。'); return }
+    const out = state.result
+    if (!out) return
+    const names = Object.keys(out.reports || {})
+    const parts: string[] = []
+    if (out.messages?.length) parts.push('引擎訊息：\n' + out.messages.join('\n'))
+    if (out.artifacts?.length) parts.push('產出檔（含 IL／RL／ILD 曲線）：\n' + out.artifacts.join('\n'))
+    if (names.length) parts.push(`報告 ${names[0]}：\n` + (out.reports[names[0]] || ''))
+    setComResult(parts.length ? parts.join('\n\n')
+      : `引擎已執行但沒有輸出。輸出尾段：\n${out.stdout_tail || ''}`)
+  }
 
   useEffect(() => {
     void (async () => {
@@ -107,27 +149,28 @@ export default function SpisimToolboxPanel() {
     } catch (reason) { setError(String(reason)) } finally { setProbing(false) }
   }
 
-  const runCom = async () => {
-    setComBusy(true); setError(''); setComResult('')
+  const startCom = async () => {
+    setError(''); setComResult('')
     try {
-      const out = await api<{
-        status: string; reports: Record<string, string>
-        artifacts: string[]; messages: string[]; stdout_tail: string
-      }>('/api/spisim/com/run', {
+      const state = await api<ComJobState>('/api/spisim/com/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ touchstone_path: source, standard: comStandard }),
       })
-      const names = Object.keys(out.reports || {})
-      const parts: string[] = []
-      if (out.messages?.length) parts.push('引擎訊息：\n' + out.messages.join('\n'))
-      if (out.artifacts?.length) parts.push('產出檔（含 IL／RL／ILD 曲線）：\n' + out.artifacts.join('\n'))
-      if (names.length) parts.push(`報告 ${names[0]}：\n` + (out.reports[names[0]] || ''))
-      setComResult(parts.length ? parts.join('\n\n')
-        : `引擎已執行但沒有輸出。輸出尾段：\n${out.stdout_tail}`)
+      setComJob(state)
     } catch (reason) {
-      setComResult('')
       setError(reason instanceof Error ? reason.message : String(reason))
-    } finally { setComBusy(false) }
+    }
+  }
+
+  const cancelCom = async () => {
+    try {
+      const state = await api<ComJobState>('/api/spisim/com/cancel',
+        { method: 'POST' })
+      setComJob(state)
+      renderComOutcome(state)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    }
   }
 
   return (
@@ -207,8 +250,9 @@ export default function SpisimToolboxPanel() {
             </div>
           )}
           <div className="field-row">
-            <label>標準
+            <label style={{ minWidth: 260 }}>標準
               <select className="input" value={comStandard}
+                style={{ minWidth: 240 }}
                 onChange={event => setComStandard(event.target.value)}>
                 {comStandards.map(item => (
                   <option key={item.name} value={item.name} title={item.description}>
@@ -221,12 +265,21 @@ export default function SpisimToolboxPanel() {
               {probing ? '探測中…' : '重新探測引擎'}
             </button>
             <button className="btn btn--primary"
-              disabled={comBusy || !source || !batchStatus?.available}
+              disabled={Boolean(comJob?.running) || !source || !batchStatus?.available}
               title={batchStatus?.available ? '' : '引擎探測未通過，先按「重新探測引擎」'}
-              onClick={() => void runCom()}>
-              {comBusy ? '計算中…（大通道要幾分鐘）' : '計算 COM'}
+              onClick={() => void startCom()}>
+              {comJob?.running ? '計算中…' : '計算 COM（背景）'}
             </button>
+            {comJob?.running && (
+              <button className="btn" onClick={() => void cancelCom()}>取消</button>
+            )}
           </div>
+          {comJob?.running && (
+            <p className="hint">
+              {comJob.standard}　·　已跑 {comJob.elapsed_seconds ?? 0} 秒　·
+              {comJob.message || ''}
+            </p>
+          )}
           {comResult && (
             <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, maxHeight: 320, overflow: 'auto' }}>
               {comResult}

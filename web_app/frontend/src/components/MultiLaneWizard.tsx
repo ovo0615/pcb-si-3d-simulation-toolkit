@@ -278,6 +278,8 @@ export default function MultiLaneWizard(
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [started, setStarted] = useState('')
+  /** 快速檢驗的參考通道檔位（2026-08-29 下午）。 */
+  const [lossyReference, setLossyReference] = useState(false)
   /** 快速檢驗（無損直連）這一輪的 job 與實際用到的兩顆模型。
    *  結果沿用同一個 /api/ibis-channel/status，靠 job_id 認出它是基準眼圖。 */
   const [quickCheck, setQuickCheck] = useState<
@@ -537,6 +539,7 @@ export default function MultiLaneWizard(
           tx_package_id: packageId,
           rx_package_id: rxPackageId || packageId,
           data_rate_gbps: dataRate,
+          reference: lossyReference ? 'lossy' : 'lossless',
         }),
       })
       const data = await response.json()
@@ -857,13 +860,20 @@ export default function MultiLaneWizard(
       </section>
 
       <section>
-        <h3>快速檢驗：無損直連基準眼圖</h3>
-        {/* 不接任何通道：TX 與 RX 之間放的是工具自產的無損 50Ω 參考線。
-            先知道這對模型在此資料率下本來給多大的眼，之後接上真實通道，
-            看到的劣化才有歸因。模型由套件角色自動挑，不需要 Touchstone。 */}
-        <p className="hint">把上面選的兩側模型背對背直連，中間零損耗。</p>
+        <h3>快速檢驗：參考通道基準眼圖</h3>
+        {/* 不接使用者通道：TX 與 RX 之間放的是工具自產的參考線——無損
+            直連看模型本來的眼，有損檔位看典型中等損耗下還剩多少。
+            模型由套件角色自動挑，不需要 Touchstone。 */}
+        <p className="hint">把上面選的兩側模型背對背接上工具自產參考線。</p>
         <p className="hint">基準眼就不好＝模型或資料率的問題，跟通道無關。</p>
         <p className="hint">基準眼好、接上通道才壞＝通道的問題。</p>
+        <label style={{ display: 'flex', flexDirection: 'row', gap: 6,
+          alignItems: 'center' }}>
+          <input type="checkbox" checked={lossyReference}
+            style={{ width: 'auto' }}
+            onChange={event => setLossyReference(event.target.checked)} />
+          用有損參考通道（Nyquist −10 dB 趨膚模型；預設是無損直連）
+        </label>
         <button className="btn" disabled={!packageId || busy || Boolean(job?.running)}
           onClick={() => void runQuickCheck()}>
           {busy ? '處理中…' : '快速檢驗（不需 Touchstone）'}
