@@ -19,13 +19,16 @@ Existing hybrid flows (such as HFSS Regions in SIwave) start with an engineer dr
 **A broken model does not block you: auto-repair, audit trail, and the run goes on.**
 Industry IBIS checkers (ibischk and the ones built into EDA tools) validate but never fix. This tool repairs a faulty model into a managed copy, records what was changed, stamps it with a SHA-256 fingerprint, and proceeds; at sign-off, every model's provenance is on record.
 
+**TDR finds the discontinuity; the layout gets the marker. Then take a virtual cross-section right there.**
+The industry workflow is to carry the TDR distance readout back to the layout by hand, then confirm by physically sectioning the board. This tool turns solved or measured S-parameters into a TDR, ranks discontinuities by |dZ/dx| peaks, converts time into routed-path coordinates, and drops the markers straight onto the layout trace; each row of the discontinuity table can cut a Q2D cross-section at that exact spot. [Location validation](./validation/tdr/TDR_群延遲定位驗證報告.md) (Traditional Chinese): mean error 0.66 mm, worst 1.71 mm. The section is rebuilt from the EDB, and the board stays in one piece.
+
 **EQ sweep: 3 seconds per setting, against 48 to 212 seconds for a full simulation of the same setting, with ranking consistency of Spearman ρ = 0.90.**
 Parameter sweeps are nothing new; seconds-level speed with quantified trust is. Others run a full simulation per grid point. This tool ranks the whole Tx×Rx matrix with a statistical-eye engine in seconds, and the agreement with full AEDT simulation, where the gap comes from (the jitter budget), and which way the bias points are all quantified in a [26-case validation report](./validation/ibis/秒級眼圖預測與完整模擬對照_20260829.md) (Traditional Chinese). The intended use is stated there too: sweep to pick a direction, sign off with the full simulation.
 
 **One button proves the model actually solves, not merely that it parses.**
 A model that parses cleanly can still fail to solve. The health check drives the model through a real reference channel once, and incompatible Tx/Rx pairs are disabled right in the menu; "found out mid-run that the model was broken" is eliminated before you press solve.
 
-The "nobody else ships this" claims on the first two items rest on an August 2026 survey of public product documentation and literature. A survey cannot prove a negative; it proves we looked hard.
+The "nobody else ships this" claims on the first three items rest on an August 2026 survey of public product documentation and literature. A survey cannot prove a negative; it proves we looked hard.
 
 ## Features and the experiments that validate them
 
