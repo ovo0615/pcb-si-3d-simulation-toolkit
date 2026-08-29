@@ -1,0 +1,289 @@
+[
+ {
+  "tag": "A_loss10dB",
+  "preset": "",
+  "route": "statistical",
+  "values": {
+   "EyeHeight": 93.7673,
+   "EyeWidth": 0.3616,
+   "EyeAmplitude": 197.0868,
+   "EyeLevelOne": 386.6821,
+   "EyeLevelZero": 189.5953,
+   "EyeSignalToNoise": 5.7226,
+   "EyeOpeningFactor": 0.8253,
+   "EyeJitterP2P": 1.0,
+   "EyeJitterRMS": 0.1064,
+   "MinEyeWidth": 0.01,
+   "MinEyeHeight": 8.7791
+  },
+  "closed": [],
+  "rescue": {
+   "attempted": true,
+   "succeeded": true,
+   "vref_v": 0.29,
+   "scanned": 29,
+   "note": "AEDT 自動交越振幅在此波形上失敗（全數 NaN）；已改明設判準位 0.290 V（取眼寬最大者）重新量測。抖動類數值對判準位敏感，引用前先確認 Vref 合理。"
+  },
+  "api": "AddAllEyeMeasurements+ManualCrossAmplitude",
+  "status": "done",
+  "elapsed_s": 97.8
+ },
+ {
+  "tag": "A_loss20dB",
+  "preset": "",
+  "route": "statistical",
+  "values": {
+   "EyeHeight": 1.0279,
+   "EyeWidth": 0.018,
+   "EyeAmplitude": 87.4096,
+   "EyeLevelOne": 344.7639,
+   "EyeLevelZero": 257.3543,
+   "EyeSignalToNoise": 2.5768,
+   "EyeOpeningFactor": 0.6119,
+   "EyeJitterP2P": 1.0,
+   "EyeJitterRMS": 0.1705,
+   "MinEyeWidth": 0.018,
+   "MinEyeHeight": 1.0279
+  },
+  "closed": [],
+  "rescue": {
+   "attempted": true,
+   "succeeded": true,
+   "vref_v": 0.3,
+   "scanned": 29,
+   "note": "AEDT 自動交越振幅在此波形上失敗（全數 NaN）；已改明設判準位 0.300 V（取眼寬最大者）重新量測。抖動類數值對判準位敏感，引用前先確認 Vref 合理。"
+  },
+  "api": "AddAllEyeMeasurements+ManualCrossAmplitude",
+  "status": "done",
+  "elapsed_s": 74.7
+ },
+ {
+  "tag": "D_pP2_10dB",
+  "preset": "P2",
+  "route": "statistical",
+  "values": {
+   "EyeHeight": 1.4996,
+   "EyeWidth": 0.0319,
+   "EyeAmplitude": 140.6809,
+   "EyeLevelOne": 288.0808,
+   "EyeLevelZero": 147.3998,
+   "EyeSignalToNoise": 1.3609,
+   "EyeOpeningFactor": 0.2652,
+   "EyeJitterP2P": 1.0,
+   "EyeJitterRMS": 0.203,
+   "MinEyeWidth": 0.0319,
+   "MinEyeHeight": 1.4996
+  },
+  "closed": [],
+  "rescue": {
+   "attempted": true,
+   "succeeded": true,
+   "vref_v": 0.15,
+   "scanned": 29,
+   "note": "AEDT 自動交越振幅在此波形上失敗（全數 NaN）；已改明設判準位 0.150 V（取眼寬最大者）重新量測。抖動類數值對判準位敏感，引用前先確認 Vref 合理。"
+  },
+  "api": "AddAllEyeMeasurements+ManualCrossAmplitude",
+  "status": "done",
+  "elapsed_s": 75.6
+ },
+ {
+  "tag": "D_pP5_10dB",
+  "preset": "P5",
+  "route": "statistical",
+  "values": {
+   "EyeHeight": 93.7673,
+   "EyeWidth": 0.3616,
+   "EyeAmplitude": 197.0868,
+   "EyeLevelOne": 386.6821,
+   "EyeLevelZero": 189.5953,
+   "EyeSignalToNoise": 5.7226,
+   "EyeOpeningFactor": 0.8253,
+   "EyeJitterP2P": 1.0,
+   "EyeJitterRMS": 0.1064,
+   "MinEyeWidth": 0.01,
+   "MinEyeHeight": 8.7791
+  },
+  "closed": [],
+  "rescue": {
+   "attempted": true,
+   "succeeded": true,
+   "vref_v": 0.29,
+   "scanned": 29,
+   "note": "AEDT 自動交越振幅在此波形上失敗（全數 NaN）；已改明設判準位 0.290 V（取眼寬最大者）重新量測。抖動類數值對判準位敏感，引用前先確認 Vref 合理。"
+  },
+  "api": "AddAllEyeMeasurements+ManualCrossAmplitude",
+  "status": "done",
+  "elapsed_s": 79.9
+ },
+ {
+  "tag": "D_pP7_10dB",
+  "preset": "P7",
+  "route": "statistical",
+  "values": {
+   "EyeHeight": 93.7673,
+   "EyeWidth": 0.3616,
+   "EyeAmplitude": 197.0868,
+   "EyeLevelOne": 386.6821,
+   "EyeLevelZero": 189.5953,
+   "EyeSignalToNoise": 5.7226,
+   "EyeOpeningFactor": 0.8253,
+   "EyeJitterP2P": 1.0,
+   "EyeJitterRMS": 0.1064,
+   "MinEyeWidth": 0.01,
+   "MinEyeHeight": 8.7791
+  },
+  "closed": [],
+  "rescue": {
+   "attempted": true,
+   "succeeded": true,
+   "vref_v": 0.29,
+   "scanned": 29,
+   "note": "AEDT 自動交越振幅在此波形上失敗（全數 NaN）；已改明設判準位 0.290 V（取眼寬最大者）重新量測。抖動類數值對判準位敏感，引用前先確認 Vref 合理。"
+  },
+  "api": "AddAllEyeMeasurements+ManualCrossAmplitude",
+  "status": "done",
+  "elapsed_s": 87.6
+ },
+ {
+  "tag": "D_pP8_10dB",
+  "preset": "P8",
+  "route": "statistical",
+  "values": {
+   "EyeHeight": 2.8234,
+   "EyeWidth": 0.0379,
+   "EyeAmplitude": 133.1966,
+   "EyeLevelOne": 287.2395,
+   "EyeLevelZero": 154.0429,
+   "EyeSignalToNoise": 1.4881,
+   "EyeOpeningFactor": 0.328,
+   "EyeJitterP2P": 1.0,
+   "EyeJitterRMS": 0.2276,
+   "MinEyeWidth": 0.0379,
+   "MinEyeHeight": 2.8234
+  },
+  "closed": [],
+  "rescue": {
+   "attempted": true,
+   "succeeded": true,
+   "vref_v": 0.16,
+   "scanned": 29,
+   "note": "AEDT 自動交越振幅在此波形上失敗（全數 NaN）；已改明設判準位 0.160 V（取眼寬最大者）重新量測。抖動類數值對判準位敏感，引用前先確認 Vref 合理。"
+  },
+  "api": "AddAllEyeMeasurements+ManualCrossAmplitude",
+  "status": "done",
+  "elapsed_s": 87.9
+ },
+ {
+  "tag": "D_pP9_10dB",
+  "preset": "P9",
+  "route": "statistical",
+  "values": {},
+  "closed": [
+   "EyeHeight",
+   "EyeWidth",
+   "EyeAmplitude",
+   "EyeLevelOne",
+   "EyeLevelZero",
+   "EyeSignalToNoise",
+   "EyeOpeningFactor",
+   "EyeJitterP2P",
+   "EyeJitterRMS",
+   "MinEyeWidth",
+   "MinEyeHeight"
+  ],
+  "rescue": {
+   "attempted": true,
+   "succeeded": false
+  },
+  "api": "AddAllEyeMeasurements",
+  "status": "done",
+  "elapsed_s": 79.5
+ },
+ {
+  "tag": "D_pP5_20dB",
+  "preset": "P5",
+  "route": "statistical",
+  "values": {
+   "EyeHeight": 1.0279,
+   "EyeWidth": 0.018,
+   "EyeAmplitude": 87.4096,
+   "EyeLevelOne": 344.7639,
+   "EyeLevelZero": 257.3543,
+   "EyeSignalToNoise": 2.5768,
+   "EyeOpeningFactor": 0.6119,
+   "EyeJitterP2P": 1.0,
+   "EyeJitterRMS": 0.1705,
+   "MinEyeWidth": 0.018,
+   "MinEyeHeight": 1.0279
+  },
+  "closed": [],
+  "rescue": {
+   "attempted": true,
+   "succeeded": true,
+   "vref_v": 0.3,
+   "scanned": 29,
+   "note": "AEDT 自動交越振幅在此波形上失敗（全數 NaN）；已改明設判準位 0.300 V（取眼寬最大者）重新量測。抖動類數值對判準位敏感，引用前先確認 Vref 合理。"
+  },
+  "api": "AddAllEyeMeasurements+ManualCrossAmplitude",
+  "status": "done",
+  "elapsed_s": 69.3
+ },
+ {
+  "tag": "D_pP7_20dB",
+  "preset": "P7",
+  "route": "statistical",
+  "values": {
+   "EyeHeight": 1.0279,
+   "EyeWidth": 0.018,
+   "EyeAmplitude": 87.4096,
+   "EyeLevelOne": 344.7639,
+   "EyeLevelZero": 257.3543,
+   "EyeSignalToNoise": 2.5768,
+   "EyeOpeningFactor": 0.6119,
+   "EyeJitterP2P": 1.0,
+   "EyeJitterRMS": 0.1705,
+   "MinEyeWidth": 0.018,
+   "MinEyeHeight": 1.0279
+  },
+  "closed": [],
+  "rescue": {
+   "attempted": true,
+   "succeeded": true,
+   "vref_v": 0.3,
+   "scanned": 29,
+   "note": "AEDT 自動交越振幅在此波形上失敗（全數 NaN）；已改明設判準位 0.300 V（取眼寬最大者）重新量測。抖動類數值對判準位敏感，引用前先確認 Vref 合理。"
+  },
+  "api": "AddAllEyeMeasurements+ManualCrossAmplitude",
+  "status": "done",
+  "elapsed_s": 76.5
+ },
+ {
+  "tag": "F_getwave_p5",
+  "preset": "",
+  "route": "getwave",
+  "values": {
+   "EyeHeight": 93.7673,
+   "EyeWidth": 0.3616,
+   "EyeAmplitude": 197.0868,
+   "EyeLevelOne": 386.6821,
+   "EyeLevelZero": 189.5953,
+   "EyeSignalToNoise": 5.7226,
+   "EyeOpeningFactor": 0.8253,
+   "EyeJitterP2P": 1.0,
+   "EyeJitterRMS": 0.1064,
+   "MinEyeWidth": 0.01,
+   "MinEyeHeight": 8.7791
+  },
+  "closed": [],
+  "rescue": {
+   "attempted": true,
+   "succeeded": true,
+   "vref_v": 0.29,
+   "scanned": 29,
+   "note": "AEDT 自動交越振幅在此波形上失敗（全數 NaN）；已改明設判準位 0.290 V（取眼寬最大者）重新量測。抖動類數值對判準位敏感，引用前先確認 Vref 合理。"
+  },
+  "api": "AddAllEyeMeasurements+ManualCrossAmplitude",
+  "status": "done",
+  "elapsed_s": 54.2
+ }
+]
