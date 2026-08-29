@@ -8,9 +8,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ModelPackage } from './ModelLibrary'
 import { useCascadedChannel } from './useCascadedChannel'
+import { QuickProbeResult, QuickProbeView } from './AmiQuickProbe'
+
+interface AmiEditableParameter {
+  name: string
+  type?: string
+  default?: string
+  choices?: string[]
+  minimum?: string
+  maximum?: string
+  description?: string
+}
 
 interface AmiCandidate {
   name: string
+  editable_parameters?: AmiEditableParameter[]
   [key: string]: unknown
 }
 
@@ -81,6 +93,10 @@ export default function AmiChannelPanel(
   const [route, setRoute] = useState('auto')
   const [modulation, setModulation] = useState('NRZ')
   const [ports, setPorts] = useState({ input_p: '', input_n: '', output_p: '', output_n: '' })
+  /** 使用者親手改過的 AMI 參數（只存改過的；空字串＝清掉、回到 .ami 預設）。
+   *  親手設的值寫不進 AEDT 時後端會擋（既有的寫入預檢），不會默默略過。 */
+  const [txParams, setTxParams] = useState<Record<string, string>>({})
+  const [rxParams, setRxParams] = useState<Record<string, string>>({})
   const [job, setJob] = useState<AmiJob | null>(null)
   /** 快速檢驗那一輪的 job 與模型；靠 job_id 認出結果是基準眼圖。 */
   const [quickCheck, setQuickCheck] = useState<
@@ -88,6 +104,10 @@ export default function AmiChannelPanel(
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [started, setStarted] = useState('')
+  // 秒級預覽（SPISimAMI 引擎，2026-08-29）
+  const [preview, setPreview] = useState<QuickProbeResult | null>(null)
+  const [previewBusy, setPreviewBusy] = useState(false)
+  const [previewError, setPreviewError] = useState('')
 
   const amiPackages = useMemo(
     () => packages.filter(item => item.kind === 'ibis_ami'), [packages])
@@ -165,6 +185,27 @@ export default function AmiChannelPanel(
     } finally { setBusy(false) }
   }
 
+  /** 秒級預覽：Tx 模型的等化打在這條通道上長什麼樣（不開 AEDT）。 */
+  async function runPreview() {
+    setPreviewBusy(true); setPreviewError(''); setPreview(null)
+    try {
+      const response = await fetch(
+        `/api/models/${encodeURIComponent(txPackageId)}/ami-quick-test`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: txModel || '',
+            touchstone_path: touchstone,
+            data_rate_gbps: dataRate,
+          }),
+        })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data?.detail || '秒級預覽失敗')
+      setPreview(data)
+    } catch (exc) {
+      setPreviewError(exc instanceof Error ? exc.message : String(exc))
+    } finally { setPreviewBusy(false) }
+  }
+
   async function runSuggest() {
     setBusy(true); setError(''); setSuggestion(null); setStarted('')
     try {
@@ -186,6 +227,8 @@ export default function AmiChannelPanel(
       setTopology(s.recommended_topology || s.supported_topologies[0] || '')
       setPorts({ ...s.ports })
       setRoute('auto')
+      // 換了預檢就清掉親手改的參數：那些值是綁著上一組模型的。
+      setTxParams({}); setRxParams({})
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc))
     } finally { setBusy(false) }
@@ -206,6 +249,13 @@ export default function AmiChannelPanel(
         data_rate_gbps: dataRate,
         bit_count: bitCount,
       }
+      // 只送親手改過的參數；沒改的由 .ami 預設接手（後端會記錄略過的）。
+      const pick = (params: Record<string, string>) =>
+        Object.fromEntries(Object.entries(params).filter(([, v]) => v !== ''))
+      const txOverrides = pick(txParams)
+      const rxOverrides = pick(rxParams)
+      if (Object.keys(txOverrides).length) body.tx_parameters = txOverrides
+      if (Object.keys(rxOverrides).length) body.rx_parameters = rxOverrides
       if (topology === 'dual_single') {
         body.lanes = suggestion.dual_single_lanes
       } else {
@@ -359,8 +409,20 @@ export default function AmiChannelPanel(
             {cascaded.path.split(/[\\/]/).pop()}（{cascaded.n_ports} Port）
           </code>
         </div>}
-        <button className="btn" disabled={!touchstone || !txPackageId || busy}
-          onClick={() => void runSuggest()}>{busy ? '處理中…' : '執行預檢'}</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="btn" disabled={!touchstone || !txPackageId || busy}
+            onClick={() => void runSuggest()}>{busy ? '處理中…' : '執行預檢'}</button>
+          {/* 秒級預覽（2026-08-29）：SPISim 引擎把「Tx 等化打在這條通道上」
+              一秒畫出來，不開 AEDT。只吃 2 埠穿透，正式眼圖仍走下面流程。 */}
+          <button className="btn"
+            disabled={!touchstone || !txPackageId || previewBusy}
+            title="用 SPISimAMI 引擎驅動 Tx 模型＋通道脈衝響應；限 2 埠"
+            onClick={() => void runPreview()}>
+            {previewBusy ? '預覽中…' : '秒級預覽（不開 AEDT）'}
+          </button>
+        </div>
+        {previewError && <p className="error">{previewError}</p>}
+        {preview && <QuickProbeView result={preview} />}
       </section>
 
       {suggestion && <>
@@ -459,6 +521,49 @@ export default function AmiChannelPanel(
             </table>
           )}
           <p className="hint">AMI 參數採 .ami 內建預設；AEDT 未公開的預設會略過並記錄。</p>
+          {/* 進階：親手改 AMI 參數（丙類第 2 項，2026-08-29）。摺疊起來，
+              不動就是零設定；只列 .ami 宣告 Usage In/InOut 的 Model_Specific
+              參數（保留參數是 EDA 工具在填的，列了只會教人填壞）。 */}
+          {([
+            ['Tx', txModel, suggestion.tx.candidates, txParams, setTxParams],
+            ['Rx', rxModel, suggestion.rx.candidates, rxParams, setRxParams],
+          ] as const).map(([side, model, candidates, params, setParams]) => {
+            const editable = candidates.find(c => c.name === model)?.editable_parameters || []
+            if (!editable.length) return null
+            const touched = Object.values(params).filter(v => v !== '').length
+            return (
+              <details key={side}>
+                <summary>進階：{side} AMI 參數（{editable.length} 個可編輯
+                  {touched ? `，已改 ${touched} 個` : '，預設不必動'}）</summary>
+                <table className="model-library__table">
+                  <thead><tr><th>參數</th><th>值（留空＝用預設）</th><th>預設</th></tr></thead>
+                  <tbody>{editable.map(item => (
+                    <tr key={item.name} title={item.description || ''}>
+                      <td>{item.name}</td>
+                      <td>
+                        {item.choices && item.choices.length > 0 ? (
+                          <select className="input" value={params[item.name] ?? ''}
+                            onChange={e => setParams(prev => ({ ...prev, [item.name]: e.target.value }))}>
+                            <option value="">（預設）</option>
+                            {item.choices.map(choice => (
+                              <option key={choice} value={choice}>{choice}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input className="input" value={params[item.name] ?? ''}
+                            placeholder={item.minimum !== '' && item.maximum !== ''
+                              ? `${item.minimum} ~ ${item.maximum}` : ''}
+                            onChange={e => setParams(prev => ({ ...prev, [item.name]: e.target.value }))} />
+                        )}
+                      </td>
+                      <td>{item.default || '—'}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+                <p className="hint">親手設的值寫不進 AEDT 時會被擋下，不會默默略過。</p>
+              </details>
+            )
+          })}
           <button className="btn" disabled={busy || suggestion.blockers.length > 0
             || !txModel || !rxModel || Boolean(job?.running)}
             onClick={() => void start()}>
