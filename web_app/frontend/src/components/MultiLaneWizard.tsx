@@ -280,6 +280,15 @@ export default function MultiLaneWizard(
   const [started, setStarted] = useState('')
   /** 快速檢驗的參考通道檔位（2026-08-29 下午）。 */
   const [lossyReference, setLossyReference] = useState(false)
+  // ── 位址命令群（乙7 介面，2026-08-29）──────────────────────────
+  // fly-by：控制器推一條線、線上掛著多顆顆粒。電路層早就支援
+  // 一對多（共用驅動埠的道共用驅動器），缺的是走得到的介面。
+  const [addrDriver, setAddrDriver] = useState('')
+  const [addrReceivers, setAddrReceivers] = useState('')
+  const [addrCmdRate, setAddrCmdRate] = useState<'1T' | '2T'>('1T')
+  const [addrResult, setAddrResult] = useState<any | null>(null)
+  const [addrBusy, setAddrBusy] = useState(false)
+  const [addrError, setAddrError] = useState('')
   /** 快速檢驗（無損直連）這一輪的 job 與實際用到的兩顆模型。
    *  結果沿用同一個 /api/ibis-channel/status，靠 job_id 認出它是基準眼圖。 */
   const [quickCheck, setQuickCheck] = useState<
@@ -552,6 +561,74 @@ export default function MultiLaneWizard(
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc))
     } finally { setBusy(false) }
+  }
+
+  /** 位址命令群：把埠名攤成 fly-by 的道（乙7）。 */
+  async function analyzeAddressGroup() {
+    setAddrBusy(true); setAddrError(''); setAddrResult(null)
+    try {
+      const response = await fetch('/api/address-command/lanes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          touchstone_path: touchstone,
+          driver_component: addrDriver.trim(),
+          receiver_components: addrReceivers.split(/[，,]/)
+            .map(item => item.trim()).filter(Boolean),
+          data_rate_gbps: dataRate,
+          command_rate: addrCmdRate,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data?.detail || '分組失敗')
+      if (data.reason) throw new Error(data.reason)
+      setAddrResult(data)
+    } catch (exc) {
+      setAddrError(exc instanceof Error ? exc.message : String(exc))
+    } finally { setAddrBusy(false) }
+  }
+
+  /** 以指定顆粒的 CK 對為時間基準啟動位址群分析。
+   *  電路裡留著**全部**接收端（fly-by 的負載就是那幾顆），只換 strobe。 */
+  async function startAddressRun(device: string) {
+    if (!suggestion || !addrResult) return
+    setAddrBusy(true); setAddrError(''); setStarted('')
+    try {
+      const entry = (addrResult.devices || [])
+        .find((item: any) => item.device === device)
+      const widestOf = (role: VariantChoice['role']) =>
+        suggestion.variant_choices
+          .filter(item => item.role === role && pickedVariant(item))[0]
+      const driverChoice = widestOf('driver')
+      const receiverChoice = widestOf('receiver')
+      const response = await fetch('/api/multi-lane/start', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          touchstone_path: touchstone,
+          package_id: packageId, rx_package_id: rxPackageId,
+          lanes: addrResult.lanes,
+          driving_side: suggestion.bus_direction.driving_side ?? 0,
+          tx_buffer: driverChoice ? pickedVariant(driverChoice) : '',
+          rx_buffer: receiverChoice ? pickedVariant(receiverChoice) : '',
+          dispositions: Object.entries(dispositions).map(([index, plan]) => ({
+            port_index: Number(index), ...plan,
+          })),
+          data_rate_gbps: dataRate,
+          // 位址時序要看轉態，最差碼型會讓道長時間持平——量不到約束。
+          pattern_kind: 'prbs',
+          settle_ui: settleUi, transient_ui_count: transientUi,
+          strobe_labels: entry?.strobe_labels || [],
+          // CK 不像 DQS 有寫入位移——CA 對 CK 的對齊正是要量的東西。
+          strobe_phase_ui: 0,
+          ...(thresholdsValid ? { timing_thresholds: thresholds } : {}),
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data?.detail || '啟動失敗')
+      setStarted(`位址群已排入背景（job ${data.job_id ?? '—'}，`
+        + `時間基準：${device} 的 CK 對）。進度顯示在下方。`)
+    } catch (exc) {
+      setAddrError(exc instanceof Error ? exc.message : String(exc))
+    } finally { setAddrBusy(false) }
   }
 
   async function start(sweep = false) {
@@ -882,6 +959,77 @@ export default function MultiLaneWizard(
           已排入背景：{quickCheck.txModel} → {quickCheck.rxModel}，
           結果顯示在下方「分析狀態與結果」。
         </p>}
+      </section>
+
+      <section>
+        <details>
+          <summary>位址命令群（fly-by：一顆控制器推多顆顆粒）</summary>
+          <p className="hint">
+            電路是一對多接的：共用驅動埠的道共用同一顆驅動器與訊號源。
+          </p>
+          <p className="hint">
+            建議用只含位址群的裁切檔；末端 VTT 電阻要在下方 Port 處置指定。
+          </p>
+          <div className="field-row">
+            <label>驅動端元件
+              <input className="input" value={addrDriver} placeholder="U1"
+                onChange={event => setAddrDriver(event.target.value)} />
+            </label>
+            <label>接收顆粒（逗號分隔；留空＝除驅動端外全部）
+              <input className="input" value={addrReceivers}
+                placeholder="U35, U37"
+                onChange={event => setAddrReceivers(event.target.value)} />
+            </label>
+            <label>命令速率
+              <select className="input" value={addrCmdRate}
+                onChange={event => setAddrCmdRate(
+                  event.target.value as '1T' | '2T')}>
+                <option value="1T">1T</option>
+                <option value="2T">2T</option>
+              </select>
+            </label>
+            <button className="btn" disabled={!touchstone || !addrDriver || addrBusy}
+              onClick={() => void analyzeAddressGroup()}>
+              {addrBusy ? '分組中…' : '分析分組'}
+            </button>
+          </div>
+          {addrError && <p className="error">{addrError}</p>}
+          {addrResult && <>
+            <p className="hint">
+              {addrResult.lanes.length} 條道（{addrResult.clock_nets.length} 條時脈）
+              {addrResult.windows
+                ? `　·　tCK ${addrResult.windows.clock_period_ps?.toFixed(0)} ps、位址窗 ${addrResult.windows.address_window_ps?.toFixed(0)} ps（${addrCmdRate}）`
+                : ''}
+            </p>
+            {(addrResult.unassigned || []).length > 0 && (
+              <p className="hint" style={{ color: '#e3b341' }}>
+                {addrResult.unassigned.length} 個埠沒有歸屬（多半是 VTT 終端）：
+                {addrResult.unassigned.slice(0, 4).map((item: any) => item.port).join('、')}
+                ——請在「Port 處置」指定終結，否則啟動會被擋。
+              </p>
+            )}
+            {(addrResult.devices || []).map((device: any) => (
+              <div key={device.device} className="field-row"
+                style={{ alignItems: 'center' }}>
+                <span>顆粒 <strong>{device.device}</strong>
+                  （{device.lanes.length} 條道）</span>
+                {device.strobe_labels?.length === 2
+                  ? <button className="btn"
+                      disabled={!suggestion || addrBusy || Boolean(job?.running)}
+                      title={suggestion ? '以這顆的 CK 對為時間基準啟動'
+                        : '先按上方「執行預檢」取得緩衝器選擇'}
+                      onClick={() => void startAddressRun(device.device)}>
+                      以 {device.device} 為基準啟動
+                    </button>
+                  : <span className="hint">{device.why}</span>}
+              </div>
+            ))}
+            <p className="hint">
+              每輪電路都保留全部接收端（fly-by 的負載），只有時間基準換顆粒；
+              時序判讀需要在上方填妥判讀準位。
+            </p>
+          </>}
+        </details>
       </section>
 
       {suggestion && <>
@@ -1541,6 +1689,23 @@ export default function MultiLaneWizard(
 
           {/* 沒量到時要講清楚是哪一種「沒量到」，三種要做的事完全不同。 */}
           {timingWhy && <p className="hint">{timingWhy}</p>}
+
+          {/* CK／選通品質（乙7）：AC 區間內的邊緣單調性。不單調＝有
+              double clocking 風險，而眼圖看不出來（折疊後台階被蓋掉）。 */}
+          {(() => {
+            const ck = jobResult?.sweep
+              ? (jobResult.runs?.[0]?.result?.timing?.ck_quality || [])
+              : (jobResult?.timing?.ck_quality || [])
+            if (!ck.length) return null
+            return (
+              <p className="hint">
+                選通品質：{ck.map((item: any) => item.why
+                  ? `${item.label}（${item.why}）`
+                  : `${item.label} ${item.monotonic ? '單調 ✓' : `不單調（${item.violation_count} 處、最大回頭 ${item.worst_reversal_mv?.toFixed(1)} mV）⚠`}`
+                ).join('；')}
+              </p>
+            )
+          })()}
 
           {/* 快速檢驗的重點是數字：眼高眼寬是基準線，之後接上真實通道
               比的就是這一組。量測在 measurements.metrics 底下，外層是

@@ -39,6 +39,7 @@ import CascadeSchematic, { CascadeGraph } from './components/CascadeSchematic'
 import ReportCenter from './components/ReportCenter'
 import ReportSnapshotButton from './components/ReportSnapshotButton'
 import ModelLibrary from './components/ModelLibrary'
+import { modelsReportMetadata } from './components/reportMetadataStore'
 import { markReportSnapshotsStale } from './reportApi'
 
 const normalizeUserPath = (path: string): string => {
@@ -5894,6 +5895,10 @@ ${data.output_path}`)
                         // 表格才會以文字保留下來。
                         ...(activeView === 'crosssection'
                           ? crossSectionReportMetadata() : {}),
+                        // 模型分頁同理：秒測／統計眼／COM 的數字由各元件寫進
+                        // store，這裡整批掛上。
+                        ...(activeView === 'models'
+                          ? modelsReportMetadata() : {}),
                       }}
                       onSaved={rememberReportWorkspace}
                     />

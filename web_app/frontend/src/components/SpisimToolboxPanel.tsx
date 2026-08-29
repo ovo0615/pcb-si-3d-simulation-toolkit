@@ -5,6 +5,7 @@
 // 免授權、立即可用；COM 簽核走 AEDT 內建的 SPISim 批次引擎，授權實測
 // 尚未打通，介面誠實顯示探測結果，不讓使用者按下去等七分鐘。
 import { useEffect, useState } from 'react'
+import { setModelsReportMetadata } from './reportMetadataStore'
 
 interface ToolboxOperation { name: string; description: string }
 interface BatchStatus { available: boolean; checked_at: string; detail: string }
@@ -82,6 +83,12 @@ export default function SpisimToolboxPanel() {
     if (state.status === 'cancelled') { setComResult('已取消。'); return }
     const out = state.result
     if (!out) return
+    setModelsReportMetadata({
+      'COM_標準': state.standard || comStandard,
+      'COM_通道': source.split(/[\\/]/).pop() || source,
+      'COM_產出檔數': out.artifacts?.length ?? 0,
+      'COM_引擎訊息': (out.messages || []).slice(-1)[0] || '',
+    })
     const names = Object.keys(out.reports || {})
     const parts: string[] = []
     if (out.messages?.length) parts.push('引擎訊息：\n' + out.messages.join('\n'))

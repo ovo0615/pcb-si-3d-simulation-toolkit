@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ModelPackage } from './ModelLibrary'
 import { useCascadedChannel } from './useCascadedChannel'
 import { QuickProbeResult, QuickProbeView } from './AmiQuickProbe'
+import { setModelsReportMetadata } from './reportMetadataStore'
 
 interface AmiEditableParameter {
   name: string
@@ -110,6 +111,10 @@ export default function AmiChannelPanel(
   const [previewError, setPreviewError] = useState('')
   // 快速檢驗的參考通道檔位（2026-08-29 下午）
   const [lossyReference, setLossyReference] = useState(false)
+  // DDR4 Rx 遮罩統計簽核（乙8）：遮罩尺寸由使用者依 JESD79-4 填
+  const [ddrMaskWidth, setDdrMaskWidth] = useState('')
+  const [ddrMaskHeight, setDdrMaskHeight] = useState('')
+  const [ddrRjSigma, setDdrRjSigma] = useState('1')
 
   const amiPackages = useMemo(
     () => packages.filter(item => item.kind === 'ibis_ami'), [packages])
@@ -203,11 +208,31 @@ export default function AmiChannelPanel(
             rx_package_id: rxPackageId || txPackageId,
             rx_model: rxModel || '',
             modulation,
+            // 4 埠差分：預檢帶入的埠對應直接沿用；沒跑預檢就交給後端
+            // 用預設對應並在結果註明。
+            ports,
+            ddr4_mask: (Number(ddrMaskWidth) > 0 && Number(ddrMaskHeight) > 0)
+              ? { width_ui: Number(ddrMaskWidth),
+                  height_mv: Number(ddrMaskHeight),
+                  rj_sigma_ps: Number(ddrRjSigma) || 1 }
+              : {},
           }),
         })
       const data = await response.json()
       if (!response.ok) throw new Error(data?.detail || '秒級預覽失敗')
       setPreview(data)
+      if (data?.quick_eye?.metrics) {
+        const m = data.quick_eye.metrics
+        setModelsReportMetadata({
+          '統計眼_眼高(V)': Number(m.eye_height_v ?? 0).toFixed(3),
+          '統計眼_眼寬(UI)': Number(m.eye_width_ui ?? 0).toFixed(2),
+          '統計眼_調變': data.quick_eye.modulation || 'NRZ',
+          '統計眼_Tx': `${data.model}（${data.ami_file}）`,
+          '統計眼_Rx': data.rx ? `${data.rx.model}（${data.rx.ami_file}）` : '—',
+          '統計眼_通道': touchstone.split(/[\\/]/).pop() || touchstone,
+          '統計眼_說明': '最壞情況疊加（Init/LTI），未含抖動與雜訊',
+        })
+      }
     } catch (exc) {
       setPreviewError(exc instanceof Error ? exc.message : String(exc))
     } finally { setPreviewBusy(false) }
@@ -430,11 +455,30 @@ export default function AmiChannelPanel(
               一秒畫出來，不開 AEDT。只吃 2 埠穿透，正式眼圖仍走下面流程。 */}
           <button className="btn"
             disabled={!touchstone || !txPackageId || previewBusy}
-            title="用 SPISimAMI 引擎驅動 Tx 模型＋通道脈衝響應；限 2 埠"
+            title="用 SPISimAMI 引擎驅動 Tx→Rx 模型＋通道脈衝響應；2 埠取 S21、4 埠取差模 Sdd21"
             onClick={() => void runPreview()}>
             {previewBusy ? '預覽中…' : '秒級預覽（不開 AEDT）'}
           </button>
         </div>
+        <details>
+          <summary>進階：DDR4 Rx 遮罩統計簽核（BER 1e-16）</summary>
+          <p className="hint">遮罩尺寸依速度等級查 JESD79-4（例：0.2 UI／136 mV）。</p>
+          <p className="hint">填了寬與高，下一次秒級預覽就會附上遮罩簽核。</p>
+          <div className="field-row">
+            <label>遮罩寬（UI）
+              <input className="input" value={ddrMaskWidth} placeholder="0.2"
+                onChange={event => setDdrMaskWidth(event.target.value)} />
+            </label>
+            <label>遮罩高（mV）
+              <input className="input" value={ddrMaskHeight} placeholder="136"
+                onChange={event => setDdrMaskHeight(event.target.value)} />
+            </label>
+            <label>RJ σ（ps）
+              <input className="input" value={ddrRjSigma}
+                onChange={event => setDdrRjSigma(event.target.value)} />
+            </label>
+          </div>
+        </details>
         {previewError && <p className="error">{previewError}</p>}
         {preview && <QuickProbeView result={preview} />}
       </section>

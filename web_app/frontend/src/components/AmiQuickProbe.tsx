@@ -32,6 +32,14 @@ export interface QuickEyeResult {
   traces: [number, number][][]
   ui_ps: number
   modulation: string
+  ddr4_mask_check?: {
+    ber: number
+    at_ber: { eye_width_ui: number; eye_height_v: number }
+    mask: { width_ui: number; height_v: number }
+    margin: { width_ui: number; height_v: number }
+    passes: boolean
+    assumptions: string[]
+  }
 }
 
 export interface QuickProbeResult {
@@ -146,6 +154,17 @@ export function EyeView({ eye }: { eye: QuickEyeResult }) {
         <text x={width / 2} y={height - 5} fontSize={10} fill="#8a949e"
           textAnchor="middle">±{vAbs.toFixed(2)} V</text>
       </svg>
+      {eye.ddr4_mask_check && (
+        <p className="hint" style={{ marginTop: 2 }}>
+          <strong style={{ color: eye.ddr4_mask_check.passes ? '#43d17a' : '#e5534b' }}>
+            DDR4 Rx 遮罩（BER {eye.ddr4_mask_check.ber}）：
+            {eye.ddr4_mask_check.passes ? '通過' : '不通過'}
+          </strong>
+          　寬邊際 {(eye.ddr4_mask_check.margin.width_ui * 100).toFixed(1)}% UI、
+          高邊際 {(eye.ddr4_mask_check.margin.height_v * 1000).toFixed(0)} mV
+          　·　{eye.ddr4_mask_check.assumptions[0]}
+        </p>
+      )}
     </div>
   )
 }
