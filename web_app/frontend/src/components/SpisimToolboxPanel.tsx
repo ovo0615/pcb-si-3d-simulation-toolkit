@@ -110,15 +110,20 @@ export default function SpisimToolboxPanel() {
   const runCom = async () => {
     setComBusy(true); setError(''); setComResult('')
     try {
-      const out = await api<{ status: string; reports: Record<string, string>; stdout_tail: string }>(
-        '/api/spisim/com/run', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ touchstone_path: source, standard: comStandard }),
-        })
+      const out = await api<{
+        status: string; reports: Record<string, string>
+        artifacts: string[]; messages: string[]; stdout_tail: string
+      }>('/api/spisim/com/run', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ touchstone_path: source, standard: comStandard }),
+      })
       const names = Object.keys(out.reports || {})
-      setComResult(names.length
-        ? `完成，報告：${names.join('、')}\n\n${Object.values(out.reports)[0] || ''}`
-        : `引擎已執行但沒有報告輸出。輸出尾段：\n${out.stdout_tail}`)
+      const parts: string[] = []
+      if (out.messages?.length) parts.push('引擎訊息：\n' + out.messages.join('\n'))
+      if (out.artifacts?.length) parts.push('產出檔（含 IL／RL／ILD 曲線）：\n' + out.artifacts.join('\n'))
+      if (names.length) parts.push(`報告 ${names[0]}：\n` + (out.reports[names[0]] || ''))
+      setComResult(parts.length ? parts.join('\n\n')
+        : `引擎已執行但沒有輸出。輸出尾段：\n${out.stdout_tail}`)
     } catch (reason) {
       setComResult('')
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -197,7 +202,7 @@ export default function SpisimToolboxPanel() {
           <p className="hint">內建 {comStandards.length} 份標準參數組態，不必自己填門檻。</p>
           {batchStatus && !batchStatus.available && (
             <div className="model-library__notice model-library__notice--error">
-              引擎授權尚未打通：{batchStatus.detail}
+              引擎探測未通過：{batchStatus.detail}
             </div>
           )}
           <div className="field-row">
@@ -212,13 +217,13 @@ export default function SpisimToolboxPanel() {
               </select>
             </label>
             <button className="btn" disabled={probing} onClick={() => void reprobe()}>
-              {probing ? '探測中…' : '重新探測授權'}
+              {probing ? '探測中…' : '重新探測引擎'}
             </button>
             <button className="btn btn--primary"
               disabled={comBusy || !source || !batchStatus?.available}
-              title={batchStatus?.available ? '' : '授權探測未通過，先按「重新探測授權」'}
+              title={batchStatus?.available ? '' : '引擎探測未通過，先按「重新探測引擎」'}
               onClick={() => void runCom()}>
-              {comBusy ? '計算中…' : '計算 COM'}
+              {comBusy ? '計算中…（大通道要幾分鐘）' : '計算 COM'}
             </button>
           </div>
           {comResult && (
