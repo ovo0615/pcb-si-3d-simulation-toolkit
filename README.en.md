@@ -11,6 +11,22 @@ Consolidates PCB and package channel import, cutout, port creation, segmented so
 
 ![N-way segmentation with per-segment solver assignment: green = SIwave, purple = HFSS, labels show complexity score](./graph/N段分割後推薦求解器示意_20260815.png)
 
+## What nobody else ships
+
+**Whole-board automatic segmentation with per-segment solver assignment. You never draw a region.**
+Existing hybrid flows (such as HFSS Regions in SIwave) start with an engineer drawing the 3D regions by hand. This tool searches for safe cut planes, scores each segment's 3D complexity, and decides on its own which segments go to HFSS and which to SIwave; your job is reduced to picking the segment count and overriding the segments you disagree with.
+
+**A broken model does not block you: auto-repair, audit trail, and the run goes on.**
+Industry IBIS checkers (ibischk and the ones built into EDA tools) validate but never fix. This tool repairs a faulty model into a managed copy, records what was changed, stamps it with a SHA-256 fingerprint, and proceeds; at sign-off, every model's provenance is on record.
+
+**EQ sweep: 3 seconds per setting, against 48 to 212 seconds for a full simulation of the same setting, with ranking consistency of Spearman ρ = 0.90.**
+Parameter sweeps are nothing new; seconds-level speed with quantified trust is. Others run a full simulation per grid point. This tool ranks the whole Tx×Rx matrix with a statistical-eye engine in seconds, and the agreement with full AEDT simulation, where the gap comes from (the jitter budget), and which way the bias points are all quantified in a [26-case validation report](./validation/ibis/秒級眼圖預測與完整模擬對照_20260829.md) (Traditional Chinese). The intended use is stated there too: sweep to pick a direction, sign off with the full simulation.
+
+**One button proves the model actually solves, not merely that it parses.**
+A model that parses cleanly can still fail to solve. The health check drives the model through a real reference channel once, and incompatible Tx/Rx pairs are disabled right in the menu; "found out mid-run that the model was broken" is eliminated before you press solve.
+
+The "nobody else ships this" claims on the first two items rest on an August 2026 survey of public product documentation and literature. A survey cannot prove a negative; it proves we looked hard.
+
 ## Features and the experiments that validate them
 
 Every speed-up **changes what is actually being solved**, so each one has to answer the same question first: how far does this land from solving the whole board once?
