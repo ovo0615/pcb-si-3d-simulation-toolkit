@@ -63,6 +63,7 @@ export default function SpisimToolboxPanel() {
   const [comStandard, setComStandard] = useState('')
   const [comJob, setComJob] = useState<ComJobState | null>(null)
   const [comResult, setComResult] = useState('')
+  const [comOvernight, setComOvernight] = useState(false)
 
   // COM 是背景工作（時域計算分鐘級起跳）：跑著就每 5 秒問一次狀態。
   useEffect(() => {
@@ -161,7 +162,8 @@ export default function SpisimToolboxPanel() {
     try {
       const state = await api<ComJobState>('/api/spisim/com/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ touchstone_path: source, standard: comStandard }),
+        body: JSON.stringify({ touchstone_path: source, standard: comStandard,
+          overnight: comOvernight }),
       })
       setComJob(state)
     } catch (reason) {
@@ -282,6 +284,13 @@ export default function SpisimToolboxPanel() {
               <button className="btn" onClick={() => void cancelCom()}>取消</button>
             )}
           </div>
+          <label style={{ display: 'flex', flexDirection: 'row', gap: 6,
+            alignItems: 'center' }}>
+            <input type="checkbox" checked={comOvernight}
+              style={{ width: 'auto' }}
+              onChange={event => setComOvernight(event.target.checked)} />
+            夜間掛機（12 小時上限；報告與曲線落 com_reports，隔天來看即可）
+          </label>
           {comJob?.running && (
             <p className="hint">
               {comJob.standard}　·　已跑 {comJob.elapsed_seconds ?? 0} 秒　·
