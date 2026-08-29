@@ -115,6 +115,9 @@ export default function AmiChannelPanel(
   const [ddrMaskWidth, setDdrMaskWidth] = useState('')
   const [ddrMaskHeight, setDdrMaskHeight] = useState('')
   const [ddrRjSigma, setDdrRjSigma] = useState('1')
+  // 等化掃描（2026-08-29 傍晚）：哪組等化在這條通道上眼最大
+  const [eqSweep, setEqSweep] = useState<any | null>(null)
+  const [eqBusy, setEqBusy] = useState(false)
 
   const amiPackages = useMemo(
     () => packages.filter(item => item.kind === 'ibis_ami'), [packages])
@@ -236,6 +239,40 @@ export default function AmiChannelPanel(
     } catch (exc) {
       setPreviewError(exc instanceof Error ? exc.message : String(exc))
     } finally { setPreviewBusy(false) }
+  }
+
+  /** 等化掃描：逐組 Tx（×Rx）等化選項算統計眼並排名（不開 AEDT）。 */
+  async function runEqSweep() {
+    setEqBusy(true); setPreviewError(''); setEqSweep(null)
+    try {
+      const response = await fetch(
+        `/api/models/${encodeURIComponent(txPackageId)}/ami-eq-sweep`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: txModel || '',
+            rx_package_id: rxPackageId || txPackageId,
+            rx_model: rxModel || '',
+            touchstone_path: touchstone,
+            data_rate_gbps: dataRate,
+            modulation, ports,
+          }),
+        })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data?.detail || '等化掃描失敗')
+      setEqSweep(data)
+    } catch (exc) {
+      setPreviewError(exc instanceof Error ? exc.message : String(exc))
+    } finally { setEqBusy(false) }
+  }
+
+  /** 把掃描選中的那一組寫進進階 AMI 參數（正式分析就會用它）。 */
+  function applyEqRow(row: any) {
+    if (row.tx_param) setTxParams(prev => ({ ...prev, [row.tx_param]: row.tx_value }))
+    if (row.rx_param) setRxParams(prev => ({ ...prev, [row.rx_param]: row.rx_value }))
+    setStarted(`已把 ${row.tx_param ? `${row.tx_param}=${row.tx_value}` : ''}`
+      + `${row.rx_param ? `、${row.rx_param}=${row.rx_value}` : ''}`
+      + ' 填進進階 AMI 參數；下一次正式分析與秒級預覽不受影響'
+      + '（預覽用 .ami 預設）。')
   }
 
   async function runSuggest() {
@@ -459,7 +496,42 @@ export default function AmiChannelPanel(
             onClick={() => void runPreview()}>
             {previewBusy ? '預覽中…' : '秒級預覽（不開 AEDT）'}
           </button>
+          <button className="btn"
+            disabled={!touchstone || !txPackageId || eqBusy}
+            title="逐組掃 Tx（×Rx）等化選項，統計眼排名；約一兩分鐘"
+            onClick={() => void runEqSweep()}>
+            {eqBusy ? '掃描中…' : '等化掃描（找最大的眼）'}
+          </button>
         </div>
+        {eqSweep && (
+          <div>
+            <p className="hint">
+              掃了 {eqSweep.combo_count} 組
+              （{eqSweep.tx_param || '—'}{eqSweep.rx_param ? `×${eqSweep.rx_param}` : ''}）、
+              耗時 {(eqSweep.elapsed_ms / 1000).toFixed(1)} 秒；點一列把該組
+              填進進階 AMI 參數。
+            </p>
+            <table className="model-library__table">
+              <thead><tr>
+                {eqSweep.tx_param && <th>{eqSweep.tx_param}</th>}
+                {eqSweep.rx_param && <th>{eqSweep.rx_param}</th>}
+                <th>眼高（V）</th><th>眼寬（UI）</th><th>套用</th>
+              </tr></thead>
+              <tbody>{eqSweep.rows.slice(0, 10).map((row: any, index: number) => (
+                <tr key={index}
+                  style={index === 0 ? { fontWeight: 700 } : undefined}>
+                  {eqSweep.tx_param && <td>{row.tx_value}</td>}
+                  {eqSweep.rx_param && <td>{row.rx_value}</td>}
+                  <td>{row.why ? `—（${row.why}）`
+                    : row.eye_height_v.toFixed(3)}</td>
+                  <td>{row.why ? '—' : (row.eye_width_ui * 100).toFixed(0) + '%'}</td>
+                  <td><button className="btn" disabled={Boolean(row.why)}
+                    onClick={() => applyEqRow(row)}>套用</button></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
         <details>
           <summary>進階：DDR4 Rx 遮罩統計簽核（BER 1e-16）</summary>
           <p className="hint">遮罩尺寸依速度等級查 JESD79-4（例：0.2 UI／136 mV）。</p>

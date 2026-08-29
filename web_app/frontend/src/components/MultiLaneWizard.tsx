@@ -1690,6 +1690,27 @@ export default function MultiLaneWizard(
           {/* 沒量到時要講清楚是哪一種「沒量到」，三種要做的事完全不同。 */}
           {timingWhy && <p className="hint">{timingWhy}</p>}
 
+          {/* JEDEC slew 極值（乙8 接線）：全週期 DC→AC 段斜率的最小值，
+              derating 查表用的就是它。逐道列最慢的上升與下降。 */}
+          {(() => {
+            const timingLanes = jobResult?.sweep
+              ? (jobResult.runs?.[0]?.result?.timing?.lanes || [])
+              : (jobResult?.timing?.lanes || [])
+            const withSlew = timingLanes.filter(
+              (row: any) => row.slew_rise_min_v_per_ns !== undefined
+                || row.slew_fall_min_v_per_ns !== undefined)
+            if (!withSlew.length) return null
+            return (
+              <p className="hint">
+                Slew 最慢（V/ns）：{withSlew.slice(0, 8).map((row: any) =>
+                  `${row.label} 升 ${row.slew_rise_min_v_per_ns?.toFixed(2) ?? '—'}`
+                  + `／降 ${row.slew_fall_min_v_per_ns?.toFixed(2) ?? '—'}`
+                ).join('；')}
+                {withSlew.length > 8 ? `　…共 ${withSlew.length} 條道` : ''}
+              </p>
+            )
+          })()}
+
           {/* CK／選通品質（乙7）：AC 區間內的邊緣單調性。不單調＝有
               double clocking 風險，而眼圖看不出來（折疊後台階被蓋掉）。 */}
           {(() => {
