@@ -1,0 +1,844 @@
+[
+ {
+  "tag": "A_loss0dB",
+  "loss_db": 0,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.8206085177870994,
+   "eye_width_ui": 0.90625,
+   "is_open": true,
+   "at_ber_width_ui": 0.4560430351807276,
+   "elapsed_ms": 2843
+  },
+  "aedt": {
+   "eye_height": 34.437,
+   "eye_width": 0.5561,
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 93.9
+  }
+ },
+ {
+  "tag": "A_loss5dB",
+  "loss_db": 5,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.6240808855900002,
+   "eye_width_ui": 0.84375,
+   "is_open": true,
+   "at_ber_width_ui": 0.3935430351807276,
+   "elapsed_ms": 3281
+  },
+  "aedt": {
+   "eye_height": 118.9272,
+   "eye_width": 0.5837,
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 106.4
+  }
+ },
+ {
+  "tag": "A_loss10dB",
+  "loss_db": 10,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.4372487972479999,
+   "eye_width_ui": 0.78125,
+   "is_open": true,
+   "at_ber_width_ui": 0.3310430351807276,
+   "elapsed_ms": 3046
+  },
+  "aedt": {
+   "eye_height": "眼圖閉合，無法量測",
+   "eye_width": "眼圖閉合，無法量測",
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 83.1
+  }
+ },
+ {
+  "tag": "A_loss20dB",
+  "loss_db": 20,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.0,
+   "eye_width_ui": 0.0,
+   "is_open": false,
+   "at_ber_width_ui": 0.0,
+   "elapsed_ms": 2453
+  },
+  "aedt": {
+   "eye_height": "眼圖閉合，無法量測",
+   "eye_width": "眼圖閉合，無法量測",
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 91.5
+  }
+ },
+ {
+  "tag": "B_rate8G",
+  "loss_db": 10,
+  "rate": 8.0,
+  "modulation": "NRZ",
+  "preset": "",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.13009741939999986,
+   "eye_width_ui": 0.5,
+   "is_open": true,
+   "at_ber_width_ui": 0.3874482587951819,
+   "elapsed_ms": 2811
+  },
+  "aedt": {
+   "eye_height": 38.1069,
+   "eye_width": 0.0865,
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 93.0
+  }
+ },
+ {
+  "tag": "B_rate16G",
+  "loss_db": 10,
+  "rate": 16.0,
+  "modulation": "NRZ",
+  "preset": "",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.2723152076840001,
+   "eye_width_ui": 0.78125,
+   "is_open": true,
+   "at_ber_width_ui": 0.5561465175903638,
+   "elapsed_ms": 2766
+  },
+  "aedt": {
+   "eye_height": 31.9279,
+   "eye_width": 0.6936,
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 82.0
+  }
+ },
+ {
+  "tag": "C_pam4_loss0dB",
+  "loss_db": 0,
+  "rate": 32.0,
+  "modulation": "PAM4",
+  "preset": "",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.8206085177870994,
+   "eye_width_ui": 0.90625,
+   "is_open": true,
+   "at_ber_width_ui": 0.4560430351807276,
+   "elapsed_ms": 3328,
+   "pam4_inner_eye_v": 0.0
+  },
+  "aedt": {
+   "eye_height": "眼圖閉合，無法量測",
+   "eye_width": "眼圖閉合，無法量測",
+   "metric_keys": [
+    "EyeHeight",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 200.6
+  }
+ },
+ {
+  "tag": "C_pam4_loss10dB",
+  "loss_db": 10,
+  "rate": 32.0,
+  "modulation": "PAM4",
+  "preset": "",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.4372487972479999,
+   "eye_width_ui": 0.78125,
+   "is_open": true,
+   "at_ber_width_ui": 0.3310430351807276,
+   "elapsed_ms": 2985,
+   "pam4_inner_eye_v": 0.0
+  },
+  "aedt": {
+   "eye_height": "眼圖閉合，無法量測",
+   "eye_width": "眼圖閉合，無法量測",
+   "metric_keys": [
+    "EyeHeight",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 212.3
+  }
+ },
+ {
+  "tag": "D_pP0_10dB",
+  "loss_db": 10,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P0",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.7540330275000002,
+   "eye_width_ui": 0.78125,
+   "is_open": true
+  },
+  "aedt": {
+   "eye_height": 131.8028,
+   "eye_width": 0.6547,
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 96.2
+  }
+ },
+ {
+  "tag": "D_pP1_10dB",
+  "loss_db": 10,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P1",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.6336046831054001,
+   "eye_width_ui": 0.8125,
+   "is_open": true
+  },
+  "aedt": {
+   "eye_height": 147.2958,
+   "eye_width": 0.5835,
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 84.1
+  }
+ },
+ {
+  "tag": "D_pP2_10dB",
+  "loss_db": 10,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P2",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.50225309352,
+   "eye_width_ui": 0.78125,
+   "is_open": true
+  },
+  "aedt": {
+   "eye_height": "眼圖閉合，無法量測",
+   "eye_width": "眼圖閉合，無法量測",
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 99.0
+  }
+ },
+ {
+  "tag": "D_pP3_10dB",
+  "loss_db": 10,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P3",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.6253820072759999,
+   "eye_width_ui": 0.8125,
+   "is_open": true
+  },
+  "aedt": {
+   "eye_height": 129.2904,
+   "eye_width": 0.5816,
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 80.2
+  }
+ },
+ {
+  "tag": "D_pP4_10dB",
+  "loss_db": 10,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P4",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.4951691406580001,
+   "eye_width_ui": 0.78125,
+   "is_open": true
+  },
+  "aedt": {
+   "eye_height": 96.691,
+   "eye_width": 0.4237,
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 105.4
+  }
+ },
+ {
+  "tag": "D_pP5_10dB",
+  "loss_db": 10,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P5",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.4372487972479999,
+   "eye_width_ui": 0.78125,
+   "is_open": true
+  },
+  "aedt": {
+   "eye_height": "眼圖閉合，無法量測",
+   "eye_width": "眼圖閉合，無法量測",
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 84.0
+  }
+ },
+ {
+  "tag": "D_pP6_10dB",
+  "loss_db": 10,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P6",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.37001743772508,
+   "eye_width_ui": 0.78125,
+   "is_open": true
+  },
+  "aedt": {
+   "eye_height": 95.6876,
+   "eye_width": 0.468,
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 104.2
+  }
+ },
+ {
+  "tag": "D_pP7_10dB",
+  "loss_db": 10,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P7",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.4372487972479999,
+   "eye_width_ui": 0.78125,
+   "is_open": true
+  },
+  "aedt": {
+   "eye_height": "眼圖閉合，無法量測",
+   "eye_width": "眼圖閉合，無法量測",
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 96.7
+  }
+ },
+ {
+  "tag": "D_pP8_10dB",
+  "loss_db": 10,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P8",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.37126624863,
+   "eye_width_ui": 0.75,
+   "is_open": true
+  },
+  "aedt": {
+   "eye_height": "眼圖閉合，無法量測",
+   "eye_width": "眼圖閉合，無法量測",
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 84.5
+  }
+ },
+ {
+  "tag": "D_pP9_10dB",
+  "loss_db": 10,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P9",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.3052016535640001,
+   "eye_width_ui": 0.78125,
+   "is_open": true
+  },
+  "aedt": {
+   "eye_height": "眼圖閉合，無法量測",
+   "eye_width": "眼圖閉合，無法量測",
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 98.6
+  }
+ },
+ {
+  "tag": "D_pP0_20dB",
+  "loss_db": 20,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P0",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.0,
+   "eye_width_ui": 0.0,
+   "is_open": false
+  },
+  "aedt": {
+   "eye_height": 1.4973,
+   "eye_width": 0.0539,
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 89.0
+  }
+ },
+ {
+  "tag": "D_pP3_20dB",
+  "loss_db": 20,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P3",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.0,
+   "eye_width_ui": 0.0,
+   "is_open": false
+  },
+  "aedt": {
+   "eye_height": 1.2027,
+   "eye_width": 0.0233,
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 67.9
+  }
+ },
+ {
+  "tag": "D_pP5_20dB",
+  "loss_db": 20,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P5",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.0,
+   "eye_width_ui": 0.0,
+   "is_open": false
+  },
+  "aedt": {
+   "eye_height": "眼圖閉合，無法量測",
+   "eye_width": "眼圖閉合，無法量測",
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 75.1
+  }
+ },
+ {
+  "tag": "D_pP7_20dB",
+  "loss_db": 20,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P7",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.0,
+   "eye_width_ui": 0.0,
+   "is_open": false
+  },
+  "aedt": {
+   "eye_height": "眼圖閉合，無法量測",
+   "eye_width": "眼圖閉合，無法量測",
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 73.7
+  }
+ },
+ {
+  "tag": "D_pP9_20dB",
+  "loss_db": 20,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "P9",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.0,
+   "eye_width_ui": 0.0,
+   "is_open": false
+  },
+  "aedt": {
+   "eye_height": 1.3408,
+   "eye_width": 0.0359,
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 75.8
+  }
+ },
+ {
+  "tag": "E_pcieg5_32gt",
+  "loss_db": 10,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.5683471189559997,
+   "eye_width_ui": 0.75,
+   "is_open": true,
+   "at_ber_width_ui": 0.2997930351807276,
+   "elapsed_ms": 2469
+  },
+  "aedt": {
+   "eye_height": 61.9772,
+   "eye_width": 0.737,
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 67.5
+  }
+ },
+ {
+  "tag": "E_usb_default",
+  "loss_db": 10,
+  "rate": 10.0,
+  "modulation": "NRZ",
+  "preset": "",
+  "route": "statistical",
+  "quick": {
+   "eye_height_v": 0.0,
+   "eye_width_ui": 0.0,
+   "is_open": false,
+   "at_ber_width_ui": 0.0,
+   "elapsed_ms": 2125
+  },
+  "aedt": {
+   "eye_height": 30.7871,
+   "eye_width": 0.2355,
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 63.7
+  }
+ },
+ {
+  "tag": "F_getwave_p5",
+  "loss_db": 10,
+  "rate": 32.0,
+  "modulation": "NRZ",
+  "preset": "",
+  "route": "getwave",
+  "quick": {
+   "eye_height_v": 0.4372487972479999,
+   "eye_width_ui": 0.78125,
+   "is_open": true,
+   "at_ber_width_ui": 0.3310430351807276,
+   "elapsed_ms": 2093
+  },
+  "aedt": {
+   "eye_height": "眼圖閉合，無法量測",
+   "eye_width": "眼圖閉合，無法量測",
+   "metric_keys": [
+    "EyeAmplitude",
+    "EyeHeight",
+    "EyeJitterP2P",
+    "EyeJitterRMS",
+    "EyeLevelOne",
+    "EyeLevelZero",
+    "EyeOpeningFactor",
+    "EyeSignalToNoise",
+    "EyeWidth",
+    "MinEyeHeight",
+    "MinEyeWidth"
+   ],
+   "status": "done",
+   "elapsed_s": 48.0
+  }
+ }
+]
