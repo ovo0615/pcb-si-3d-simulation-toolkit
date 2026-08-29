@@ -32,6 +32,12 @@ export interface QuickEyeResult {
   traces: [number, number][][]
   ui_ps: number
   modulation: string
+  at_ber?: {
+    ber: number
+    rj_sigma_ps: number
+    eye_width_ui: number
+    eye_height_v: number
+  }
   ddr4_mask_check?: {
     ber: number
     at_ber: { eye_width_ui: number; eye_height_v: number }
@@ -134,6 +140,13 @@ export function EyeView({ eye }: { eye: QuickEyeResult }) {
           ? `　·　PAM4 內眼 ${m.pam4_inner_eye_v.toFixed(3)} V` : ''}
         　·　UI {eye.ui_ps.toFixed(1)} ps
       </p>
+      {eye.at_ber && m.is_open && (
+        <p className="hint" style={{ marginTop: 0 }}>
+          BER {eye.at_ber.ber} 外插：眼寬 {(eye.at_ber.eye_width_ui * 100).toFixed(0)}% UI、
+          眼高 {eye.at_ber.eye_height_v.toFixed(3)} V
+          （假設 RJ σ={eye.at_ber.rj_sigma_ps} ps，可在 DDR4 遮罩區改）
+        </p>
+      )}
       <svg width={width} height={height} role="img"
         style={{ maxWidth: '100%', background: '#101418', border: '1px solid #2a3138', borderRadius: 4 }}>
         {eye.traces.map((trace, index) => (
