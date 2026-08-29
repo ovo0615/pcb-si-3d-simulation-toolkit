@@ -1,0 +1,210 @@
+{
+ "A_loss0dB": {
+  "EyeHeight_mV": 34.437,
+  "MinEyeHeight_mV": 219.3909,
+  "MinEyeWidth_UI": 0.7126,
+  "EyeAmplitude_mV": 477.6672,
+  "JitterRMS_UI": 0.074,
+  "unavailable": null
+ },
+ "A_loss10dB": {
+  "EyeHeight_mV": null,
+  "MinEyeHeight_mV": null,
+  "MinEyeWidth_UI": null,
+  "EyeAmplitude_mV": null,
+  "JitterRMS_UI": null,
+  "unavailable": null
+ },
+ "A_loss20dB": {
+  "EyeHeight_mV": null,
+  "MinEyeHeight_mV": null,
+  "MinEyeWidth_UI": null,
+  "EyeAmplitude_mV": null,
+  "JitterRMS_UI": null,
+  "unavailable": null
+ },
+ "A_loss5dB": {
+  "EyeHeight_mV": 118.9272,
+  "MinEyeHeight_mV": 171.5917,
+  "MinEyeWidth_UI": 0.6786,
+  "EyeAmplitude_mV": 307.6346,
+  "JitterRMS_UI": 0.0694,
+  "unavailable": null
+ },
+ "B_rate16G": {
+  "EyeHeight_mV": 31.9279,
+  "MinEyeHeight_mV": 79.67,
+  "MinEyeWidth_UI": 0.7385,
+  "EyeAmplitude_mV": 186.8219,
+  "JitterRMS_UI": 0.0511,
+  "unavailable": null
+ },
+ "B_rate8G": {
+  "EyeHeight_mV": 38.1069,
+  "MinEyeHeight_mV": 38.1069,
+  "MinEyeWidth_UI": 0.2455,
+  "EyeAmplitude_mV": 135.3223,
+  "JitterRMS_UI": 0.1522,
+  "unavailable": null
+ },
+ "C_pam4_loss0dB": {
+  "EyeHeight_mV": null,
+  "MinEyeHeight_mV": 13.9964,
+  "MinEyeWidth_UI": 0.2415,
+  "EyeAmplitude_mV": null,
+  "JitterRMS_UI": null,
+  "unavailable": null
+ },
+ "C_pam4_loss10dB": {
+  "EyeHeight_mV": null,
+  "MinEyeHeight_mV": 1.3504,
+  "MinEyeWidth_UI": 0.016,
+  "EyeAmplitude_mV": null,
+  "JitterRMS_UI": null,
+  "unavailable": null
+ },
+ "D_pP0_10dB": {
+  "EyeHeight_mV": 131.8028,
+  "MinEyeHeight_mV": 125.5483,
+  "MinEyeWidth_UI": 0.5489,
+  "EyeAmplitude_mV": 252.9685,
+  "JitterRMS_UI": 0.0576,
+  "unavailable": null
+ },
+ "D_pP0_20dB": {
+  "EyeHeight_mV": 1.4973,
+  "MinEyeHeight_mV": 1.4973,
+  "MinEyeWidth_UI": 0.0539,
+  "EyeAmplitude_mV": 120.9258,
+  "JitterRMS_UI": 0.1969,
+  "unavailable": null
+ },
+ "D_pP1_10dB": {
+  "EyeHeight_mV": 147.2958,
+  "MinEyeHeight_mV": 67.8734,
+  "MinEyeWidth_UI": 0.4611,
+  "EyeAmplitude_mV": 230.7751,
+  "JitterRMS_UI": 0.0694,
+  "unavailable": null
+ },
+ "D_pP2_10dB": {
+  "EyeHeight_mV": null,
+  "MinEyeHeight_mV": null,
+  "MinEyeWidth_UI": null,
+  "EyeAmplitude_mV": null,
+  "JitterRMS_UI": null,
+  "unavailable": null
+ },
+ "D_pP3_10dB": {
+  "EyeHeight_mV": 129.2904,
+  "MinEyeHeight_mV": 142.6033,
+  "MinEyeWidth_UI": 0.5788,
+  "EyeAmplitude_mV": 229.8082,
+  "JitterRMS_UI": 0.0697,
+  "unavailable": null
+ },
+ "D_pP3_20dB": {
+  "EyeHeight_mV": 1.2027,
+  "MinEyeHeight_mV": 1.2027,
+  "MinEyeWidth_UI": 0.024,
+  "EyeAmplitude_mV": 108.8401,
+  "JitterRMS_UI": 0.1628,
+  "unavailable": null
+ },
+ "D_pP4_10dB": {
+  "EyeHeight_mV": 96.691,
+  "MinEyeHeight_mV": 121.9815,
+  "MinEyeWidth_UI": 0.521,
+  "EyeAmplitude_mV": 205.6484,
+  "JitterRMS_UI": 0.0961,
+  "unavailable": null
+ },
+ "D_pP5_10dB": {
+  "EyeHeight_mV": null,
+  "MinEyeHeight_mV": null,
+  "MinEyeWidth_UI": null,
+  "EyeAmplitude_mV": null,
+  "JitterRMS_UI": null,
+  "unavailable": null
+ },
+ "D_pP5_20dB": {
+  "EyeHeight_mV": null,
+  "MinEyeHeight_mV": null,
+  "MinEyeWidth_UI": null,
+  "EyeAmplitude_mV": null,
+  "JitterRMS_UI": null,
+  "unavailable": null
+ },
+ "D_pP6_10dB": {
+  "EyeHeight_mV": 95.6876,
+  "MinEyeHeight_mV": 71.9064,
+  "MinEyeWidth_UI": 0.3952,
+  "EyeAmplitude_mV": 185.0299,
+  "JitterRMS_UI": 0.0887,
+  "unavailable": null
+ },
+ "D_pP7_10dB": {
+  "EyeHeight_mV": null,
+  "MinEyeHeight_mV": null,
+  "MinEyeWidth_UI": null,
+  "EyeAmplitude_mV": null,
+  "JitterRMS_UI": null,
+  "unavailable": null
+ },
+ "D_pP7_20dB": {
+  "EyeHeight_mV": null,
+  "MinEyeHeight_mV": null,
+  "MinEyeWidth_UI": null,
+  "EyeAmplitude_mV": null,
+  "JitterRMS_UI": null,
+  "unavailable": null
+ },
+ "D_pP8_10dB": {
+  "EyeHeight_mV": null,
+  "MinEyeHeight_mV": null,
+  "MinEyeWidth_UI": null,
+  "EyeAmplitude_mV": null,
+  "JitterRMS_UI": null,
+  "unavailable": null
+ },
+ "D_pP9_10dB": {
+  "EyeHeight_mV": null,
+  "MinEyeHeight_mV": null,
+  "MinEyeWidth_UI": null,
+  "EyeAmplitude_mV": null,
+  "JitterRMS_UI": null,
+  "unavailable": null
+ },
+ "D_pP9_20dB": {
+  "EyeHeight_mV": 1.3408,
+  "MinEyeHeight_mV": 1.3408,
+  "MinEyeWidth_UI": 0.0359,
+  "EyeAmplitude_mV": 74.3361,
+  "JitterRMS_UI": 0.1735,
+  "unavailable": null
+ },
+ "E_pcieg5_32gt": {
+  "EyeHeight_mV": 61.9772,
+  "MinEyeHeight_mV": 117.3711,
+  "MinEyeWidth_UI": 0.7864,
+  "EyeAmplitude_mV": 204.7837,
+  "JitterRMS_UI": 0.0438,
+  "unavailable": null
+ },
+ "E_usb_default": {
+  "EyeHeight_mV": 30.7871,
+  "MinEyeHeight_mV": 30.7871,
+  "MinEyeWidth_UI": 0.2834,
+  "EyeAmplitude_mV": 305.1759,
+  "JitterRMS_UI": 0.1274,
+  "unavailable": null
+ },
+ "F_getwave_p5": {
+  "EyeHeight_mV": null,
+  "MinEyeHeight_mV": null,
+  "MinEyeWidth_UI": null,
+  "EyeAmplitude_mV": null,
+  "JitterRMS_UI": null,
+  "unavailable": null
+ }
+}
