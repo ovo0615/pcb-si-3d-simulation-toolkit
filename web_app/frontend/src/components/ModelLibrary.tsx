@@ -4,6 +4,7 @@ import AmiChannelPanel from './AmiChannelPanel'
 import MultiLaneWizard from './MultiLaneWizard'
 import SpisimToolboxPanel from './SpisimToolboxPanel'
 import { QuickProbeResult, QuickProbeView } from './AmiQuickProbe'
+import { setModelsReportMetadata } from './reportMetadataStore'
 
 type CompatibilityState = 'ready' | 'warning' | 'block'
 
@@ -250,6 +251,14 @@ export default function ModelLibrary() {
           body: JSON.stringify({}),
         })
       setProbeResult(data)
+      const swing = data.waveforms[0]?.series
+        .find(item => item.name === 'Output_AMI_GetWave')?.swing
+      setModelsReportMetadata({
+        '秒測_模型': `${data.model}（${data.ami_file}）`,
+        '秒測_耗時(ms)': data.elapsed_ms,
+        ...(swing !== undefined
+          ? { '秒測_等化後擺幅(V)': swing.toFixed(3) } : {}),
+      })
     } catch (reason) {
       setProbeError(apiErrorText(reason))
     } finally { setProbeBusy(false) }
