@@ -250,7 +250,8 @@ export default function SpisimToolboxPanel() {
           <h3>IEEE COM 簽核（SPISim 批次引擎）</h3>
           <p className="hint">對串接後的通道算 COM，直接對 IEEE 802.3／OIF 條文。</p>
           <p className="hint">內建 {comStandards.length} 份標準參數組態，不必自己填門檻。</p>
-          <p className="hint">計算是分鐘級起跳（頻點多會到數十分鐘），先泡杯茶。</p>
+          <p className="hint">通道要 4 埠差分（埠序 [1 3 2 4]）；2 埠只會出頻域曲線。</p>
+          <p className="hint">時域外插以小時計（實測），計算走背景、可隨時取消。</p>
           {batchStatus && !batchStatus.available && (
             <div className="model-library__notice model-library__notice--error">
               引擎探測未通過：{batchStatus.detail}
