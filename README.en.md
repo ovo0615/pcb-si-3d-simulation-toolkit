@@ -92,7 +92,8 @@ Whether the lateral extent is wide enough is one click away: the same cut is sol
 
 The segmentation view overlays the safety judgement directly on the layout: orange marks risky traces, red marks hard no-cut obstacles, cyan is the adopted cut, and green and purple are SIwave and HFSS segments.
 
-Step-by-step instructions are in the [user manual](./操作說明.md) (eleven chapters, in Traditional Chinese, covering cutout, ports, segmentation, scheduling, IBIS eye analysis, TDR, cross-section impedance and troubleshooting).
+First time? Start with [First run: from download to your first eye diagram](./docs/manual/00-第一次跑.md) (Traditional Chinese) — one path, 30 minutes.
+The full reference is the [user manual](./操作說明.md) (eleven chapters, in Traditional Chinese, covering cutout, ports, segmentation, scheduling, IBIS eye analysis, TDR, cross-section impedance and troubleshooting).
 
 ## Technical stack
 
