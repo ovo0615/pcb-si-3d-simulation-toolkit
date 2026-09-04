@@ -2,10 +2,10 @@
 
 [English](README.en.md) ｜ 繁體中文
 
-> 商用授權與技術支援由虎門科技（TADC）提供。本工具與 Ansys, Inc. 無隸屬、無背書關係；
+> 商用授權與技術支援由虎門科技股份有限公司（TADC）提供。本工具與 Ansys, Inc. 無隸屬、無背書關係；
 > Ansys 為 Ansys, Inc. 之商標。使用本工具需自備有效的 Ansys AEDT 授權。
 
-**Jeff Hong 洪敬傑**｜CAE 技術部資深技術工程師｜Taiwan Auto-Design Co. (TADC)
+**Jeff Hong 洪敬傑**｜CAE 技術部資深技術工程師｜虎門科技股份有限公司（Taiwan Auto-Design Co., Ltd.）
 [jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com)　[cadmen.com](https://www.cadmen.com/)
 
 把一片 PCB 上的一條訊號路徑，從板子檔案一路算到眼圖。求解環境為 Ansys HFSS 3D Layout
@@ -102,7 +102,7 @@ Top-3 排名與完整模擬完全一致（抖動輕的組合 Spearman ρ＝0.86�
 
 ## 商用授權與聲明
 
-**商用授權、報價與技術支援由虎門科技（Taiwan Auto-Design Co., TADC）提供：**
+**商用授權、報價與技術支援由虎門科技股份有限公司（Taiwan Auto-Design Co., Ltd.，以下稱 TADC）提供：**
 [jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com)｜[cadmen.com](https://www.cadmen.com/)
 
 本 Repository 為公開展示版本，由作者維護，非 Ansys, Inc. 官方帳號，亦非其官方合作展示。
