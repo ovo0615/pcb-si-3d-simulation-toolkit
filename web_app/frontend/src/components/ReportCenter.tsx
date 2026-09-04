@@ -31,6 +31,9 @@ interface Props {
   basePath: string
   projectName: string
   onWorkspaceChange?: (workspace: string) => void
+  /** 這份報告所依據的通道 Touchstone。給了報告才會有「模型品質與判定依據」
+   *  一節；沒有串接結果時是空字串，那一節就不會出現。 */
+  channelTouchstone?: string
 }
 
 type ReportTab = 'snapshots' | 'brand' | 'content' | 'watermark' | 'export'
@@ -65,7 +68,7 @@ function normalizedSettings(value: Partial<ReportSettings> | undefined): ReportS
   }
 }
 
-export default function ReportCenter({ basePath, projectName, onWorkspaceChange }: Props) {
+export default function ReportCenter({ basePath, projectName, onWorkspaceChange, channelTouchstone }: Props) {
   const [tab, setTab] = useState<ReportTab>('snapshots')
   const [workspaceInput, setWorkspaceInput] = useState(basePath)
   const [workspace, setWorkspace] = useState('')
@@ -231,7 +234,8 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange 
     try {
       await saveReportBrand(workspace, brand, logoDataUrl, false)
       const savedSettings = await saveAllSettings()
-      const result = await generateHtmlReport(workspace, savedSettings, outputPath, overwriteConfirmed)
+      const result = await generateHtmlReport(
+        workspace, savedSettings, outputPath, overwriteConfirmed, channelTouchstone || '')
       setLastOutput(result.output_path)
       setMessage(`報告完成：${result.output_path}（${result.snapshot_count} 張快照）`)
       await refresh()

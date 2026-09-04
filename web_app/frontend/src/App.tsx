@@ -7,6 +7,8 @@ import {
   loadReportWorkspace, saveReportWorkspace,
 } from './splitLayout'
 import { logColor } from './logLevel'
+import { revealPath } from './revealPath'
+import RunHistory from './components/RunHistory'
 import 'allotment/dist/style.css'
 import Preview2D, {
   CleanupOverlay,
@@ -26,6 +28,7 @@ import CrossSectionComparison, {
   ComparisonResult,
 } from './components/CrossSectionComparison'
 import SParamChart, { SParamSeries } from './components/SParamChart'
+import EvidenceBadges from './components/EvidenceBadges'
 import TdrChart from './components/TdrChart'
 import TaskPicker from './components/TaskPicker'
 import {
@@ -330,7 +333,7 @@ function useMeasuredHeight<T extends HTMLElement>() {
  *  2026-08-19 實測兩種都發生了。
  *
  *  加端點或改送出欄位時兩邊一起 +1；`test_api_contract_version.py` 會擋住只改一邊。 */
-const API_CONTRACT_VERSION = 3
+const API_CONTRACT_VERSION = 6
 
 /** 結果物件換版後，將同類報告快照標記為可能過期；第一次載入不誤報。 */
 function useReportStaleRevision(
@@ -480,10 +483,19 @@ const jobElapsedSec = (job: any, tick: number): number | null => {
   return end - job.started_at
 }
 
+type StorageInfo = {
+  locations: { label: string; path: string; exists: boolean; note: string }[]
+  board_outputs: string
+  network: string
+}
+
 export default function App() {
   // ── 檔案與載入狀態 ──
   const [inputPath, setInputPath] = useState('')
   const [outputPath, setOutputPath] = useState('')
+  // 資料放在哪裡：由後端回報實際路徑，前端不寫死。
+  // 環境變數改得動模型庫與設定檔的位置，寫死的字串會安靜地說謊。
+  const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null)
   // S 參數分頁：自動曲線（單端／差動、IL／RL／NEXT／FEXT）
   const [spMode, setSpMode] = useState<'single' | 'diff'>('diff')
   const [spKinds, setSpKinds] = useState<Record<string, boolean>>(
@@ -674,6 +686,14 @@ export default function App() {
   const [tdrAnalysisIdx, setTdrAnalysisIdx] = useState(0)  // A 法／B 法切換
   const [tdrMarkers, setTdrMarkers] = useState<TdrMarkerSpan[] | null>(null)
   const [tdrMapError, setTdrMapError] = useState('')
+  // 量測波形匯入（乙路）：示波器 CSV → 錨點指認 → 同一套劇變定位
+  const [tmCsvPath, setTmCsvPath] = useState('')
+  const [tmPreview, setTmPreview] = useState<any | null>(null)
+  const [tmT0, setTmT0] = useState('')       // 板端入口（ns）
+  const [tmTEnd, setTmTEnd] = useState('')   // 線尾反射（ns）
+  const [tmRise, setTmRise] = useState('')   // 歐姆／rho 波形的儀器上升時間（ps）
+  const [tmBusy, setTmBusy] = useState(false)
+  const [tmError, setTmError] = useState('')
 
   // 截面阻抗（Q2D）：在 Layout 上框工作範圍、拉一條切線，從 EDB 還原截面。
   // 工作範圍同時是二維模型的側向截斷邊界，不只是畫面上的框（ADR-0051）。
@@ -954,6 +974,20 @@ export default function App() {
         setOutputPath(stripExtension(data.path) + '_Cutout.aedb')
       }
     } catch (e) { console.error(e) }
+  }
+
+  /** 挑一個 CSV 填進指定欄位。示波器匯出的檔名又長又帶時間戳，
+   *  手打路徑打錯一個字元得到的是「找不到檔案」，看不出是路徑的問題。 */
+  const browseCsvInto = async (setter: (path: string) => void, title: string) => {
+    try {
+      const data = await api(`/api/browse_csv?title=${encodeURIComponent(title)}`)
+      if (data.path) setter(data.path)
+    } catch (e) { console.error(e) }
+  }
+
+  const revealInExplorer = async (path: string) => {
+    const failure = await revealPath(path)
+    if (failure) setLogs(prev => [...prev, failure])
   }
 
   const handleBrowseOutput = async () => {
@@ -2295,6 +2329,12 @@ ${data.output_path}`)
     return result
   }
   const tdrScene = cutScene || fullScene
+  /** 「只顯示選取網路」的開關提到這一層共用。
+   *
+   *  每個 Preview2D 各有一份 `visibleNets`，所以在完整 Layout 篩到只剩要看的
+   *  那條之後，切到 TDR 分頁仍然是整片板子——阻抗標記被其他銅箔蓋住，
+   *  而使用者以為自己已經篩過了。共用一個開關，兩邊就會一起變。 */
+  const [layoutOnlySelectedNets, setLayoutOnlySelectedNets] = useState(false)
   // 分段切面位置 → 排除區輸入（axis 0 = X 座標上的縱切）
   const tdrCuts = complexityAnalysis
     ? complexityAnalysis.cuts.map(c => ({
@@ -2428,7 +2468,8 @@ ${data.output_path}`)
     })
       .then(result => {
         if (cancelled) return
-        const methodTag = analysis.method === 'group_delay' ? 'A' : 'B'
+        const methodTag = analysis.method === 'group_delay' ? 'A'
+          : analysis.method === 'end_anchor' ? '錨' : 'B'
         setTdrMarkers(result.markers.map((m: any, i: number): TdrMarkerSpan => ({
           points: m.points,
           distance_mm: m.distance_mm,
@@ -2439,8 +2480,11 @@ ${data.output_path}`)
       })
       .catch(e => { if (!cancelled) setTdrMapError(String(e)) })
     return () => { cancelled = true }
+    // 相依含 result 本體：量測波形匯入直接塞一個 status 已是 done 的
+    // 結果進來，只看 status 的話標記不會重算。輪詢端在內容相同時沿用
+    // 舊物件，所以不會因此白跑。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tdrJob?.status, tdrAnalysisIdx, tdrPath, tdrScene, tdrNet])
+  }, [tdrJob?.status, tdrJob?.result, tdrAnalysisIdx, tdrPath, tdrScene, tdrNet])
 
   const handleTdrRun = async () => {
     if (!cascadeResult?.output_path || !tdrSuggestion?.supported) {
@@ -2494,6 +2538,57 @@ ${data.output_path}`)
       setActiveView('tdr')
     } catch (e) {
       alert('TDR 啟動失敗：' + String(e))
+    }
+  }
+
+  // ── 量測波形匯入（乙路）─────────────────────────────────
+  const handleTmLoad = async () => {
+    setTmError('')
+    setTmPreview(null)
+    setTmBusy(true)
+    try {
+      const preview = await api('/api/tdr/measured/load',
+        { csv_path: tmCsvPath.trim() })
+      setTmPreview(preview)
+    } catch (e) {
+      setTmError(String(e))
+    } finally {
+      setTmBusy(false)
+    }
+  }
+
+  const handleTmAnalyze = async () => {
+    const t0 = Number(tmT0)
+    if (!Number.isFinite(t0)) { setTmError('t0 必須是數字（ns）。'); return }
+    const tEnd = tmTEnd.trim() ? Number(tmTEnd) : null
+    if (tEnd !== null && (!Number.isFinite(tEnd) || tEnd <= t0)) {
+      setTmError('線尾反射時刻必須晚於 t0。'); return
+    }
+    setTmError('')
+    setTmBusy(true)
+    try {
+      const result = await api('/api/tdr/measured/analyze', {
+        csv_path: tmCsvPath.trim(),
+        t0_ns: t0,
+        t_end_ns: tEnd,
+        path_length_mm: tdrPath?.length_mm || null,
+        dk_hint: tdrDkHint.trim() ? Number(tdrDkHint) : null,
+        rise_time_ps: tmRise.trim() ? Number(tmRise) : null,
+      })
+      // 塞進與模擬路同一個結果槽：曲線、劇變表、Layout 標記與
+      // 「取此處截面」全部重用。輪詢只在 running 時覆寫，不會蓋掉它。
+      setTdrAnalysisIdx(0)
+      setTdrMarkers(null)
+      setTdrMapError('')
+      setTdrJob({
+        running: false, status: 'done', phase: '量測波形',
+        message: '量測波形分析完成。', result,
+      })
+      setActiveView('tdr')
+    } catch (e) {
+      setTmError(String(e))
+    } finally {
+      setTmBusy(false)
     }
   }
 
@@ -3464,7 +3559,7 @@ ${data.output_path}`)
     || cascadeResult?.output_path || inputPath
   const reportBasePath = reportWorkspace || reportDefaultBasePath
   const reportProjectName = (
-    (inputPath || cascadeResult?.output_path || '').split(/[\/]/).pop()
+    (inputPath || cascadeResult?.output_path || '').split(/[\\/]/).pop()
     || 'PCB SI 分析專案'
   ).replace(/\.(aedb|brd|tgz|s\d+p)$/i, '')
   const reportSectionByView: Record<ViewMode, string> = {
@@ -3745,6 +3840,53 @@ ${data.output_path}`)
                   <button className="btn--primary" onClick={handleLoadFile} style={{ marginTop: 6 }}>
                     {directSegmentMode ? '載入檔案（不裁切）' : '載入電路板'}
                   </button>
+                  {/* 拿去給客戶用的時候，第一個被問的就是「我的板子檔會不會被傳走」。
+                      這一段回答它，而且路徑是跟後端要的實際值，不是寫死的字串——
+                      模型庫與設定檔的位置可由環境變數覆寫，寫死就會開始說謊。
+                      收在 <details> 裡：這是要用的時候找得到，不是每次都要讀的東西。 */}
+                  <details style={{ marginTop: 8 }}
+                    onToggle={event => {
+                      if (!(event.currentTarget as HTMLDetailsElement).open || storageInfo) return
+                      void fetch('/api/storage/locations')
+                        .then(res => (res.ok ? res.json() : null))
+                        .then(data => { if (data) setStorageInfo(data) })
+                        .catch(() => { /* 顯示不出來就算了，不要為了一段說明跳錯誤 */ })
+                    }}>
+                    <summary className="panel-hint" style={{ cursor: 'pointer' }}>
+                      我的板子檔會去哪裡？
+                    </summary>
+                    <div className="panel-caveat" style={{ marginTop: 6 }}
+                      title="後端沒有 requests／httpx／urllib 之類的對外連線函式庫，前端也沒有絕對網址的請求。">
+                      <b>電路板檔案不會離開這台機器。</b>解析與求解都在本機，
+                      後端只監聽 127.0.0.1。
+                      {storageInfo ? (
+                        <>
+                          <div style={{ marginTop: 6 }}>{storageInfo.board_outputs}</div>
+                          <div style={{ marginTop: 6 }}>工具本身會寫入的位置：</div>
+                          {storageInfo.locations.map(loc => (
+                            <div key={loc.path} style={{ marginTop: 5 }}>
+                              <div>
+                                {loc.label}
+                                {!loc.exists && <span>（尚未建立）</span>}
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <code style={{ flex: 1, wordBreak: 'break-all', fontSize: 10 }}>
+                                  {loc.path}
+                                </code>
+                                {loc.exists && (
+                                  <button className="btn" style={{ fontSize: 10, padding: '0 6px' }}
+                                    onClick={() => void revealInExplorer(loc.path)}>開啟</button>
+                                )}
+                              </div>
+                              <div style={{ opacity: 0.85 }}>{loc.note}</div>
+                            </div>
+                          ))}
+                        </>
+                      ) : (
+                        <div style={{ marginTop: 6 }}>讀取實際路徑中…</div>
+                      )}
+                    </div>
+                  </details>
                 </div>
 
                 {/* 「選擇網路」：網路選擇 */}
@@ -4971,6 +5113,10 @@ ${data.output_path}`)
                       對應表 segments.json 已輸出。
                     </div>
                   )}
+                  <p className="panel-caveat">
+                    <b>切面附近的場由 Gap Port 近似。</b>判斷整段的趨勢可靠，緊貼切面的
+                    單點數值不可靠——要讀那裡的值就把切面移開。
+                  </p>
                 </div>
 
                 {/* 「排程求解」：排程求解 */}
@@ -5201,6 +5347,10 @@ ${data.output_path}`)
                       })}
                     </div>
                   )}
+                  <p className="panel-caveat">
+                    <b>SIwave 是準靜態近似</b>，篩選夠用；要簽核的那幾條建議改用 HFSS
+                    全波重跑一次再比對。
+                  </p>
                 </div>
 
                 {/* 「電路串接」：電路串接 */}
@@ -5395,6 +5545,10 @@ ${data.output_path}`)
                           </div>
                         )}
                       </div>
+                      {/* 證據徽章：這份 S 參數是誰、用什麼設定解出來的。
+                          後端的判定早就有了，這是它第一個對使用者的出口。 */}
+                      <EvidenceBadges path={cascadeResult.output_path}
+                        expectedPorts={cascadeResult.n_ports} />
                       {cascadeMode === 'tool' && (
                         <button className="btn" onClick={handleCascadeExportAs}
                           disabled={cascadeBusy}
@@ -5535,13 +5689,28 @@ ${data.output_path}`)
                           </div>
                         )}
                       </div>
-                      <div hidden={!show.tdr} style={{
+                      {/* 面板內原有的 S(A,B) 手動加曲線區塊已移除——「S 參數」
+                          分頁的自動曲線（IL/RL/NEXT/FEXT、單端／差動切換）
+                          已完整取代它。 */}
+                    </>
+                  )}
+                  <p className="panel-caveat">
+                    <b>串接假設段與段之間沒有電磁耦合。</b>段界靠得太近，或切面兩側共用
+                    同一處參考層破口時，這個假設不成立。
+                  </p>
+                  <RunHistory kind="cascade" title="串接執行歷史" />
+                  {/* TDR 面板刻意放在 cascadeResult 條件之外：量測波形匯入
+                      只需要板子與示波器 CSV——客戶拿量測檔來的時候，常常
+                      根本還沒跑過串接。模擬路的區塊自己再看 tdrSuggestion。 */}
+                  <div hidden={!show.tdr} style={{
                         marginTop: 8, padding: 8, border: '1px solid var(--border)',
                         borderRadius: 7, background: 'rgba(110, 40, 70, 0.08)',
                       }}>
                         <div style={{ fontWeight: 700, fontSize: 12 }}>TDR 阻抗定位</div>
                         <div className="panel-hint" style={{ marginTop: 3 }}>
-                          用串接結果求解 TDR，換算成 Layout 位置。
+                          {cascadeResult
+                            ? '用串接結果求解 TDR，換算成 Layout 位置。'
+                            : '尚未串接。可先用下方「量測波形匯入」定位量測到的劇變。'}
                         </div>
                         {tdrSuggestion && (
                           <>
@@ -5655,12 +5824,154 @@ ${data.output_path}`)
                             上次 TDR 執行失敗：{tdrJob.error}
                           </div>
                         )}
-                      </div>
-                      {/* 面板內原有的 S(A,B) 手動加曲線區塊已移除——「S 參數」
-                          分頁的自動曲線（IL/RL/NEXT/FEXT、單端／差動切換）
-                          已完整取代它。 */}
-                    </>
-                  )}
+                        {/* 量測波形匯入（乙路）：不依賴串接結果——客戶拿
+                            示波器檔來的時候，常常手上只有板子與波形。 */}
+                        <details style={{ marginTop: 8 }}>
+                          <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                            量測波形匯入（示波器 TDR）
+                          </summary>
+                          <div className="panel-hint" style={{ marginTop: 4 }}>
+                            兩欄 CSV（時間、電壓或阻抗）→ 指認 t0 與線尾 → 劇變標回 Layout。
+                          </div>
+                          <div className="panel-hint" style={{ marginTop: 2 }}>
+                            t0 是板端 launch 反射的時刻，得由你指認——程式只給候選，不代答。
+                          </div>
+                          <div className="panel-hint" style={{ marginTop: 2 }}>
+                            分析完成後，結果會出現在上方的「TDR」分頁——
+                            <strong>在那之前它是暗的，這是正常的</strong>，不是壞掉。
+                          </div>
+                          <div className="field-row" style={{ marginTop: 5 }}>
+                            <div style={{ flex: 2 }}>
+                              <div className="field-label">波形 CSV 路徑</div>
+                              <input aria-label="波形 CSV 路徑" className="input" value={tmCsvPath}
+                                onChange={event => setTmCsvPath(event.target.value)}
+                                placeholder="示波器匯出的 .csv" />
+                            </div>
+                            <button className="btn" style={{ marginTop: 14, whiteSpace: 'nowrap' }}
+                              onClick={() => void browseCsvInto(setTmCsvPath, '選擇示波器 TDR 波形 CSV')}>
+                              瀏覽…
+                            </button>
+                            <button className="btn" style={{ marginTop: 14, whiteSpace: 'nowrap' }}
+                              disabled={tmBusy || !tmCsvPath.trim()} onClick={handleTmLoad}>
+                              {tmBusy && !tmPreview ? '載入中…' : '載入'}
+                            </button>
+                            {tmCsvPath.trim() && (
+                              <button className="btn" style={{ marginTop: 14, whiteSpace: 'nowrap' }}
+                                title="在檔案總管開啟這個波形檔所在的資料夾"
+                                onClick={() => void revealInExplorer(tmCsvPath)}>
+                                開啟資料夾
+                              </button>
+                            )}
+                          </div>
+                          {tmPreview && (
+                            <>
+                              <div className="panel-hint" style={{ marginTop: 4 }}>
+                                {tmPreview.point_count} 點｜單位 {tmPreview.time_unit}（自動判定）｜
+                                {tmPreview.value_kind === 'volts' ? '電壓'
+                                  : tmPreview.value_kind === 'ohms' ? '阻抗' : '反射係數'}
+                                {tmPreview.edge_time_ns != null
+                                  && `｜入射步階 ${Number(tmPreview.edge_time_ns).toFixed(3)} ns`}
+                                {tmPreview.rise_time_ps != null
+                                  && `｜實測上升 ${Number(tmPreview.rise_time_ps).toFixed(1)} ps`}
+                              </div>
+                              {(tmPreview.candidates_ns || []).length > 0 && (
+                                <div style={{ marginTop: 5 }}>
+                                  <div className="field-label">
+                                    反射候選（t0＝板端 launch；線尾＝開路／端接反射）
+                                  </div>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                    {tmPreview.candidates_ns.map((candidate: number) => (
+                                      <div key={candidate} style={{
+                                        display: 'flex', border: '1px solid #303a48',
+                                        borderRadius: 6, overflow: 'hidden', fontSize: 10.5,
+                                      }}>
+                                        <span style={{
+                                          padding: '2px 6px', background: '#131820',
+                                          color: '#d8e1ec',
+                                        }}>
+                                          {candidate.toFixed(3)} ns
+                                        </span>
+                                        <button className="btn" style={{ padding: '2px 7px' }}
+                                          onClick={() => setTmT0(candidate.toFixed(4))}>設 t0</button>
+                                        <button className="btn" style={{ padding: '2px 7px' }}
+                                          onClick={() => setTmTEnd(candidate.toFixed(4))}>設線尾</button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              <div className="field-row" style={{ marginTop: 5 }}>
+                                <div style={{ flex: 1 }}>
+                                  <div className="field-label">t0：板端入口（ns）</div>
+                                  <input aria-label="t0：板端入口（ns）" className="input" value={tmT0}
+                                    onChange={event => setTmT0(event.target.value)} />
+                                </div>
+                                <div style={{ flex: 1 }}
+                                  title="線尾反射的時刻。配上走線實體長度就是雙錨點法：兩端依定義精確，Dk 公差的累積誤差被歸零。留空則只用疊構 Dk 法。">
+                                  <div className="field-label">線尾反射（ns，可留空）</div>
+                                  <input aria-label="線尾反射（ns，可留空）" className="input" value={tmTEnd}
+                                    onChange={event => setTmTEnd(event.target.value)} />
+                                </div>
+                                {tmPreview.value_kind !== 'volts' && (
+                                  <div style={{ flex: 1 }}
+                                    title="阻抗／反射係數波形量不到入射邊緣，上升時間要填儀器的系統規格值（常見 20～50 ps）。">
+                                    <div className="field-label">上升時間（ps）</div>
+                                    <input aria-label="上升時間（ps）" className="input" value={tmRise}
+                                      onChange={event => setTmRise(event.target.value)} />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="panel-hint" style={{ marginTop: 3 }}>
+                                速度來源：
+                                {tdrPath?.length_mm
+                                  ? `雙錨點（走線 ${Number(tdrPath.length_mm).toFixed(1)} mm，需指定線尾）`
+                                  : '無走線長度（先載入電路板才能用雙錨點法）'}
+                                {tdrDkHint ? `｜疊構 Dk ${Number(tdrDkHint).toFixed(2)}` : ''}
+                              </div>
+                              {!tdrSuggestion && signalNets.length > 0 && (
+                                <div className="field-row" style={{ marginTop: 5 }}>
+                                  <div style={{ flex: 2 }}>
+                                    <div className="field-label">被探測的訊號網路（Layout 標記）</div>
+                                    <select aria-label="被探測的訊號網路（Layout 標記）" className="input"
+                                      value={tdrNet}
+                                      onChange={event => setTdrNet(event.target.value)}>
+                                      {signalNets.map(net =>
+                                        <option key={net} value={net}>{net}</option>)}
+                                    </select>
+                                  </div>
+                                  <label style={{
+                                    flex: 1, display: 'flex', alignItems: 'center', gap: 4,
+                                    fontSize: 11, cursor: 'pointer', marginTop: 14,
+                                  }}
+                                    title="TDR 距離從探棒端起算。標記像從另一端量的就勾這裡。">
+                                    <input type="checkbox" checked={tdrFlipStart}
+                                      onChange={event => setTdrFlipStart(event.target.checked)} />
+                                    起點在另一端
+                                  </label>
+                                </div>
+                              )}
+                              <button className="btn btn--primary" style={{ width: '100%', marginTop: 6 }}
+                                disabled={tmBusy || !tmT0.trim()}
+                                onClick={handleTmAnalyze}>
+                                {tmBusy && tmPreview ? '分析中…' : '分析量測波形'}
+                              </button>
+                            </>
+                          )}
+                          {tmError && (
+                            <div className="status status--warn"
+                              style={{ marginTop: 6, fontSize: 11, wordBreak: 'break-all' }}>
+                              {tmError}
+                            </div>
+                          )}
+                        </details>
+                        <p className="panel-caveat">
+                          <b>阻抗值來自求解結果，距離是用推估的等效 Dk 換算的。</b>阻抗可信，
+                          位置有誤差；Layout 上的標記是定位參考，不是量測座標。
+                        </p>
+                        {/* TDR 的執行歷史。求解與量測兩條路都寫紀錄，
+                            列在同一份清單裡——它們是同一種分析的兩種來源。 */}
+                        <RunHistory kind="tdr" title="TDR 執行歷史" />
+                  </div>
                 </div>
 
                 {/* 「截面阻抗（Q2D）」：從 EDB 還原二維截面，求該處的阻抗 */}
@@ -5797,6 +6108,10 @@ ${data.output_path}`)
                       )}
                     </div>
                   )}
+                  <p className="panel-caveat">
+                    <b>二維解假設截面沿走線方向不變。</b>過孔、轉角與參考層破口都不在這個
+                    模型裡——要看那些結構得用 3D。
+                  </p>
                 </div>
 
               </div>
@@ -5857,18 +6172,28 @@ ${data.output_path}`)
                   className={'viewtab' + (activeView === 'models' ? ' viewtab--active' : '')}
                   onClick={() => setActiveView('models')}
                 >IBIS 模型與眼圖分析</button>
-                <button
-                  hidden={!(show.tdr)}
-                  className={'viewtab' + (activeView === 'tdr' ? ' viewtab--active' : '')}
-                  onClick={() => setActiveView('tdr')}
-                  disabled={!tdrJob || tdrJob.status === 'idle'}
-                >TDR</button>
-                <button
-                  hidden={!(show.crosssection)}
-                  className={'viewtab' + (activeView === 'crosssection' ? ' viewtab--active' : '')}
-                  onClick={() => setActiveView('crosssection')}
-                  disabled={!fullScene}
-                >截面阻抗</button>
+                {/* 分頁在條件未滿足時是暗的。**一定要說明為什麼**——使用者
+                    回報「操作量測波形匯入時 TDR 分頁是暗的，容易使人誤會」，
+                    以為功能壞了。`title` 掛在外層 span 而不是按鈕上：停用的
+                    表單控制項不接收滑鼠事件，tooltip 不會出現。 */}
+                <span hidden={!(show.tdr)}
+                  title={!tdrJob || tdrJob.status === 'idle'
+                    ? '還沒有 TDR 結果。在左側面板執行 TDR 阻抗定位，或用「量測波形匯入」載入示波器波形並分析，完成後這個分頁就會亮起來。'
+                    : ''}>
+                  <button
+                    className={'viewtab' + (activeView === 'tdr' ? ' viewtab--active' : '')}
+                    onClick={() => setActiveView('tdr')}
+                    disabled={!tdrJob || tdrJob.status === 'idle'}
+                  >TDR</button>
+                </span>
+                <span hidden={!(show.crosssection)}
+                  title={!fullScene ? '還沒載入電路板。載入之後才能框選截面範圍。' : ''}>
+                  <button
+                    className={'viewtab' + (activeView === 'crosssection' ? ' viewtab--active' : '')}
+                    onClick={() => setActiveView('crosssection')}
+                    disabled={!fullScene}
+                  >截面阻抗</button>
+                </span>
                 <button
                   hidden={!(show.report)}
                   className={'viewtab' + (activeView === 'report' ? ' viewtab--active' : '')}
@@ -5925,7 +6250,8 @@ ${data.output_path}`)
                           <ModelLibrary />
                         ) : activeView === 'report' ? (
                           <ReportCenter basePath={reportBasePath} projectName={reportProjectName}
-                            onWorkspaceChange={rememberReportWorkspace} />
+                            onWorkspaceChange={rememberReportWorkspace}
+                            channelTouchstone={cascadeResult?.output_path || ''} />
                         ) : activeView === 'eye' ? (
                           <div style={{
                             height: '100%', overflow: 'hidden', padding: 14,
@@ -6047,6 +6373,13 @@ ${data.output_path}`)
                                 <div style={{ color: '#8fa1b5', fontSize: 12, marginTop: 4 }}>
                                   阻抗劇變依 |dZ/dx| 峰值排序；標記畫成空間解析度的寬度，那是物理極限而非誤差。
                                 </div>
+                                {/* 量測波形那一路的輸入是示波器 CSV，不是 Touchstone——
+                                    把串接檔的證據掛上去會指向錯的東西。 */}
+                                {tdrJob?.result?.source !== 'measured_waveform'
+                                  && cascadeResult?.output_path && (
+                                  <EvidenceBadges path={cascadeResult.output_path}
+                                    expectedPorts={cascadeResult.n_ports} dark />
+                                )}
                               </div>
                               {tdrJob?.result && (
                                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -6091,7 +6424,8 @@ ${data.output_path}`)
                               const analyses = tdrJob.result.analyses || []
                               const analysis = analyses[tdrAnalysisIdx] || analyses[0]
                               if (!analysis) return null
-                              const methodTag = analysis.method === 'group_delay' ? 'A' : 'B'
+                              const methodTag = analysis.method === 'group_delay' ? 'A'
+                                : analysis.method === 'end_anchor' ? '錨' : 'B'
                               const peaks = (analysis.discontinuities || []).slice(0, 8)
                               const chartMarkers = tdrMarkers
                                 ? tdrMarkers.map(m => ({
@@ -6113,7 +6447,9 @@ ${data.output_path}`)
                                           className={'btn' + (index === tdrAnalysisIdx ? ' btn--primary' : '')}
                                           style={{ padding: '3px 12px', fontSize: 11.5 }}
                                           onClick={() => setTdrAnalysisIdx(index)}>
-                                          {item.method === 'group_delay' ? 'A 法：群延遲' : 'B 法：疊構 Dk'}
+                                          {item.method === 'group_delay' ? 'A 法：群延遲'
+                                            : item.method === 'end_anchor' ? '雙錨點（量測）'
+                                              : 'B 法：疊構 Dk'}
                                         </button>
                                       ))}
                                       <span style={{ fontSize: 11, color: '#8fa1b5', marginLeft: 6 }}>
@@ -6121,18 +6457,26 @@ ${data.output_path}`)
                                       </span>
                                     </div>
                                   )}
-                                  {(tdrJob.result.warnings || []).map((warning: string) => (
-                                    <div key={warning} className="status status--warn" style={{ fontSize: 11 }}>
-                                      {warning}
-                                    </div>
-                                  ))}
-                                  {tdrMapError && (
-                                    <div className="status status--warn" style={{ fontSize: 11 }}>
-                                      Layout 標記映射失敗：{tdrMapError}
+                                  {/* 警語流式排列：量測路一次會有三四條，逐條整寬
+                                      疊起來會把下面的場景列擠塌。 */}
+                                  {((tdrJob.result.warnings || []).length > 0 || tdrMapError) && (
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                      {(tdrJob.result.warnings || []).map((warning: string) => (
+                                        <div key={warning} className="status status--warn"
+                                          style={{ fontSize: 10.5, width: 'auto', padding: '2px 8px' }}>
+                                          {warning}
+                                        </div>
+                                      ))}
+                                      {tdrMapError && (
+                                        <div className="status status--warn"
+                                          style={{ fontSize: 10.5, width: 'auto', padding: '2px 8px' }}>
+                                          Layout 標記映射失敗：{tdrMapError}
+                                        </div>
+                                      )}
                                     </div>
                                   )}
 
-                                  <div style={{ display: 'flex', gap: 8, minHeight: 0, flex: 1 }}>
+                                  <div style={{ display: 'flex', gap: 8, minHeight: 180, flex: 1 }}>
                                     {tdrScene && (
                                       <div style={{
                                         flex: 1.5, minWidth: 0, border: '1px solid #303a48',
@@ -6143,6 +6487,7 @@ ${data.output_path}`)
                                           signalNets={signalNets} refNets={refNets}
                                           highlightNets={[...signalNets, ...refNets]}
                                           tdrMarkers={tdrMarkers}
+                                          showOnlySelected={layoutOnlySelectedNets}
                                           layerPanelEnabled={false} />
                                         {!tdrMarkers && !tdrMapError && (
                                           <div style={{
@@ -6160,7 +6505,8 @@ ${data.output_path}`)
                                       padding: 10, overflow: 'auto',
                                     }}>
                                       <div style={{ fontWeight: 700, fontSize: 12.5, marginBottom: 6 }}>
-                                        阻抗劇變（{methodTag} 法，依反射強度排序）
+                                        阻抗劇變（{analysis.method === 'end_anchor'
+                                          ? '雙錨點法' : `${methodTag} 法`}，依反射強度排序）
                                       </div>
                                       {peaks.length === 0 ? (
                                         <div style={{ fontSize: 12, color: '#8fa1b5' }}>
@@ -6265,10 +6611,13 @@ ${data.output_path}`)
                                       impedanceOhm={tdrJob.result.impedance_ohm || []}
                                       markers={chartMarkers}
                                       pathLengthMm={tdrJob.result.path_length_mm}
+                                      xMaxMm={analysis.display_cap_mm ?? null}
                                       height={230} />
                                   </div>
                                   <div className="result-paths result-paths--center">
-                                    <span>Circuit 專案：{tdrJob.result.project_path}</span>
+                                    <span>{tdrJob.result.source === 'measured_waveform'
+                                      ? `量測波形：${tdrJob.result.csv_path}`
+                                      : `Circuit 專案：${tdrJob.result.project_path}`}</span>
                                   </div>
                                 </>
                               )
@@ -6295,6 +6644,8 @@ ${data.output_path}`)
                                   : '由 Port 名稱自動判斷兩端與差動配對'}
                               </div>
                             </div>
+                            <EvidenceBadges path={cascadeResult.output_path}
+                              expectedPorts={cascadeResult.n_ports} dark />
 
                             <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
                               <div style={{ display: 'flex', gap: 4 }}>
@@ -6542,6 +6893,8 @@ ${data.output_path}`)
                           signalNets={signalNets}
                           refNets={refNets}
                           highlightNets={[...signalNets, ...refNets]}
+                          showOnlySelected={layoutOnlySelectedNets}
+                          onShowOnlySelectedChange={setLayoutOnlySelectedNets}
                           expansionMm={activeView === 'full' && signalNets.length > 0 ? parseFloat(expansionMm) || 0 : undefined}
                           extentType={extentType}
                           estimatedCutoutBoundary={visibleEstimatedBoundary}

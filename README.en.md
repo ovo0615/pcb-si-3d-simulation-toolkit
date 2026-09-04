@@ -2,7 +2,9 @@
 
 English ｜ [繁體中文](README.zh-TW.md)
 
-> Personal technical portfolio showcase. Not an official Ansys or Taiwan Auto-Design Co. (TADC) account. Ansys is a trademark of Ansys, Inc.
+> Commercial licensing and technical support are provided by Taiwan Auto-Design Co. (TADC).
+> This tool is not affiliated with, nor endorsed by, Ansys, Inc. Ansys is a trademark of Ansys, Inc.
+> A valid Ansys AEDT licence of your own is required.
 
 **Jeff Hong**｜Senior Technical Engineer, CAE｜Taiwan Auto-Design Co. (TADC)
 [jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com)　[cadmen.com](https://www.cadmen.com/)
@@ -75,11 +77,42 @@ Stack: React/TypeScript/Vite, FastAPI + WebSocket, PyEDB, PyAEDT, scikit-rf.
 
 Step-by-step instructions: [操作說明](./操作說明.md) (Traditional Chinese, 12 chapters).
 
-## Collaboration and notices
+## Commercial licensing and notices
 
-Formal technical collaboration goes through Taiwan Auto-Design Co. (TADC):
+**Commercial licensing, quotations and technical support are provided by
+Taiwan Auto-Design Co. (TADC):**
 [jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com)｜[cadmen.com](https://www.cadmen.com/)
 
-This repository is Jeff Hong's personal technical portfolio. It is not an official
-TADC account, nor an official Ansys, Inc. collaboration. Ansys, HFSS and SIwave are
+This repository is the public showcase edition, maintained by the author. It is not an
+official Ansys, Inc. account, nor an official Ansys collaboration. This tool is not
+affiliated with, nor endorsed by, Ansys, Inc. Ansys, HFSS, SIwave, Q3D and Q2D are
 trademarks of Ansys, Inc.
+
+**A valid Ansys AEDT (HFSS / SIwave / Q2D) licence of your own is required.** This tool
+neither includes nor provides a licence, and never bypasses Ansys licensing; every solve
+calls the AEDT installation on your own machine.
+
+### Terms for running third-party model libraries
+
+IBIS-AMI models carry native libraries (`.dll` / `.ami`) that AEDT executes on your
+machine. Before the first trust is established in the model library, the tool asks you
+to acknowledge four points:
+
+1. The tool hands **the files you supply** to Ansys AEDT for execution on this machine.
+   Their provenance, correctness and licensing are your responsibility.
+2. The tool scans with Windows Defender, records the SHA-256, and refuses libraries whose
+   format it cannot identify. **This is provenance tracking, not a safety guarantee** —
+   the tool makes no warranty about third-party model behaviour.
+3. Models stay on the local machine and are never uploaded (see ADR-0021).
+4. Managed copies in the model library must not be redistributed beyond the terms you
+   hold with the model vendor.
+
+### Auto-repair is inference, not measurement
+
+Two of the repairs applied on import are inferences. They are listed one by one in the
+report's "Warnings and Limitations" section; confirm them before delivery.
+
+| Inference | Rule | If you disagree |
+|---|---|---|
+| A missing conductor material is treated as copper | Refused when the name looks like aluminium, gold, silver, nickel, tin or a resistive layer | Define the material yourself in the AEDT material library |
+| A missing `[Model Selector]` is generated | Only when every model in the same-prefix family shares one `Model_type`; otherwise nothing is changed and the case is reported as needing your decision | Add the `[Model Selector]` yourself, or reference the correct model name |

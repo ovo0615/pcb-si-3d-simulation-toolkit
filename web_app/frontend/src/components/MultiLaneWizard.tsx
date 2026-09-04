@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ModelPackage } from './ModelLibrary'
 import { useCascadedChannel } from './useCascadedChannel'
+import RunHistory, { RestorableRun } from './RunHistory'
 
 interface PortBinding {
   port_index: number
@@ -847,6 +848,21 @@ export default function MultiLaneWizard(
     && suggestion!.bus_direction.driving_side === null
   const canStart = Boolean(suggestion) && suggestion!.blockers.length === 0
     && missingDisposition.length === 0 && !variantPending && !directionPending && !busy
+
+  /** 把某一次紀錄的物理輸入填回表單。
+   *
+   *  **只填得回去的填，填不回去的講出來**。半套還原比不還原更危險——
+   *  使用者會以為表單已經完全回到那一版，然後拿一組混合的設定重跑。
+   *  舊紀錄不動：ADR-0016 規定既有紀錄不得被新結果覆蓋。 */
+  function restoreRun(run: RestorableRun) {
+    if (run.touchstonePath) setTouchstone(run.touchstonePath)
+    if (run.txPackageId) setPackageId(run.txPackageId)
+    if (run.rxPackageId) setRxPackageId(run.rxPackageId)
+    if (run.dataRateGbps > 0) setDataRate(run.dataRateGbps)
+    setError(run.unrestored.length
+      ? `已填回通道、模型套件與資料率。這幾項要自己重設：${run.unrestored.join('、')}。`
+      : '已填回這一版的設定。舊紀錄原封不動保留。')
+  }
 
   return (
     <div className="ibis-wizard multi-lane-wizard">
@@ -1769,6 +1785,14 @@ export default function MultiLaneWizard(
             </div>
           </>}
         </section>}
+
+      {/* 執行歷史。ADR-0016 的不可變紀錄一直只存在於後端，這是它的入口。
+          一次求解要跑數十分鐘到數小時，能回頭比對的價值遠大於少一顆按鈕。 */}
+      {/* 讀 `multi_lane` 種類的紀錄，不是點對點 IBIS 的。
+          先前這裡讀的是 Touchstone 旁邊的 `ibis_channel_runs`——那些是
+          **點對點通道**的紀錄，跟多道是不同的分析，列在這裡會讓人以為
+          自己跑過但其實沒有。2026-08-31 多道開始寫自己的紀錄之後改掉。 */}
+      <RunHistory kind="multi_lane" title="多道執行歷史" onRestore={restoreRun} />
     </div>
   )
 }

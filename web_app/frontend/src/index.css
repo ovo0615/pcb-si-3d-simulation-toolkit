@@ -197,6 +197,19 @@ pre {
   height: 6px;
 }
 
+/* 有些分頁在條件未滿足時是停用的，外面包了一層 span 只為了掛 tooltip
+   （停用的表單控制項不接收滑鼠事件，title 掛在按鈕上不會顯示）。
+   那層 span 會變成 flex 子元素，不處理的話會被壓縮、分頁寬度就跑掉了。
+   `display: contents` 不能用——它讓 span 沒有框，也就接不到滑鼠。 */
+.viewtabs > span {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+
+.viewtabs > span[hidden] {
+  display: none;
+}
+
 /* 分頁列的外框：左邊是會捲的分頁，右邊是釘住的「更新報告快照」。 */
 .viewtabs-row {
   display: flex;
@@ -504,6 +517,157 @@ pre {
   font-size: 11.5px;
   color: var(--muted);
   line-height: 1.5;
+}
+
+/* 能力邊界：這個面板的算法算得準什麼、算不準什麼。
+   放在面板底部（使用者看完控制項、要按下去之前），不是放在標題下面。
+   刻意不用 .warning——它不是警告，沒有東西壞掉，是這個方法本來的範圍。 */
+.panel-caveat {
+  margin: 10px 0 0;
+  padding: 6px 8px 6px 9px;
+  border-left: 2px solid var(--muted);
+  border-radius: 0 4px 4px 0;
+  background: rgba(92, 103, 125, 0.07);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.panel-caveat b {
+  color: inherit;
+  font-weight: 700;
+}
+
+/* 通道證據徽章（EvidenceBadges）。
+   顏色只有三種，對應後端的 ok／warn／unknown：`unknown` 刻意跟 `warn` 分開，
+   「量不出來」跟「量出來不合格」是兩件事，同色會讓人以為模型壞了。 */
+.evidence-badges {
+  margin: 8px 0 0;
+}
+
+.evidence-badges__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.evidence-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(120, 130, 150, 0.06);
+  font: inherit;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.evidence-badge:hover {
+  border-color: var(--accent);
+}
+
+.evidence-badge__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.evidence-badge__label {
+  font-weight: 700;
+}
+
+.evidence-badge--warn {
+  background: rgba(201, 101, 47, 0.10);
+}
+
+.evidence-badges__detail,
+.evidence-badges__error {
+  margin-top: 5px;
+  padding: 5px 8px;
+  border-left: 2px solid var(--muted);
+  border-radius: 0 4px 4px 0;
+  background: rgba(92, 103, 125, 0.07);
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+/* 結果畫布是深色的，徽章要跟著換一組顏色。做成修飾類別而不是另一個元件：
+   判定的措辭必須完全一致，只有顏色可以不一樣。 */
+.evidence-badges--dark .evidence-badge {
+  border-color: rgba(150, 170, 195, 0.28);
+  background: rgba(150, 170, 195, 0.10);
+  color: #b8c6d8;
+}
+
+.evidence-badges--dark .evidence-badge--warn {
+  background: rgba(201, 121, 67, 0.18);
+}
+
+.evidence-badges--dark .evidence-badges__detail,
+.evidence-badges--dark .evidence-badges__error {
+  border-left-color: rgba(150, 170, 195, 0.45);
+  background: rgba(150, 170, 195, 0.10);
+  color: #a8b8cc;
+}
+
+/* 執行歷史（RunHistory）。掛在深色的 multi-lane 向導裡，所以直接用深色。
+   「設定不一致」用中性色不用紅色——它不是失敗，那筆求解本身可能完全成功。 */
+.run-history {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(150, 170, 195, 0.25);
+  border-radius: 7px;
+  background: rgba(150, 170, 195, 0.07);
+  font-size: 11px;
+  color: #a8b8cc;
+}
+
+.run-history__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #cfe0f0;
+}
+
+.run-history__row {
+  margin-top: 7px;
+  padding: 6px 8px;
+  border-left: 2px solid rgba(150, 170, 195, 0.4);
+  border-radius: 0 5px 5px 0;
+  background: rgba(20, 28, 38, 0.45);
+}
+
+.run-history__row--current { border-left-color: #3f9a5c; }
+.run-history__row--mismatch { border-left-color: #7f8ea3; }
+.run-history__row--unreadable { border-left-color: #c9652f; }
+
+.run-history__line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #cfe0f0;
+}
+
+.run-history__relation,
+.run-history__note,
+.run-history__detail {
+  margin-top: 3px;
+  line-height: 1.5;
+  color: #93a5b9;
+}
+
+.run-history__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
 }
 
 /* ── 表單 ───────────────────────────────────────────── */
@@ -1156,7 +1320,13 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .model-library__manifest code { color: #bcd0e5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── 標準 IBIS 點對點通道七步向導 ─────────────────────────── */
-.ibis-wizard { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 10px; }
+/* `overflow-y: auto` 是這裡的必要條件，不是選配：父層 `.model-library` 是
+   `overflow: hidden` 的 flex 直排，本層拿 `flex: 1` 吃掉剩餘高度。少了它，
+   超出的內容不會長出捲軸、也捲不到，而是**直接被父層裁掉且無法到達**——
+   沒有任何錯誤，畫面看起來只是「下面沒東西了」。`min-height: 0` 本來就是
+   為了讓這層能內捲才加的，先前只有 `.multi-lane-wizard` 變體補上了 overflow，
+   於是 S 參數工具箱少了 351px（COM 那一段整個按不到）。 */
+.ibis-wizard { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
 .ibis-wizard__steps { display: grid; grid-template-columns: repeat(7, minmax(72px, 1fr)); gap: 5px; }
 .ibis-wizard__steps button { min-width: 0; padding: 7px 5px; color: #718397; border: 1px solid #293441; border-radius: 7px; background: #11161d; cursor: default; font: 700 10.5px "Calibri", "Microsoft JhengHei", sans-serif; }
 .ibis-wizard__steps button span { display: inline-flex; width: 18px; height: 18px; margin-right: 5px; align-items: center; justify-content: center; border-radius: 50%; color: #8ea0b4; background: #222c38; }
@@ -1729,6 +1899,16 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .field-row > .btn--mini {
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+/* `.btn--primary` 是整排寬的區塊按鈕（`width: 100%`），放進 flex 列就會
+   佔掉整條、把自己推出容器右緣——「計算 COM（背景）」在 1186 px 寬時
+   右緣衝到 1537，只看得到一個「計」字。上面那條 `flex: 0 0 auto` 擋住了
+   壓縮，卻擋不住 `width: 100%`，兩者一起作用反而讓它硬撐成整排寬。
+   列裡的按鈕一律照內容給寬度；要整排寬的按鈕本來就不會放在 `.field-row` 裡。 */
+.field-row > .btn--primary {
+  width: auto;
+  padding: 8px 16px;
 }
 
 /* ── 圖層面板：內容淡入，寬度不動 ─────────────────────

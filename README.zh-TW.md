@@ -2,7 +2,8 @@
 
 [English](README.en.md) ｜ 繁體中文
 
-> 個人技術作品集之公開展示版本，非 Ansys 或虎門科技（TADC）官方帳號。Ansys 為 Ansys, Inc. 之商標。
+> 商用授權與技術支援由虎門科技（TADC）提供。本工具與 Ansys, Inc. 無隸屬、無背書關係；
+> Ansys 為 Ansys, Inc. 之商標。使用本工具需自備有效的 Ansys AEDT 授權。
 
 **Jeff Hong 洪敬傑**｜CAE 技術部資深技術工程師｜Taiwan Auto-Design Co. (TADC)
 [jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com)　[cadmen.com](https://www.cadmen.com/)
@@ -99,10 +100,35 @@ Top-3 排名與完整模擬完全一致（抖動輕的組合 Spearman ρ＝0.86�
 
 技術架構：React／TypeScript／Vite、FastAPI＋WebSocket、PyEDB、PyAEDT、scikit-rf。
 
-## 技術合作與聲明
+## 商用授權與聲明
 
-正式技術合作透過 Taiwan Auto-Design Co.（TADC）進行：
+**商用授權、報價與技術支援由虎門科技（Taiwan Auto-Design Co., TADC）提供：**
 [jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com)｜[cadmen.com](https://www.cadmen.com/)
 
-本 Repository 為 Jeff Hong 個人技術作品集之展示內容，非 TADC 官方帳號，
-亦非 Ansys, Inc. 官方合作展示。Ansys、HFSS、SIwave 為 Ansys, Inc. 之商標。
+本 Repository 為公開展示版本，由作者維護，非 Ansys, Inc. 官方帳號，亦非其官方合作展示。
+本工具與 Ansys, Inc. 無隸屬、無背書關係。Ansys、HFSS、SIwave、Q3D、Q2D 為 Ansys, Inc. 之商標。
+
+**使用本工具需自備有效的 Ansys AEDT（HFSS／SIwave／Q2D）授權。** 本工具不含、不提供，
+也不會繞過任何 Ansys 授權機制；求解一律呼叫你自己安裝的 AEDT。
+
+### 執行第三方模型程式庫的條款
+
+IBIS-AMI 模型帶有原生程式庫（`.dll`／`.ami`），分析時會由 AEDT 在你的機器上實際執行。
+第一次在模型庫建立信任前，工具會要你確認以下四點：
+
+1. 本工具會把**你提供的** `.dll`／`.ami` 交給 Ansys AEDT 在這台機器上執行；
+   檔案的來源、正確性與授權由你負責。
+2. 本工具以 Windows Defender 掃描、記錄 SHA-256、格式認不出就拒絕載入。
+   **這是來源追蹤，不是安全保證**——本工具不保證第三方模型的行為。
+3. 模型留在本機，不會上傳到任何地方（見 ADR-0021）。
+4. 模型庫裡的受管副本不得超出你與模型供應商的授權範圍散布。
+
+### 自動修復是推測，不是量測
+
+匯入模型與載入板子時，工具會補掉幾類規格寫死唯一答案的缺陷。**其中兩項是推測**，
+報告的「警告與限制」段會逐筆列出，交付前請確認：
+
+| 推測 | 規則 | 不同意時怎麼辦 |
+|---|---|---|
+| 缺失的導體材料當成銅 | 名稱看起來是鋁、金、銀、鎳、錫或電阻層時**拒絕補建** | 在 AEDT 材料庫自行定義該材料 |
+| 補上漏寫的 `[Model Selector]` | 同前綴家族的 `Model_type` **全部相同**才自動建；不一致就不動，列成「需要你決定」 | 在模型檔自行補 `[Model Selector]` 或改用正確的模型名稱 

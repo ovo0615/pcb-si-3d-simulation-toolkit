@@ -93,6 +93,8 @@ export default function AmiChannelPanel(
   const [topology, setTopology] = useState('')
   const [route, setRoute] = useState('auto')
   const [modulation, setModulation] = useState('NRZ')
+  // 後端要求使用者明確確認拓撲、Port、路由與調變（ADR-0057）；端點不會替你填。
+  const [confirmed, setConfirmed] = useState(false)
   const [ports, setPorts] = useState({ input_p: '', input_n: '', output_p: '', output_n: '' })
   /** 使用者親手改過的 AMI 參數（只存改過的；空字串＝清掉、回到 .ami 預設）。
    *  親手設的值寫不進 AEDT 時後端會擋（既有的寫入預檢），不會默默略過。 */
@@ -259,6 +261,8 @@ export default function AmiChannelPanel(
         })
       const data = await response.json()
       if (!response.ok) throw new Error(data?.detail || '等化掃描失敗')
+      // 全部組合失敗時後端回 status=error（HTTP 仍是 200），不能當成排名顯示。
+      if (data?.status === 'error') throw new Error(data?.error || '等化掃描全部失敗')
       setEqSweep(data)
     } catch (exc) {
       setPreviewError(exc instanceof Error ? exc.message : String(exc))
@@ -296,8 +300,8 @@ export default function AmiChannelPanel(
       setTopology(s.recommended_topology || s.supported_topologies[0] || '')
       setPorts({ ...s.ports })
       setRoute('auto')
-      // 換了預檢就清掉親手改的參數：那些值是綁著上一組模型的。
-      setTxParams({}); setRxParams({})
+      // 換了預檢就清掉親手改的參數：那些值是綁著上一組模型的。確認也要重做。
+      setTxParams({}); setRxParams({}); setConfirmed(false)
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc))
     } finally { setBusy(false) }
@@ -317,6 +321,7 @@ export default function AmiChannelPanel(
         modulation,
         data_rate_gbps: dataRate,
         bit_count: bitCount,
+        confirmed,
       }
       // 只送親手改過的參數；沒改的由 .ami 預設接手（後端會記錄略過的）。
       const pick = (params: Record<string, string>) =>
@@ -393,6 +398,7 @@ export default function AmiChannelPanel(
       .map((res: any, index: number) => ({
         index, analysis: String(res?.analysis || ''),
         measurements: res?.measurements,
+        waveformEye: res?.waveform_eye,
         notes: res?.notes || [],
       }))
       .filter((item: any) => item.measurements)
@@ -511,19 +517,23 @@ export default function AmiChannelPanel(
               耗時 {(eqSweep.elapsed_ms / 1000).toFixed(1)} 秒；點一列把該組
               填進進階 AMI 參數。
             </p>
+            {(eqSweep.warnings || []).map((text: string, index: number) => (
+              <p key={index} className="hint" style={{ color: '#c47a00' }}>⚠ {text}</p>
+            ))}
             <table className="model-library__table">
               <thead><tr>
                 {eqSweep.tx_param && <th>{eqSweep.tx_param}</th>}
                 {eqSweep.rx_param && <th>{eqSweep.rx_param}</th>}
-                <th>眼高（V）</th><th>眼寬（UI）</th><th>套用</th>
+                <th>{eqSweep.ranking_metric === 'pam4_inner_eye_v' ? 'PAM4 內眼（V）' : '眼高（V）'}</th>
+                <th>眼寬（UI）</th><th>套用</th>
               </tr></thead>
               <tbody>{eqSweep.rows.slice(0, 10).map((row: any, index: number) => (
                 <tr key={index}
-                  style={index === 0 ? { fontWeight: 700 } : undefined}>
+                  style={index === 0 && !row.why ? { fontWeight: 700 } : undefined}>
                   {eqSweep.tx_param && <td>{row.tx_value}</td>}
                   {eqSweep.rx_param && <td>{row.rx_value}</td>}
                   <td>{row.why ? `—（${row.why}）`
-                    : row.eye_height_v.toFixed(3)}</td>
+                    : Number(row[eqSweep.ranking_metric || 'eye_height_v'] ?? row.eye_height_v).toFixed(3)}</td>
                   <td>{row.why ? '—' : (row.eye_width_ui * 100).toFixed(0) + '%'}</td>
                   <td><button className="btn" disabled={Boolean(row.why)}
                     onClick={() => applyEqRow(row)}>套用</button></td>
@@ -694,8 +704,13 @@ export default function AmiChannelPanel(
               </details>
             )
           })}
+          <label className="hint" style={{ display: 'block', margin: '8px 0' }}>
+            <input type="checkbox" checked={confirmed}
+              onChange={(e) => setConfirmed(e.target.checked)} />{' '}
+            我已核對模型、拓撲、Port 對應、路由與調變（預檢的警告已看過）
+          </label>
           <button className="btn" disabled={busy || suggestion.blockers.length > 0
-            || !txModel || !rxModel || Boolean(job?.running)}
+            || !txModel || !rxModel || !confirmed || Boolean(job?.running)}
             onClick={() => void start()}>
             {busy ? '處理中…' : '開始 AMI 分析'}
           </button>
@@ -742,6 +757,26 @@ export default function AmiChannelPanel(
                     </tr>
                   ))}</tbody>
               </table>
+            )}
+            {block.waveformEye?.available && (
+              <>
+                <h4>GetWave 時域疊眼（逐位元）</h4>
+                <table className="model-library__table">
+                  <tbody>
+                    <tr><td>眼高（絕對最壞情況）</td>
+                      <td>{Number(block.waveformEye.eye_height).toPrecision(4)}
+                        {' '}{block.waveformEye.unit || ''}</td></tr>
+                    <tr><td>眼寬（絕對最壞情況）</td>
+                      <td>{Number(block.waveformEye.eye_width_ui).toFixed(3)} UI</td></tr>
+                    <tr><td>位元數（已略過暖機 {block.waveformEye.ignored_bits}）</td>
+                      <td>{block.waveformEye.bits_used}</td></tr>
+                  </tbody>
+                </table>
+                <p className="hint">{block.waveformEye.definition}</p>
+              </>
+            )}
+            {block.waveformEye && block.waveformEye.available === false && (
+              <p className="hint">GetWave 時域疊眼不可用：{block.waveformEye.reason}</p>
             )}
             {block.notes.length > 0 && block.notes.map((note: string) => (
               <p className="hint" key={note}>{note}</p>

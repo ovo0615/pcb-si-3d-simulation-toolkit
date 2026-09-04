@@ -104,7 +104,10 @@ export function saveReportSettings(workspace: string, settings: ReportSettings) 
   })
 }
 
-export function generateHtmlReport(workspace: string, settings: ReportSettings, outputPath = '', overwriteConfirmed = false) {
+export function generateHtmlReport(
+  workspace: string, settings: ReportSettings, outputPath = '',
+  overwriteConfirmed = false, channelTouchstone = '',
+) {
   return jsonPost<{
     ok: boolean
     output_path: string
@@ -116,6 +119,7 @@ export function generateHtmlReport(workspace: string, settings: ReportSettings, 
     ...settings,
     output_path: outputPath,
     overwrite_confirmed: overwriteConfirmed,
+    channel_touchstone: channelTouchstone,
   })
 }
 
