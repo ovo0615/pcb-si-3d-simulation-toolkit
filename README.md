@@ -20,11 +20,11 @@ TDR 阻抗定位與截面阻抗（Q2D）。
 
 ---
 
-Commercial licensing and technical support are provided by Taiwan Auto-Design Co. (TADC).
+Commercial licensing and technical support are provided by Taiwan Auto-Design Co., Ltd. (TADC).
 This repository is the public showcase edition, maintained by the author.
 This tool is not affiliated with, nor endorsed by, Ansys, Inc. Ansys, HFSS and SIwave are trademarks of Ansys, Inc.
 A valid Ansys AEDT licence of your own is required; this tool neither includes nor provides one.
 
-商用授權與技術支援由虎門科技（Taiwan Auto-Design Co., TADC）提供。本 Repository 為公開展示版本，由作者維護。
+商用授權與技術支援由虎門科技股份有限公司（Taiwan Auto-Design Co., Ltd.，TADC）提供。本 Repository 為公開展示版本，由作者維護。
 本工具與 Ansys, Inc. 無隸屬、無背書關係；Ansys、HFSS、SIwave 為 Ansys, Inc. 之商標。
 使用本工具需自備有效的 Ansys AEDT 授權，本工具不含、亦不提供授權。

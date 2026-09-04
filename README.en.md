@@ -2,11 +2,11 @@
 
 English ｜ [繁體中文](README.zh-TW.md)
 
-> Commercial licensing and technical support are provided by Taiwan Auto-Design Co. (TADC).
+> Commercial licensing and technical support are provided by Taiwan Auto-Design Co., Ltd. (TADC).
 > This tool is not affiliated with, nor endorsed by, Ansys, Inc. Ansys is a trademark of Ansys, Inc.
 > A valid Ansys AEDT licence of your own is required.
 
-**Jeff Hong**｜Senior Technical Engineer, CAE｜Taiwan Auto-Design Co. (TADC)
+**Jeff Hong**｜Senior Technical Engineer, CAE｜Taiwan Auto-Design Co., Ltd. (TADC)
 [jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com)　[cadmen.com](https://www.cadmen.com/)
 
 Takes one signal path on a PCB from board file all the way to an eye diagram.
@@ -80,7 +80,7 @@ Step-by-step instructions: [操作說明](./操作說明.md) (Traditional Chines
 ## Commercial licensing and notices
 
 **Commercial licensing, quotations and technical support are provided by
-Taiwan Auto-Design Co. (TADC):**
+Taiwan Auto-Design Co., Ltd. (TADC):**
 [jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com)｜[cadmen.com](https://www.cadmen.com/)
 
 This repository is the public showcase edition, maintained by the author. It is not an
