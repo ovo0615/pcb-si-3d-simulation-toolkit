@@ -133,6 +133,10 @@ interface Preview2DProps {
    *  給了這個 callback 才開放拖曳。 */
   onCutDrag?: (cutIndex: number, positionMm: number) => void
   cleanupOverlay?: CleanupOverlay | null // Layout 清理：預計移除物件紅框
+  /** 「只顯示選取網路」由外部接管。給了就以它為準（受控），
+   *  沒給就用元件自己的狀態。TDR 分頁靠這個跟著完整 Layout 一起篩。 */
+  showOnlySelected?: boolean
+  onShowOnlySelectedChange?: (value: boolean) => void
   layerPanelEnabled?: boolean // 比較模式可關閉側欄，保留更多畫布空間
   /** 側欄一開始是收合的。畫布本身就被右側結果面板分掉一半時（截面阻抗），
    *  展開的圖層面板會把剩下的畫布再吃掉一大塊。仍可用 ▶ 展開。 */
@@ -243,6 +247,8 @@ export default function Preview2D({
   crossSectionCut = null,
   onCrossSectionRegionDrawn,
   onCrossSectionCutDrawn,
+  showOnlySelected: showOnlySelectedProp,
+  onShowOnlySelectedChange,
 }: Preview2DProps) {
   const canvasRef    = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -276,8 +282,18 @@ export default function Preview2D({
   const [compFilter,  setCompFilter]  = useState('')
   const [netFilter,   setNetFilter]   = useState('')
 
-  // 「只顯示選取網路」模式
-  const [showOnlySelected, setShowOnlySelected] = useState(false)
+  // 「只顯示選取網路」模式。
+  //
+  // 這個狀態可以由外部接管：每個 Preview2D 是各自獨立的實例，各有一份
+  // `visibleNets`，所以在完整 Layout 按下「只顯示選取網路」之後，切到 TDR
+  // 分頁看到的仍然是整片板子——標記被其他銅箔蓋住。把開關提到 App 共用，
+  // 兩邊就會一起變。沒給 `showOnlySelected` 時維持原本的各自為政。
+  const [showOnlySelectedInner, setShowOnlySelectedInner] = useState(false)
+  const showOnlySelected = showOnlySelectedProp ?? showOnlySelectedInner
+  const setShowOnlySelected = (value: boolean) => {
+    setShowOnlySelectedInner(value)
+    onShowOnlySelectedChange?.(value)
+  }
 
   // 資料載入時初始化
   useEffect(() => {
@@ -1121,6 +1137,41 @@ export default function Preview2D({
     const mx = e.clientX-r.left, my = e.clientY-r.top
     setTransform(prev => ({ x: mx-(mx-prev.x)*f, y: my-(my-prev.y)*f, scale: prev.scale*f }))
   }
+  /** 鍵盤操作。**掛在畫布上而不是掛 window**——方向鍵在整個應用程式裡
+   *  是文字欄位的游標鍵，全域攔截會讓使用者在輸入路徑時游標動不了。
+   *  要用鍵盤就先點一下畫布（容器有 tabIndex，點擊即取得焦點）。
+   *
+   *  跑十幾條通道的人一天要平移縮放幾百次，滑鼠滾輪縮放的落點又依游標
+   *  位置而定，很難精準回到同一個視角；`0` 一鍵回到全覽解決的就是這件事。
+   */
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const step = e.shiftKey ? 120 : 30          // Shift ＝ 一次跨大步
+    const zoom = (factor: number) => {
+      const rect = canvasRef.current?.getBoundingClientRect()
+      // 以畫布中心為基準縮放，不是游標——鍵盤操作沒有游標位置可用。
+      const mx = (rect?.width ?? 0) / 2, my = (rect?.height ?? 0) / 2
+      setTransform(prev => ({
+        x: mx - (mx - prev.x) * factor,
+        y: my - (my - prev.y) * factor,
+        scale: prev.scale * factor,
+      }))
+    }
+    const pan = (dx: number, dy: number) =>
+      setTransform(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
+
+    switch (e.key) {
+      case 'ArrowLeft':  pan(step, 0); break
+      case 'ArrowRight': pan(-step, 0); break
+      case 'ArrowUp':    pan(0, step); break
+      case 'ArrowDown':  pan(0, -step); break
+      case '+': case '=': zoom(1.2); break
+      case '-': case '_': zoom(1 / 1.2); break
+      case '0': case 'f': case 'F': fitView(); break
+      default: return                            // 其餘按鍵不攔，讓它照常冒泡
+    }
+    e.preventDefault()
+  }
+
   // ── 刀線拖曳 ──────────────────────────────────────────────
   /** 螢幕座標 → 圖面座標（mm）。 */
   const toWorld = (e: React.MouseEvent) => {
@@ -1372,7 +1423,11 @@ export default function Preview2D({
       {/* 畫布區（佔滿剩餘寬度） */}
       <div
         ref={containerRef}
-        style={{ flex:1, position:'relative', overflow:'hidden', minWidth:0 }}
+        style={{ flex:1, position:'relative', overflow:'hidden', minWidth:0,
+                 outline:'none' }}
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
+        title="點一下畫布後可用鍵盤：方向鍵平移（Shift 跨大步）、+／− 縮放、0 回到全覽。"
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}

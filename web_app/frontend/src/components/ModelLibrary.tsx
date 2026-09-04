@@ -78,8 +78,9 @@ export interface ModelPackage {
     target: string
     qualification: string
   }
-  /** 匯入或遷移時自動修掉的機械性缺陷；修的是受管副本，來源檔不動。 */
-  repairs?: { rule: string; detail: string; impact: string }[]
+  /** 匯入或遷移時的修復紀錄。`kind: 'needs_user_choice'` 是「工具不敢猜、要你決定」，
+   *  不是已經修好的東西——渲染時必須跟自動修正分開，否則使用者會以為已經處理完了。 */
+  repairs?: { rule: string; detail: string; impact: string; kind?: string }[]
 }
 
 export interface AmiParameter {
@@ -235,6 +236,111 @@ export default function ModelLibrary() {
     } catch (e) {
       setSpecMsg('產生失敗：' + String(e))
     } finally { setSpecBusy(false) }
+  }
+  // 量測→IBIS 建模（B4，2026-08-30）：示波器／SMU 兩欄 CSV → 合規 .ibs
+  // → 匯入模型庫。單 corner（typ），缺的 corner 以 NA 標示不假造。
+  const [mb, setMb] = useState({
+    model_name: '', model_type: 'Output', voltage_range_v: '1.2',
+    c_comp_pf: '1.0', vinl_v: '', vinh_v: '',
+    pulldown_csv: '', pullup_csv: '', gnd_clamp_csv: '', power_clamp_csv: '',
+    rising_csv: '', rising_r: '50', rising_v: '0',
+    falling_csv: '', falling_r: '50', falling_v: '',
+  })
+  const [mbBusy, setMbBusy] = useState(false)
+  const [mbMsg, setMbMsg] = useState('')
+  const [mbFolder, setMbFolder] = useState('')
+  const [mbScanMsg, setMbScanMsg] = useState('')
+  const setMbField = (key: string, value: string) =>
+    setMb(prev => ({ ...prev, [key]: value }))
+
+  const browseMbCsv = async (key: string, title: string) => {
+    try {
+      const data = await api<{ path: string }>(
+        `/api/browse_csv?title=${encodeURIComponent(title)}`)
+      if (data.path) setMbField(key, data.path)
+    } catch (reason) { console.error(reason) }
+  }
+
+  const browseMbFolder = async () => {
+    try {
+      const data = await api<{ path: string }>(
+        '/api/browse_folder?title=' + encodeURIComponent('選擇放量測 CSV 的資料夾'))
+      if (data.path) { setMbFolder(data.path); await scanMbFolder(data.path) }
+    } catch (reason) { console.error(reason) }
+  }
+
+  /** 掃資料夾、依檔名特徵把 CSV 填進對應欄位。
+   *
+   *  **填完一定讓人看見填了什麼**——猜測會錯（不同量測設備的檔名差很多），
+   *  所以不做「選了資料夾就直接建模」。沒認出來的檔案也列出來，
+   *  不然使用者會以為工具沒看到那些檔案。 */
+  const scanMbFolder = async (folder: string) => {
+    setMbScanMsg('掃描中…')
+    try {
+      const data = await api<{
+        matched: Record<string, string>; unmatched: string[]; csv_count: number
+      }>(`/api/scan_measurement_folder?folder=${encodeURIComponent(folder)}`)
+      const entries = Object.entries(data.matched || {})
+      if (!entries.length) {
+        setMbScanMsg(`資料夾裡有 ${data.csv_count} 個 CSV，但檔名認不出來`
+          + '（預期含 pd／pu／rise／fall 之類的字）。請自己指定。')
+        return
+      }
+      setMb(prev => ({ ...prev, ...Object.fromEntries(entries) }))
+      const labels: Record<string, string> = {
+        pulldown_csv: 'Pulldown', pullup_csv: 'Pullup',
+        gnd_clamp_csv: 'GND Clamp', power_clamp_csv: 'POWER Clamp',
+        rising_csv: 'Rising', falling_csv: 'Falling',
+      }
+      const named = entries.map(([key, path]) =>
+        `${labels[key] || key}＝${path.split(/[\\/]/).pop()}`).join('、')
+      setMbScanMsg(`已帶入 ${entries.length} 個：${named}。`
+        + (data.unmatched.length
+          ? `　另有 ${data.unmatched.length} 個 CSV 沒認出來：`
+            + data.unmatched.map(p => p.split(/[\\/]/).pop()).join('、')
+          : '')
+        + '　**請核對再建模**——檔名猜錯不會有錯誤訊息，錯的會是模型本身。')
+    } catch (reason) {
+      setMbScanMsg(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+  const buildFromMeasurement = async () => {
+    setMbBusy(true); setMbMsg('')
+    try {
+      const needsInput = mb.model_type !== 'Output'
+      const data = await api<any>('/api/models/build-from-measurement', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model_name: mb.model_name.trim(),
+          model_type: mb.model_type,
+          voltage_range_v: Number(mb.voltage_range_v),
+          c_comp_pf: Number(mb.c_comp_pf) || 0,
+          vinl_v: needsInput && mb.vinl_v.trim() ? Number(mb.vinl_v) : null,
+          vinh_v: needsInput && mb.vinh_v.trim() ? Number(mb.vinh_v) : null,
+          pulldown_csv: mb.pulldown_csv.trim(),
+          pullup_csv: mb.pullup_csv.trim(),
+          gnd_clamp_csv: mb.gnd_clamp_csv.trim(),
+          power_clamp_csv: mb.power_clamp_csv.trim(),
+          rising: mb.rising_csv.trim() ? [{
+            csv: mb.rising_csv.trim(),
+            r_fixture_ohm: Number(mb.rising_r) || 50,
+            v_fixture_v: Number(mb.rising_v) || 0,
+          }] : [],
+          falling: mb.falling_csv.trim() ? [{
+            csv: mb.falling_csv.trim(),
+            r_fixture_ohm: Number(mb.falling_r) || 50,
+            v_fixture_v: mb.falling_v.trim()
+              ? Number(mb.falling_v) : Number(mb.voltage_range_v),
+          }] : [],
+        }),
+      })
+      const warnings = (data.warnings || []).join('；')
+      setMbMsg(`已建模並匯入：${data.imported?.display_name || ''}。`
+        + `${data.note || ''}${warnings ? `（整形註記：${warnings}）` : ''}`)
+      await refresh()
+    } catch (e) {
+      setMbMsg('建模失敗：' + String(e))
+    } finally { setMbBusy(false) }
   }
   // 秒測（SPISimAMI 引擎，2026-08-29）：不開 AEDT、免授權，一秒看到
   // 模型等化真的有沒有動作。跟著選取的套件走，換套件就清結果。
@@ -419,8 +525,35 @@ export default function ModelLibrary() {
     }
   }
 
+  /** 執行第三方原生程式庫的使用條款，第一次建立信任前要看過一次。
+   *  同意記在瀏覽器本機，換電腦或清掉網站資料會再問一次——這是刻意的，
+   *  因為條款講的是「這台機器上要執行誰給的二進位檔」。 */
+  const TERMS_KEY = 'pcbsi.native-library-terms.v1'
+  const TERMS_TEXT = [
+    '執行第三方原生模型程式庫（.dll／.ami）的條款',
+    '',
+    '1. 本工具會把你提供的 .dll／.ami 交給 Ansys AEDT 在這台機器上執行。',
+    '   檔案的來源、正確性與授權由你負責。',
+    '2. 本工具以 Windows Defender 掃描、記錄 SHA-256、格式認不出就拒絕載入。',
+    '   這是來源追蹤，不是安全保證——本工具不保證模型的行為。',
+    '3. 模型留在本機，不會上傳到任何地方。',
+    '4. 模型庫裡的受管副本不得超出你與模型供應商的授權範圍散布。',
+    '',
+    '按「確定」表示你已閱讀並同意上述條款。',
+  ].join('\n')
+
+  const acceptNativeTerms = (): boolean => {
+    try {
+      if (window.localStorage.getItem(TERMS_KEY) === 'accepted') return true
+    } catch { /* 隱私模式讀不到就每次都問，不影響功能 */ }
+    if (!window.confirm(TERMS_TEXT)) return false
+    try { window.localStorage.setItem(TERMS_KEY, 'accepted') } catch { /* 記不住就下次再問 */ }
+    return true
+  }
+
   const trustNative = async (item: NativeLibrary) => {
     if (!selected) return
+    if (!acceptNativeTerms()) return
     const unavailable = item.scan_status === 'unavailable'
     const warning = unavailable
       ? '\n\n注意：本機未能執行防毒掃描。確認後仍會以此 SHA-256 建立信任。'
@@ -522,6 +655,141 @@ export default function ModelLibrary() {
           {specMsg && <div className="model-library__notice">{specMsg}</div>}
         </details>
       )}
+
+      {/* 量測→IBIS 建模（B4）：客戶只有示波器／SMU 量測時的路。 */}
+      <details className="model-library__import" style={{ padding: '8px 12px' }}>
+        <summary>從量測建模（IV／VT 兩欄 CSV → IBIS）</summary>
+        <p className="model-library__hint" style={{ marginTop: 4 }}>
+          IV：pad 電壓（V）、pad 電流（A，流入元件為正）。VT：時間（s）、pad 電壓（V）。
+        </p>
+        <p className="model-library__hint">
+          Pullup／POWER Clamp 的 Vcc 相對座標轉換由工具做，照量測填就好。
+        </p>
+        <p className="model-library__hint">
+          單 corner（typ）；建好先按「健檢」證明解得動。
+        </p>
+        {/* 快速帶入：選一個資料夾，依檔名特徵認出哪個 CSV 是哪一條。
+            六個路徑一個一個貼太痛苦，而量測輸出通常本來就在同一個資料夾。 */}
+        <div className="field-row" style={{ marginTop: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="field-label">量測資料夾（選了會依檔名自動帶入下方路徑）</div>
+            <input className="input" value={mbFolder}
+              onChange={e => setMbFolder(e.target.value)}
+              placeholder="放 pd／pu／rise／fall 等 CSV 的資料夾" />
+          </div>
+          <button className="btn" style={{ marginTop: 14, whiteSpace: 'nowrap' }}
+            onClick={() => void browseMbFolder()}>瀏覽…</button>
+          <button className="btn" style={{ marginTop: 14, whiteSpace: 'nowrap' }}
+            disabled={!mbFolder.trim()}
+            onClick={() => void scanMbFolder(mbFolder)}>自動帶入</button>
+        </div>
+        {mbScanMsg && <div className="model-library__notice">{mbScanMsg}</div>}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 6, marginTop: 8 }}>
+          <label>
+            <div className="field-label">模型名</div>
+            <input className="input" placeholder="英數底線" value={mb.model_name}
+              onChange={e => setMbField('model_name', e.target.value)} />
+          </label>
+          <label>
+            <div className="field-label">模型類型</div>
+            <select className="input" value={mb.model_type}
+              onChange={e => setMbField('model_type', e.target.value)}>
+              <option value="Output">Output（驅動器）</option>
+              <option value="Input">Input（接收器）</option>
+              <option value="I/O">I/O（雙向）</option>
+            </select>
+          </label>
+          <label title="緩衝器的供應電壓。IV／VT 曲線的 Vcc 相對座標由它換算，填錯會讓整條曲線位移。">
+            <div className="field-label">Vcc 供應電壓（V）</div>
+            <input className="input" placeholder="例如 1.2" value={mb.voltage_range_v}
+              onChange={e => setMbField('voltage_range_v', e.target.value)} />
+          </label>
+          <label title="晶粒的接腳電容（IBIS 的 C_comp）。影響邊緣速率；量不到就用資料手冊值。">
+            <div className="field-label">C_comp 晶粒電容（pF）</div>
+            <input className="input" placeholder="例如 1.0" value={mb.c_comp_pf}
+              onChange={e => setMbField('c_comp_pf', e.target.value)} />
+          </label>
+        </div>
+        {mb.model_type !== 'Output' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 6 }}>
+            <label title="接收端判為邏輯 0 的電壓上限。資料手冊或量測而來，不是從 CSV 推導的。">
+              <div className="field-label">Vinl 輸入低準位門檻（V）</div>
+              <input className="input" placeholder="資料手冊或量測" value={mb.vinl_v}
+                onChange={e => setMbField('vinl_v', e.target.value)} />
+            </label>
+            <label title="接收端判為邏輯 1 的電壓下限。">
+              <div className="field-label">Vinh 輸入高準位門檻（V）</div>
+              <input className="input" placeholder="資料手冊或量測" value={mb.vinh_v}
+                onChange={e => setMbField('vinh_v', e.target.value)} />
+            </label>
+          </div>
+        )}
+
+        <div className="field-label" style={{ marginTop: 10 }}>
+          IV 曲線（pad 電壓 V、pad 電流 A）
+        </div>
+        {([
+          ['pulldown_csv', 'Pulldown IV CSV', '輸出拉低時的 IV 曲線', false],
+          ['pullup_csv', 'Pullup IV CSV', '輸出拉高時的 IV 曲線', false],
+          ['gnd_clamp_csv', 'GND Clamp IV CSV', '對地的靜電保護二極體，沒量就留空', true],
+          ['power_clamp_csv', 'POWER Clamp IV CSV', '對電源的靜電保護二極體，沒量就留空', true],
+        ] as [string, string, string, boolean][]).map(([key, label, hint, optional]) => (
+          <div className="field-row" key={key} style={{ marginTop: 4 }}>
+            <div style={{ flex: 1, minWidth: 0 }} title={hint}>
+              <div className="field-label">{label}{optional ? '（選填）' : ''}</div>
+              <input className="input" value={(mb as Record<string, string>)[key]}
+                onChange={e => setMbField(key, e.target.value)} placeholder={hint} />
+            </div>
+            <button className="btn" style={{ marginTop: 14, whiteSpace: 'nowrap' }}
+              onClick={() => void browseMbCsv(key, `選擇 ${label}`)}>瀏覽…</button>
+          </div>
+        ))}
+
+        <div className="field-label" style={{ marginTop: 10 }}>
+          VT 波形（時間 s、pad 電壓 V）與量測時的治具
+        </div>
+        <p className="model-library__hint" style={{ marginTop: 2 }}
+          title={'治具是量 VT 波形時掛在 pad 上的負載。R_fixture 是串接電阻'
+            + '（示波器探棒常見 50 Ω）；V_fixture 是那顆電阻的另一端接到哪個'
+            + '電位（接地填 0，接電源就留空表示 Vcc）。IBIS 用這兩個值把量到的'
+            + '波形反推回緩衝器本身，所以填的必須是你實際的量測接法。'}>
+          治具填錯會讓邊緣速率整個偏掉。滑鼠停這裡看說明。
+        </p>
+        {([
+          ['rising_csv', 'rising_r', 'rising_v', 'Rising VT CSV', '上升緣波形', '例如 0（接地）'],
+          ['falling_csv', 'falling_r', 'falling_v', 'Falling VT CSV', '下降緣波形', '留空＝接 Vcc'],
+        ] as [string, string, string, string, string, string][]).map(
+          ([csvKey, rKey, vKey, label, hint, vHint]) => (
+          <div className="field-row" key={csvKey} style={{ marginTop: 4 }}>
+            <div style={{ flex: 2, minWidth: 0 }} title={hint}>
+              <div className="field-label">{label}</div>
+              <input className="input" value={(mb as Record<string, string>)[csvKey]}
+                onChange={e => setMbField(csvKey, e.target.value)} placeholder={hint} />
+            </div>
+            <button className="btn" style={{ marginTop: 14, whiteSpace: 'nowrap' }}
+              onClick={() => void browseMbCsv(csvKey, `選擇 ${label}`)}>瀏覽…</button>
+            <div style={{ flex: 1, minWidth: 0 }} title="量測治具的串接電阻值">
+              <div className="field-label">R_fixture（Ω）</div>
+              <input className="input" value={(mb as Record<string, string>)[rKey]}
+                onChange={e => setMbField(rKey, e.target.value)} placeholder="例如 50" />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }} title="治具電阻另一端接的電位">
+              <div className="field-label">V_fixture（V）</div>
+              <input className="input" value={(mb as Record<string, string>)[vKey]}
+                onChange={e => setMbField(vKey, e.target.value)} placeholder={vHint} />
+            </div>
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
+          <button className="btn btn--primary"
+            disabled={mbBusy || !mb.model_name.trim() || !Number(mb.voltage_range_v)}
+            onClick={() => void buildFromMeasurement()}>
+            {mbBusy ? '建模中…' : '建模並匯入'}
+          </button>
+        </div>
+        {mbMsg && <div className="model-library__notice">{mbMsg}</div>}
+      </details>
 
       {message && <div className="model-library__notice">{message}</div>}
       {error && <div className="model-library__notice model-library__notice--error">{error}</div>}
@@ -653,18 +921,39 @@ export default function ModelLibrary() {
               </section>
             )}
 
-            {(selected.repairs?.length ?? 0) > 0 && (
-              <section className="model-library__section">
-                <h4>自動修正（{selected.repairs!.length} 處）</h4>
-                <p className="hint">修的是模型庫裡的受管副本；你的來源檔一個位元都沒動。</p>
-                {selected.repairs!.map((item, index) => (
-                  <div className="model-library__issue is-warning" key={index}>
-                    <strong>{item.detail}</strong>
-                    <div>{item.impact}</div>
-                  </div>
-                ))}
-              </section>
-            )}
+            {(() => {
+              const all = selected.repairs ?? []
+              const auto = all.filter(item => item.kind !== 'needs_user_choice')
+              const choices = all.filter(item => item.kind === 'needs_user_choice')
+              return (<>
+                {auto.length > 0 && (
+                  <section className="model-library__section">
+                    <h4>自動修正（{auto.length} 處）</h4>
+                    <p className="hint">修的是模型庫裡的受管副本；你的來源檔一個位元都沒動。
+                      標明「依推測」的項目不是量測結果，交付前請確認。</p>
+                    {auto.map((item, index) => (
+                      <div className="model-library__issue is-warning" key={index}>
+                        <strong>{item.detail}</strong>
+                        <div>{item.impact}</div>
+                      </div>
+                    ))}
+                  </section>
+                )}
+                {choices.length > 0 && (
+                  <section className="model-library__section">
+                    <h4>需要你決定（{choices.length} 處）</h4>
+                    <p className="hint">工具沒有把握該綁哪一個，所以什麼都沒改。
+                      這幾項要你在模型檔裡自行處理，否則分析會用到不確定的模型。</p>
+                    {choices.map((item, index) => (
+                      <div className="model-library__issue is-error" key={index}>
+                        <strong>{item.detail}</strong>
+                        <div>{item.impact}</div>
+                      </div>
+                    ))}
+                  </section>
+                )}
+              </>)
+            })()}
 
             <section className="model-library__section">
               <h4>模型與 Pin</h4>

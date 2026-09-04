@@ -6,6 +6,7 @@
 // 尚未打通，介面誠實顯示探測結果，不讓使用者按下去等七分鐘。
 import { useEffect, useState } from 'react'
 import { setModelsReportMetadata } from './reportMetadataStore'
+import { revealPath, commonFolderOf } from '../revealPath'
 
 interface ToolboxOperation { name: string; description: string }
 interface BatchStatus { available: boolean; checked_at: string; detail: string }
@@ -22,7 +23,21 @@ interface ComJobState {
     artifacts?: string[]
     messages?: string[]
     stdout_tail?: string
+    com?: ComReport
+    /** 引擎自己生的 HTML 報告與 BATH／FD／TD 圖。 */
+    html_report?: string
+    plots?: string[]
   }
+}
+/** 主報表 CSV 解析出來的結構（後端 `parse_com_report`）。 */
+interface ComReport {
+  cases?: { case: string; com_db: number | null;
+            headline?: Record<string, number | string> }[]
+  columns?: string[]
+  worst_case?: string
+  worst_com_db?: number | null
+  pass_threshold_db?: number
+  passed?: boolean
 }
 
 const OPTION_HINTS: Record<string, string> = {
@@ -64,6 +79,10 @@ export default function SpisimToolboxPanel() {
   const [comJob, setComJob] = useState<ComJobState | null>(null)
   const [comResult, setComResult] = useState('')
   const [comOvernight, setComOvernight] = useState(false)
+  /** 「開啟結果資料夾」要開哪裡。工具箱與 COM 各自記一份：
+   *  兩者的輸出落在不同地方（sparam_processed 對 com_reports）。 */
+  const [outputFolder, setOutputFolder] = useState('')
+  const [comFolder, setComFolder] = useState('')
 
   // COM 是背景工作（時域計算分鐘級起跳）：跑著就每 5 秒問一次狀態。
   useEffect(() => {
@@ -84,17 +103,57 @@ export default function SpisimToolboxPanel() {
     if (state.status === 'cancelled') { setComResult('已取消。'); return }
     const out = state.result
     if (!out) return
+    const com = out.com
+    const worst = typeof com?.worst_com_db === 'number' ? com.worst_com_db : null
     setModelsReportMetadata({
       'COM_標準': state.standard || comStandard,
       'COM_通道': source.split(/[\\/]/).pop() || source,
       'COM_產出檔數': out.artifacts?.length ?? 0,
+      // 數字要進報告快照——圖上的字縮小後未必讀得出來。
+      'COM_最差值_dB': worst ?? '',
+      'COM_最差case': com?.worst_case || '',
+      'COM_門檻_dB': com?.pass_threshold_db ?? '',
+      'COM_判定': com?.passed === undefined ? '' : (com.passed ? '通過' : '不通過'),
       'COM_引擎訊息': (out.messages || []).slice(-1)[0] || '',
     })
+    // 產物全部落在同一個時間戳資料夾；記下來給「開啟結果資料夾」用。
+    setComFolder(commonFolderOf(out.artifacts || []))
     const names = Object.keys(out.reports || {})
     const parts: string[] = []
+
+    // 結論放最前面。先前只印引擎訊息，COM 值埋在一長串 [MESG] 裡。
+    if (worst !== null) {
+      const verdict = com?.passed === undefined ? ''
+        : `　${com.passed ? '✅ 通過' : '❌ 不通過'}`
+      const threshold = com?.pass_threshold_db !== undefined
+        ? `（門檻 ${com.pass_threshold_db} dB）` : ''
+      parts.push(`COM = ${worst.toFixed(4)} dB${threshold}${verdict}\n` +
+        `取最差的 ${com?.worst_case || '案例'}——` +
+        `多個案例是同一條通道在不同封裝長度下各算一次。`)
+      const rows = (com?.cases || []).map(item => {
+        const head = item.headline || {}
+        const detail = ['眼高 VEO (mV)', '眼壓縮 VEC (dB)', 'Nyquist 插入損耗 (dB)',
+                        'Tx 封裝長度 (mm)']
+          .filter(key => head[key] !== undefined)
+          .map(key => `${key} ${head[key]}`).join('、')
+        return `  ${item.case}：COM ${item.com_db ?? '—'} dB` +
+          (detail ? `\n    ${detail}` : '')
+      })
+      if (rows.length) parts.push('逐案例：\n' + rows.join('\n'))
+    }
+
+    // 引擎自己的 HTML 報告與圖單獨列，不要淹沒在二十幾個檔案裡。
+    if (out.html_report) parts.push('引擎 HTML 報告：\n' + out.html_report)
+    if (out.plots?.length) {
+      parts.push(`圖（BATH／FD／TD，共 ${out.plots.length} 張）：\n` +
+        out.plots.join('\n'))
+    }
     if (out.messages?.length) parts.push('引擎訊息：\n' + out.messages.join('\n'))
-    if (out.artifacts?.length) parts.push('產出檔（含 IL／RL／ILD 曲線）：\n' + out.artifacts.join('\n'))
-    if (names.length) parts.push(`報告 ${names[0]}：\n` + (out.reports[names[0]] || ''))
+    if (out.artifacts?.length) parts.push('全部產出檔：\n' + out.artifacts.join('\n'))
+    if (names.length && worst === null) {
+      // 解析不出 COM 值時才貼原始報表，否則上面的摘要已經夠讀。
+      parts.push(`報告 ${names[0]}：\n` + (out.reports[names[0]] || ''))
+    }
     setComResult(parts.length ? parts.join('\n\n')
       : `引擎已執行但沒有輸出。輸出尾段：\n${out.stdout_tail || ''}`)
   }
@@ -120,8 +179,14 @@ export default function SpisimToolboxPanel() {
 
   const browseInto = async (setter: (value: string) => void) => {
     try {
-      const picked = await api<{ path?: string }>('/api/browse_touchstone')
-      if (picked.path) setter(picked.path)
+      // `/api/browse_touchstone` 回的是 **`paths` 陣列**（它是多選對話框）。
+      // 這裡原本讀單數的 `picked.path`，永遠是 undefined，於是
+      // **選完檔案、對話框關掉、欄位一個字都沒填、也沒有任何錯誤**。
+      // 其餘三個呼叫點（串接、AMI、多道）都讀對了，只有這裡漏掉。
+      const picked = await api<{ paths?: string[] }>('/api/browse_touchstone')
+      const first = picked?.paths?.[0] || ''
+      if (first) setter(first)
+      else setError('沒有選到檔案。若剛才有選，請回報——這代表對話框回傳的形狀變了。')
     } catch (reason) { setError(String(reason)) }
   }
 
@@ -143,11 +208,17 @@ export default function SpisimToolboxPanel() {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ operation, touchstone_path: source, options }),
         })
+      setOutputFolder(out.output_path)
       setMessage(`完成：${out.output_path}（${out.ports} 埠、${out.points} 點）。`
         + '路徑可直接貼到串接或通道分析。')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally { setBusy(false) }
+  }
+
+  const openFolder = async (path: string) => {
+    const failure = await revealPath(path)
+    if (failure) setError(failure)
   }
 
   const reprobe = async () => {
@@ -245,6 +316,13 @@ export default function SpisimToolboxPanel() {
           {busy ? '處理中…' : '執行'}
         </button>
         {message && <div className="model-library__notice">{message}</div>}
+        {outputFolder && (
+          <div className="field-row" style={{ marginTop: 6 }}>
+            <button className="btn" onClick={() => void openFolder(outputFolder)}>
+              開啟結果資料夾
+            </button>
+          </div>
+        )}
       </section>
 
       {comStandards.length > 0 && (
@@ -252,8 +330,9 @@ export default function SpisimToolboxPanel() {
           <h3>IEEE COM 簽核（SPISim 批次引擎）</h3>
           <p className="hint">對串接後的通道算 COM，直接對 IEEE 802.3／OIF 條文。</p>
           <p className="hint">內建 {comStandards.length} 份標準參數組態，不必自己填門檻。</p>
-          <p className="hint">通道要 4 埠差分（埠序 [1 3 2 4]）；2 埠只會出頻域曲線。</p>
-          <p className="hint">時域外插以小時計（實測），計算走背景、可隨時取消。</p>
+          <p className="hint">通道要 4 埠差分，埠序 [in+, in−, out+, out−]；2 埠只出頻域曲線。</p>
+          <p className="hint">即 PORT_ORDER [1 2 3 4]，本工具串接輸出就是這個順序。</p>
+          <p className="hint">送出前會預檢最低頻與埠序；一般約 8 秒，走背景可取消。</p>
           {batchStatus && !batchStatus.available && (
             <div className="model-library__notice model-library__notice--error">
               引擎探測未通過：{batchStatus.detail}
@@ -289,13 +368,24 @@ export default function SpisimToolboxPanel() {
             <input type="checkbox" checked={comOvernight}
               style={{ width: 'auto' }}
               onChange={event => setComOvernight(event.target.checked)} />
-            夜間掛機（12 小時上限；報告與曲線落 com_reports，隔天來看即可）
+            放寬逾時到 12 小時（預設 4 小時）
           </label>
+          <p className="hint">
+            一般通道約 8 秒就出結果，上面那個選項是留給特別大的輸入，不是常態。
+          </p>
           {comJob?.running && (
             <p className="hint">
               {comJob.standard}　·　已跑 {comJob.elapsed_seconds ?? 0} 秒　·
               {comJob.message || ''}
             </p>
+          )}
+          {comFolder && (
+            <div className="field-row" style={{ marginTop: 6 }}>
+              <button className="btn" onClick={() => void openFolder(comFolder)}>
+                開啟結果資料夾
+              </button>
+              <span className="hint" style={{ wordBreak: 'break-all' }}>{comFolder}</span>
+            </div>
           )}
           {comResult && (
             <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, maxHeight: 320, overflow: 'auto' }}>

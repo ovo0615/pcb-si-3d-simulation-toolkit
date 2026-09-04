@@ -31,6 +31,17 @@ export interface TaskDef {
   key: TaskKey
   label: string
   hint: string
+  /**
+   * 預估耗時，顯示在項目名稱右邊（例如「約 2 分」）。
+   *
+   * 靜態估計值，不是即時預測——機器、板子大小與求解器設定會讓實際時間差好幾倍
+   * （光是裁切，小板幾分鐘、大板半小時都有）。放在這裡只是讓使用者在勾選前
+   * 對量級有概念，數字要調隨時可以改。取自 HANDOFF.md 記過的實測：
+   * 載入整趟 45 秒、大型板裁切 20~30 分、截面阻抗一條 20~40 秒、
+   * 基準眼圖約 40 秒；求解那項變化最大，三段 SIwave 各 22 秒，
+   * HFSS 大案子則有跑到 6.5 小時的紀錄。
+   */
+  eta?: string
   /** 前置任務。只用於提示，不會自動代勾、也不會阻擋。 */
   requires?: TaskKey[]
   /** 前置不足時要補充說明的例外情形。 */
@@ -59,18 +70,21 @@ export const TASK_GROUPS: TaskGroup[] = [
       {
         key: 'load',
         label: '載入電路板',
+        eta: '約 1 分',
         hint: '匯入 .aedb／.brd／.tgz，選擇訊號與參考網路。',
         offNote: '不勾選＝不載入板子，只能用「外部 S 參數檔」做串接與檢視。',
         children: [
           {
             key: 'cutout',
             label: '局部裁切',
+            eta: '約 5～30 分',
             hint: '依訊號範圍裁出通道。只做裁切，不建立 Port。',
             requires: ['load'],
           },
           {
             key: 'stackup',
             label: '疊構更換',
+            eta: '約 2 分',
             hint: '以外部疊構檔取代現有 Stackup，可比對差異後再套用。'
                 + '建議在裁切之後做，快非常多。',
             requires: ['load'],
@@ -87,12 +101,14 @@ export const TASK_GROUPS: TaskGroup[] = [
       {
         key: 'backdrill',
         label: '背鑽',
+        eta: '約 3 分',
         hint: '分析訊號 Via 殘樁並寫入背鑽，含共振頻率預估。',
         requires: ['load'],
       },
       {
         key: 'cleanup',
         label: 'Layout 清理',
+        eta: '約 5 分',
         hint: '移除電磁影響範圍外的銅箔與 Via，降低後續求解負擔。',
         requires: ['load'],
       },
@@ -104,6 +120,7 @@ export const TASK_GROUPS: TaskGroup[] = [
       {
         key: 'ports',
         label: '設定 Port 與求解器',
+        eta: '約 2 分',
         hint: '在通道上建立元件端 Port 與 HFSS Setup／掃頻。',
         requires: ['load'],
         requiresNote: '排在疊構、背鑽、清理之後——Port 要建立在最終幾何上。',
@@ -111,12 +128,14 @@ export const TASK_GROUPS: TaskGroup[] = [
       {
         key: 'segment',
         label: 'N 段分割（可選擇不分割）',
+        eta: '約 3 分',
         hint: '沿通道主方向切成 N 段，於切面建立 Port；也可不分割。',
         requires: ['load'],
       },
       {
         key: 'schedule',
         label: '排程求解',
+        eta: '約 30 分起',
         hint: '逐段指定 HFSS／SIwave 並依序求解，完成後匯出 Touchstone。',
         requires: ['segment'],
         requiresNote:
@@ -125,6 +144,7 @@ export const TASK_GROUPS: TaskGroup[] = [
       {
         key: 'remotepack',
         label: '遠端求解包',
+        eta: '約 2 分',
         hint: '打包成可在求解機直接執行的資料夾，跑完再收回結果。',
         requires: ['schedule'],
       },
@@ -136,6 +156,7 @@ export const TASK_GROUPS: TaskGroup[] = [
       {
         key: 'cascade',
         label: '電路串接',
+        eta: '約 1 分',
         hint: '把各段 Touchstone 串接回完整通道。',
         requires: ['segment'],
         requiresNote: '或改用「外部 S 參數檔」模式，直接載入既有 .sNp（不需要載入電路板）。',
@@ -143,17 +164,20 @@ export const TASK_GROUPS: TaskGroup[] = [
       {
         key: 'sparam',
         label: 'S 參數檢視',
+        eta: '約 10 秒',
         hint: '串接結果的插入／回波損耗與串音，可切換單端與差動。',
         requires: ['cascade'],
       },
       {
         key: 'models',
         label: 'IBIS 模型與眼圖分析',
+        eta: '約 2 分',
         hint: '管理 IBIS 模型，綁定通道並執行眼圖分析。',
       },
       {
         key: 'tdr',
         label: 'TDR 阻抗定位',
+        eta: '約 1 分',
         hint: '以串接後 Touchstone 求解 TDR 阻抗曲線，'
           + '把阻抗劇變換算成 Layout 上的位置標記。',
         requires: ['cascade'],
@@ -161,6 +185,7 @@ export const TASK_GROUPS: TaskGroup[] = [
       {
         key: 'crosssection',
         label: '截面阻抗（Q2D）',
+        eta: '約 1 分',
         hint: '框範圍、拉切線，從 EDB 還原截面並求阻抗。',
         requires: ['load'],
         requiresNote:
@@ -169,6 +194,7 @@ export const TASK_GROUPS: TaskGroup[] = [
       {
         key: 'report',
         label: '一鍵 HTML 報告',
+        eta: '約 1 分',
         hint: '保存各結果畫面的最新快照，加入公司品牌與浮水印後產生自包含 HTML 報告。',
       },
     ],

@@ -199,6 +199,22 @@ function renderTask(
           <span style={{ fontSize: depth ? 15 : 18, fontWeight: 700 }}>
             {task.label}
           </span>
+          {/* 預估耗時：刻意壓到比說明文字更淡、字重不加粗，讓它讀起來是名稱的
+              附註而不是第二個標題。nowrap 是必要的——「約 5～30 分」一旦在
+              波浪號斷行，看起來就像兩個不相干的數字。 */}
+          {task.eta && (
+            <span
+              title="預估耗時（靜態估計，實際依板子大小與機器而定）"
+              style={{
+                marginLeft: 7, fontSize: 10, fontWeight: 400,
+                color: '#8d9db0', whiteSpace: 'nowrap',
+                border: '1px solid #2a3644', borderRadius: 999,
+                padding: '0 5px', verticalAlign: '2px',
+              }}
+            >
+              {task.eta}
+            </span>
+          )}
           <span style={{
             display: 'block', fontSize: depth ? 13 : 14, color: '#a8b8ca',
             marginTop: 5, lineHeight: 1.55,

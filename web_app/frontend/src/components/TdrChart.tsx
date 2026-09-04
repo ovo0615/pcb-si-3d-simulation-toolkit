@@ -20,13 +20,16 @@ interface TdrChartProps {
   markers?: TdrChartMarker[]
   /** 通道實體長度（mm）；有值時畫一條界線，超過的部分是遠端反射的鏡像。 */
   pathLengthMm?: number | null
+  /** 顯示上限（mm）：量測路的端點之後是夾持與再反射，超過就不畫。 */
+  xMaxMm?: number | null
   height?: number
 }
 
 const FONT = '"Calibri", "Microsoft JhengHei", sans-serif'
 
 export default function TdrChart({
-  distanceMm, impedanceOhm, markers = [], pathLengthMm = null, height = 240,
+  distanceMm, impedanceOhm, markers = [], pathLengthMm = null,
+  xMaxMm = null, height = 240,
 }: TdrChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(860)
@@ -52,15 +55,23 @@ export default function TdrChart({
   }
 
   // X 軸只畫到通道長度的 1.5 倍：更遠處是多次反射，畫出來只會壓扁有用區段。
+  // 量測路另有更準的上限（端點之後是夾持區），有給就用它。
   const xMaxData = distanceMm[n - 1]
-  const xMax = pathLengthMm && pathLengthMm > 0
+  let xMax = pathLengthMm && pathLengthMm > 0
     ? Math.min(xMaxData, pathLengthMm * 1.5) : xMaxData
+  if (xMaxMm && xMaxMm > 0) xMax = Math.min(xMax, xMaxMm)
   const visible: number[] = []
   for (let i = 0; i < n; i++) if (distanceMm[i] <= xMax) visible.push(i)
   if (visible.length < 2) return <div ref={containerRef} />
 
   const zs = visible.map(i => impedanceOhm[i])
-  const zLo = Math.min(...zs), zHi = Math.max(...zs)
+  const zLo = Math.min(...zs)
+  // Y 尺度要強韌：開路端附近 Z 發散到 kΩ 級，min/max 縮放會把整段有用
+  // 曲線壓成貼地平線。上限取「中位數的 4 倍」與實際最大值的較小者，
+  // 超出的曲線裁在頂端格線上（TDR 圖的標準做法）。
+  const sorted = [...zs].sort((a, b) => a - b)
+  const median = sorted[Math.floor(sorted.length / 2)]
+  const zHi = Math.min(Math.max(...zs), Math.max(4 * median, median + 50))
   const zPad = Math.max((zHi - zLo) * 0.12, 2)
   const yMin = zLo - zPad, yMax = zHi + zPad
 
@@ -70,7 +81,8 @@ export default function TdrChart({
   const sy = (z: number) => pad.top + (1 - (z - yMin) / (yMax - yMin)) * plotH
 
   const path = visible
-    .map((i, k) => `${k === 0 ? 'M' : 'L'}${sx(distanceMm[i]).toFixed(1)},${sy(impedanceOhm[i]).toFixed(1)}`)
+    .map((i, k) => `${k === 0 ? 'M' : 'L'}${sx(distanceMm[i]).toFixed(1)},`
+      + `${sy(Math.min(impedanceOhm[i], yMax)).toFixed(1)}`)
     .join(' ')
 
   // 刻度：X 取 6 格、Y 取 5 格的「好看數字」
