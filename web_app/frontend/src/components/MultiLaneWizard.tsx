@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ModelPackage } from './ModelLibrary'
 import { useCascadedChannel } from './useCascadedChannel'
 import RunHistory, { RestorableRun } from './RunHistory'
+import { LicenseTag, useLicenseBlock } from './LicenseTag'
 
 interface PortBinding {
   port_index: number
@@ -277,6 +278,9 @@ export default function MultiLaneWizard(
   const [dispositions, setDispositions] = useState<Record<number, Disposition>>({})
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null)
   const [busy, setBusy] = useState(false)
+  // 會用到 Ansys 的按鈕（ADR-0062）：沒有空位就變灰並寫原因。
+  const quickCheckBlock = useLicenseBlock(['model_check'])
+  const multiLaneBlock = useLicenseBlock(['multi_lane'])
   const [error, setError] = useState('')
   const [started, setStarted] = useState('')
   /** 快速檢驗的參考通道檔位（2026-08-29 下午）。 */
@@ -486,6 +490,17 @@ export default function MultiLaneWizard(
     return () => { alive = false; clearInterval(timer) }
   }, [])
 
+  /**
+   * 換了通道或任一側的模型，就把預檢結果**與已定案的驅動側**一起清掉。
+   *
+   * 只清 `suggestion` 是不夠的：`drivingSide` 留著會讓下一次預檢把上一片板子
+   * 選的方向送出去，後端收到就當成「依指定」，於是新檔案的方向是使用者從來
+   * 沒替它選過的（ADR-0049）。
+   */
+  useEffect(() => {
+    setSuggestion(null); setDrivingSide(null); setStarted('')
+  }, [touchstone, packageId, rxPackageId])
+
   /** 挑一個多埠 Touchstone。
    *
    *  沿用 `/api/browse_touchstone`（外部檔案接線本來就在用），它是多選的，
@@ -592,6 +607,10 @@ export default function MultiLaneWizard(
    *  電路裡留著**全部**接收端（fly-by 的負載就是那幾顆），只換 strobe。 */
   async function startAddressRun(device: string) {
     if (!suggestion || !addrResult) return
+    if (directionPending) {
+      setAddrError('匯流排方向尚未指定，請先在上方選定驅動側。')
+      return
+    }
     setAddrBusy(true); setAddrError(''); setStarted('')
     try {
       const entry = (addrResult.devices || [])
@@ -607,7 +626,14 @@ export default function MultiLaneWizard(
           touchstone_path: touchstone,
           package_id: packageId, rx_package_id: rxPackageId,
           lanes: addrResult.lanes,
-          driving_side: suggestion.bus_direction.driving_side ?? 0,
+          // 位址群就是 fly-by（一驅動多接收）。分組端點已經這樣標了，
+          // 照原樣送過去；讓後端去猜拓樸，只要有一顆顆粒沒被歸進來，
+          // 扇出就看起來像點對點，分支延遲整組不會被算進去。
+          ...(addrResult.topology ? { topology: addrResult.topology } : {}),
+          // 方向未定時**不送這個欄位**：送 0 會被後端當成「使用者指定第 1 側」，
+          // 於是雙向 I/O 有一半機率整場量到反方向而且毫無跡象（ADR-0049）。
+          ...(suggestion.bus_direction.driving_side !== null
+            ? { driving_side: suggestion.bus_direction.driving_side } : {}),
           tx_buffer: driverChoice ? pickedVariant(driverChoice) : '',
           rx_buffer: receiverChoice ? pickedVariant(receiverChoice) : '',
           dispositions: Object.entries(dispositions).map(([index, plan]) => ({
@@ -733,9 +759,11 @@ export default function MultiLaneWizard(
           }),
           driving_side: suggestion.bus_direction.driving_side,
           tx_buffer: choice?.tx.selected, rx_buffer: choice?.rx.selected,
-          dispositions: portsNeedingDisposition.map(item => ({
-            port_index: item.index, ...(dispositions[item.index] || { kind: 'open' }),
-          })),
+          // 沒填處置的 Port **不補預設**：默默選開路正是 ADR-0046 要禁的事。
+          // 填不完整時 `canStart` 已經擋住啟動，這裡不留第二條路。
+          dispositions: portsNeedingDisposition
+            .filter(item => dispositions[item.index])
+            .map(item => ({ port_index: item.index, ...dispositions[item.index] })),
           data_rate_gbps: dataRate, pattern_kind: patternKind,
           // 兩種都跑時把清單送過去；後端會逐種各自展開 Corner 與方向，
           // 並且**分開排名**——最差碼型量不到時序，混在一起排沒有意義。
@@ -848,6 +876,7 @@ export default function MultiLaneWizard(
     && suggestion!.bus_direction.driving_side === null
   const canStart = Boolean(suggestion) && suggestion!.blockers.length === 0
     && missingDisposition.length === 0 && !variantPending && !directionPending && !busy
+    && selectedLanes >= 1
 
   /** 把某一次紀錄的物理輸入填回表單。
    *
@@ -967,10 +996,13 @@ export default function MultiLaneWizard(
             onChange={event => setLossyReference(event.target.checked)} />
           用有損參考通道（Nyquist −10 dB 趨膚模型；預設是無損直連）
         </label>
-        <button className="btn" disabled={!packageId || busy || Boolean(job?.running)}
+        <button className="btn" disabled={!packageId || busy || Boolean(job?.running)
+          || Boolean(quickCheckBlock)}
+          title={quickCheckBlock || undefined}
           onClick={() => void runQuickCheck()}>
           {busy ? '處理中…' : '快速檢驗（不需 Touchstone）'}
         </button>
+        <LicenseTag functions={['model_check']} />
         {quickCheck && <p className="hint">
           已排入背景：{quickCheck.txModel} → {quickCheck.rxModel}，
           結果顯示在下方「分析狀態與結果」。
@@ -1031,9 +1063,12 @@ export default function MultiLaneWizard(
                   （{device.lanes.length} 條道）</span>
                 {device.strobe_labels?.length === 2
                   ? <button className="btn"
-                      disabled={!suggestion || addrBusy || Boolean(job?.running)}
-                      title={suggestion ? '以這顆的 CK 對為時間基準啟動'
-                        : '先按上方「執行預檢」取得緩衝器選擇'}
+                      disabled={!suggestion || addrBusy || directionPending
+                        || Boolean(job?.running) || Boolean(multiLaneBlock)}
+                      title={multiLaneBlock ? multiLaneBlock
+                        : !suggestion ? '先按上方「執行預檢」取得緩衝器選擇'
+                        : directionPending ? '先選定驅動側再啟動'
+                          : '以這顆的 CK 對為時間基準啟動'}
                       onClick={() => void startAddressRun(device.device)}>
                       以 {device.device} 為基準啟動
                     </button>
@@ -1333,7 +1368,12 @@ export default function MultiLaneWizard(
           <label>要出眼圖的道數（其餘 Port 需指定處置）
             <input className="input" type="number" min={1} max={lanes.length}
               value={selectedLanes}
-              onChange={event => setLaneCount(Number(event.target.value))} />
+              onChange={event => {
+                // 清空欄位時 `Number('')` 是 0，會讓「最差碼型涵蓋率」用 0 條道
+                // 去算，印出滿分覆蓋率並附上「-1 條攻擊者」。空的就回到未指定。
+                const value = Number(event.target.value)
+                setLaneCount(Number.isFinite(value) && value >= 1 ? value : null)
+              }} />
           </label>
           <label>碼型
             <select className="input" value={patternKind}
@@ -1598,9 +1638,12 @@ export default function MultiLaneWizard(
 
         <section>
           <h3>送出分析</h3>
-          <button className="btn" disabled={!canStart} onClick={() => void start(false)}>
+          <button className="btn" disabled={!canStart || Boolean(multiLaneBlock)}
+            title={multiLaneBlock || undefined}
+            onClick={() => void start(false)}>
             {busy ? '處理中…' : '開始多道分析'}
           </button>
+          <LicenseTag functions={['multi_lane']} />
 
           {/* 最差條件由結果排序得出，不預先假設 Slow 最差（ADR-0011）。 */}
           <h4>或一次跑多個 Corner</h4>
@@ -1622,7 +1665,8 @@ export default function MultiLaneWizard(
           {bothDirections && reverseOnlyDropped.length > 0 && <p className="hint">
             反方向少跑 {reverseOnlyDropped.join('、')}：那一側沒有驅動器。
           </p>}
-          <button className="btn" disabled={!canStart || corners.length === 0}
+          <button className="btn" disabled={!canStart || corners.length === 0 || Boolean(multiLaneBlock)}
+            title={multiLaneBlock || undefined}
             onClick={() => void start(true)}>
             {busy ? '處理中…'
               : `掃描 ${corners.length * (bothDirections ? 2 : 1)} 組`}

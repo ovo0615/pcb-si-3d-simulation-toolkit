@@ -10,8 +10,10 @@ import type {
 async function reportApi<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options)
   let payload: unknown = null
+  let parsed = false
   try {
     payload = await response.json()
+    parsed = true
   } catch {
     payload = null
   }
@@ -20,6 +22,17 @@ async function reportApi<T>(url: string, options?: RequestInit): Promise<T> {
       ? String((payload as { detail: unknown }).detail)
       : `HTTP ${response.status}`
     const error = new Error(detail) as Error & { status?: number }
+    error.status = response.status
+    throw error
+  }
+  // 2xx 但不是 JSON（204、或舊後端讓路徑落到 StaticFiles 回了一頁 HTML）：
+  // 原本照樣 `return payload as T`，於是呼叫端下一行去取 `.manifest`／
+  // `.snapshot` 得到「Cannot read properties of null」——訊息完全指不到
+  // 真正的原因。在這裡就講清楚。
+  if (!parsed || payload === null) {
+    const error = new Error(
+      `伺服器回應不是 JSON（HTTP ${response.status}）：${url}`,
+    ) as Error & { status?: number }
     error.status = response.status
     throw error
   }

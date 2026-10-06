@@ -5,6 +5,7 @@ import MultiLaneWizard from './MultiLaneWizard'
 import SpisimToolboxPanel from './SpisimToolboxPanel'
 import { QuickProbeResult, QuickProbeView } from './AmiQuickProbe'
 import { setModelsReportMetadata } from './reportMetadataStore'
+import { LicenseTag, useLicenseBlock } from './LicenseTag'
 
 type CompatibilityState = 'ready' | 'warning' | 'block'
 
@@ -81,6 +82,12 @@ export interface ModelPackage {
   /** 匯入或遷移時的修復紀錄。`kind: 'needs_user_choice'` 是「工具不敢猜、要你決定」，
    *  不是已經修好的東西——渲染時必須跟自動修正分開，否則使用者會以為已經處理完了。 */
   repairs?: { rule: string; detail: string; impact: string; kind?: string }[]
+  /** manifest 讀不出來時，後端會回一筆只有識別碼、`readable: false` 與 `error`
+   *  的佔位資料（見 model_library.list_model_packages）——它沒有 `ami`、
+   *  `native_libraries`、`compatibility.target` 這些欄位。詳細面板要先認得
+   *  這個旗標，否則點到它就是 `undefined.length`，整頁白掉。 */
+  readable?: boolean
+  error?: string
 }
 
 export interface AmiParameter {
@@ -194,6 +201,9 @@ const scanText: Record<string, string> = {
 const trustText: Record<string, string> = {
   pending: '尚未信任',
   trusted: '已信任',
+  // 後端在「模型檔換了、原本的信任不再成立」時回 revoked（見 model_library
+  // `_decorate_trust`）。沒有這一條，畫面就直接把英文代碼印出來。
+  revoked: '信任已撤銷',
 }
 
 export default function ModelLibrary() {
@@ -258,7 +268,11 @@ export default function ModelLibrary() {
       const data = await api<{ path: string }>(
         `/api/browse_csv?title=${encodeURIComponent(title)}`)
       if (data.path) setMbField(key, data.path)
-    } catch (reason) { console.error(reason) }
+    } catch (reason) {
+      // 只寫 console 的話，對話框開不起來（例如主機沒有 tkinter）跟使用者按
+      // 取消長得一模一樣：欄位空著、畫面沒動、沒有任何訊息。
+      setMbMsg(`選擇檔案失敗：${apiErrorText(reason)}`)
+    }
   }
 
   const browseMbFolder = async () => {
@@ -266,7 +280,9 @@ export default function ModelLibrary() {
       const data = await api<{ path: string }>(
         '/api/browse_folder?title=' + encodeURIComponent('選擇放量測 CSV 的資料夾'))
       if (data.path) { setMbFolder(data.path); await scanMbFolder(data.path) }
-    } catch (reason) { console.error(reason) }
+    } catch (reason) {
+      setMbMsg(`選擇資料夾失敗：${apiErrorText(reason)}`)
+    }
   }
 
   /** 掃資料夾、依檔名特徵把 CSV 填進對應欄位。
@@ -376,6 +392,8 @@ export default function ModelLibrary() {
     record: null | { status: string; seconds?: number; reason?: string; at?: string }
   } | null>(null)
   const [healthRunning, setHealthRunning] = useState(false)
+  // 健檢會開 Circuit 求解（ADR-0062）：沒有空位就變灰並寫原因。
+  const healthBlock = useLicenseBlock(['model_check'])
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
 
@@ -823,6 +841,18 @@ export default function ModelLibrary() {
         <main className="model-library__detail">
           {!selected ? (
             <div className="model-library__empty">選擇或匯入模型後，這裡會顯示解析結果。</div>
+          ) : selected.readable === false ? (
+            // 壞掉的那一筆照樣列得出來（後端刻意如此），但它沒有解析結果可看，
+            // 只能把讀不出來的原因原樣交代清楚——別假裝它是一份正常的模型。
+            <div className="model-library__detail-title">
+              <div>
+                <h3>{selected.display_name}</h3>
+                <div className="model-library__issue is-error">
+                  這一份讀不出來：{selected.error || '原因不明'}
+                </div>
+                <p className="hint">請確認模型庫裡這個套件的 manifest 是否被改動或損毀。</p>
+              </div>
+            </div>
           ) : <>
             <div className="model-library__detail-title">
               <div>
@@ -889,15 +919,21 @@ export default function ModelLibrary() {
                       ? <span className="is-pass">通過（{health.record.seconds} 秒，{health.record.at}）</span>
                       : health.record.status === 'not_applicable'
                         ? <span>{health.record.reason}</span>
+                      : health.record.status === 'license_unavailable'
+                        // 授權不足：健檢沒跑完，不代表模型有問題。
+                        ? <span style={{ color: '#ffd28a' }} title={health.record.reason}>
+                            沒跑完：{(health.record.reason || '').slice(0, 80)}
+                          </span>
                         : <span className="is-fail" title={health.record.reason}>
                             失敗：{(health.record.reason || '').slice(0, 80)}
                           </span>
                   ) : <span>尚未健檢。</span>}
                 <button className="btn" onClick={() => void startHealthcheck()}
-                  disabled={healthRunning || Boolean(health && !health.applicable)}
-                  title={health?.blocker || '用參考通道實際求解一次'}>
+                  disabled={healthRunning || Boolean(health && !health.applicable) || Boolean(healthBlock)}
+                  title={healthBlock || health?.blocker || '用參考通道實際求解一次'}>
                   {healthRunning ? '健檢中…' : '用參考通道健檢'}
                 </button>
+                <LicenseTag functions={['model_check']} />
               </div>
               <p className="hint">健檢過、真通道失敗＝通道問題；健檢不過＝模型問題。</p>
             </section>
@@ -1004,7 +1040,11 @@ export default function ModelLibrary() {
                           </span>
                         </td>
                         <td>
-                          <span className={`model-library__native-state is-${item.trust_status}`}>
+                          {/* revoked 借用 is-error 的紅色樣式：那是「本來信任、
+                              現在不算數」的狀態，視覺上不該和「尚未信任」一樣淡。
+                              樣式表另有專屬 class 之前，先對應到現有的紅色。 */}
+                          <span className={'model-library__native-state is-'
+                            + (item.trust_status === 'revoked' ? 'error' : item.trust_status)}>
                             {trustText[item.trust_status] || item.trust_status}
                           </span>
                         </td>

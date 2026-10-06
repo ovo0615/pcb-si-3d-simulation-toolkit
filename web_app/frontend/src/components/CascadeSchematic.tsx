@@ -1,6 +1,6 @@
 // 串接電路示意圖（純 SVG）— 功能3：解算前即可預覽 N 段接線
 // 資料契約與後端 /api/cascade/preview 一致；外部檔案模式由前端自組相同結構。
-import { useEffect, useState, type WheelEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export interface CascadeGraph {
   blocks: {
@@ -107,9 +107,25 @@ export default function CascadeSchematic({ graph }: Props) {
   useEffect(() => {
     setView({ x: 0, y: 0, w: svgW, h: svgH })
   }, [svgW, svgH])
-  const handleWheel = (event: WheelEvent<SVGSVGElement>) => {
+  /**
+   * 滾輪縮放掛原生監聽器。React 的 `onWheel` 是掛在根節點的 passive 監聽器，
+   * 裡面 `preventDefault()` 攔不住任何東西——縮放電路圖時整頁跟著捲。
+   * 監聽器固定呼叫 ref，ref 每次 render 更新（handleWheel 讀 view／svgW）。
+   */
+  const svgRef = useRef<SVGSVGElement | null>(null)
+  const wheelRef = useRef<(event: globalThis.WheelEvent) => void>(() => undefined)
+  useEffect(() => {
+    const box = svgRef.current
+    if (!box) return
+    const handler = (event: globalThis.WheelEvent) => wheelRef.current(event)
+    box.addEventListener('wheel', handler, { passive: false })
+    return () => box.removeEventListener('wheel', handler)
+  }, [blocks.length])
+  const handleWheel = (event: globalThis.WheelEvent) => {
     event.preventDefault()
-    const rect = event.currentTarget.getBoundingClientRect()
+    const box = svgRef.current
+    if (!box) return
+    const rect = box.getBoundingClientRect()
     const ratioX = (event.clientX - rect.left) / Math.max(rect.width, 1)
     const ratioY = (event.clientY - rect.top) / Math.max(rect.height, 1)
     const factor = event.deltaY > 0 ? 1.15 : 0.87
@@ -122,6 +138,7 @@ export default function CascadeSchematic({ graph }: Props) {
       h: nextH,
     })
   }
+  wheelRef.current = handleWheel
   if (blocks.length === 0) {
     return <div style={{ padding: 40, color: 'var(--faint)', textAlign: 'center' }}>尚無串接資料</div>
   }
@@ -132,9 +149,9 @@ export default function CascadeSchematic({ graph }: Props) {
         style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 2, padding: '5px 10px' }}>
         ⟳ Fit All
       </button>
-      <svg width="100%" height="100%" viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+      <svg ref={svgRef} width="100%" height="100%"
+        viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
         preserveAspectRatio="xMidYMid meet"
-        onWheel={handleWheel}
         onMouseDown={event => setDrag({
           x: event.clientX, y: event.clientY, viewX: view.x, viewY: view.y,
         })}

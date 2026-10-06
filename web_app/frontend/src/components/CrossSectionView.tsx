@@ -109,8 +109,14 @@ export default function CrossSectionView({
           y0_mm: -(index + 1), y1_mm: -index,
           material: null,
         }))
-    const yLo = Math.min(...rows.map(r => r.y0_mm))
-    const yHi = Math.max(...rows.map(r => r.y1_mm))
+    // 疊構與層清單都是空的時候，`Math.min(...[])` 是 Infinity、
+    // `Math.max(...[])` 是 -Infinity，之後每一個座標都算成 NaN——React 照樣
+    // 把屬性寫出去，畫面上就是一張空白的圖，一句話都沒有。
+    let yLo = Infinity, yHi = -Infinity
+    for (const row of rows) {
+      if (row.y0_mm < yLo) yLo = row.y0_mm
+      if (row.y1_mm > yHi) yHi = row.y1_mm
+    }
     return {
       sLo: Math.min(sLo, sHi), sHi: Math.max(sLo, sHi),
       rows, yLo, yHi, toScale: scan.stackup.length > 0,
@@ -154,6 +160,13 @@ export default function CrossSectionView({
           橫向與縱向各自縮放{geometry.toScale ? '' : '；疊構讀不到，層厚為示意'}。
           橘色是訊號、藍色是參考。
         </div>
+        {geometry.rows.length === 0 ? (
+          // 疊構與層清單同時是空的：畫不出任何一層，圖會是全空白。與其給一張
+          // 空圖讓人以為是渲染壞了，不如講清楚這條切線上什麼都沒有。
+          <div style={{ ...statusStyle('warn'), marginTop: 6 }}>
+            這條切線上沒有任何層，剖視圖畫不出來。請確認切線位置與工作範圍。
+          </div>
+        ) : (
         <svg viewBox={`0 0 ${W} ${H}`} style={{
           width: '100%', marginTop: 6, background: '#0c0e12',
           border: `1px solid ${RULE}`, borderRadius: 6,
@@ -201,6 +214,7 @@ export default function CrossSectionView({
             {geometry.sHi.toFixed(2)} mm
           </text>
         </svg>
+        )}
       </div>
 
       <div style={statusStyle(scan.plan.solvable ? 'ok' : 'warn')}>
@@ -251,7 +265,13 @@ export default function CrossSectionView({
           Reference 的段會合併成單一 GND 導體（假設交流同電位）。改身分後要重新掃描。
         </div>
         <div style={{ maxHeight: 260, overflowY: 'auto', border: `1px solid ${RULE}`, borderRadius: 6 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+          {/* 表格另外存一張完整快照：外層有 260px 的捲動框，整頁快照只會拍到
+              前面幾列，而圖上完全看不出被截掉了（與眼圖同一個做法）。 */}
+          <table
+            data-report-separate-snapshot="true"
+            data-report-kind="cross-section-segments"
+            data-report-title="截面：截到的段"
+            style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
               <tr style={{ position: 'sticky', top: 0 }}>
                 <th style={headCell}>層</th>
@@ -384,7 +404,9 @@ export function CrossSectionResults({
               ? `　${(row.axis || '').toUpperCase()} = ${row.coordinate_mm.toFixed(3)} mm` : ''}
             {/* 分隔的全形空格要留在表達式裡：JSX 會把換行後開頭的空白吃掉，
                 寫成純文字會變成「mm精度」。 */}
-            {`　精度 ${MODE_LABELS[row.solve_mode || ''] || row.solve_mode}`}
+            {/* `solve_mode` 可能是 null（後端 `result.get("solve_mode")`），
+                直接印會變成「精度 undefined」。 */}
+            {`　精度 ${MODE_LABELS[row.solve_mode || ''] || row.solve_mode || '未標示'}`}
             {typeof row.per_error === 'number' ? `（PerError ${row.per_error}%）` : ''}
             {typeof row.seconds === 'number' ? `　${row.seconds} 秒` : ''}
           </div>
@@ -400,8 +422,12 @@ export function CrossSectionResults({
                       {value.toFixed(3)} Ω
                     </td>
                     <td style={{ ...cell, textAlign: 'right', color: '#8fa1b5' }}>
-                      L {(row.matrix?.[`L(${name},${name})`] ?? 0).toFixed(2)} nH/m
-                      　C {(row.matrix?.[`C(${name},${name})`] ?? 0).toFixed(2)} pF/m
+                      {/* 缺值寫「—」不寫 0：`L 0.00 nH/m` 讀起來是量到 0，
+                          而實際上是這一項沒有值（ADR-0030）。 */}
+                      L {typeof row.matrix?.[`L(${name},${name})`] === 'number'
+                        ? `${row.matrix[`L(${name},${name})`].toFixed(2)} nH/m` : '—'}
+                      　C {typeof row.matrix?.[`C(${name},${name})`] === 'number'
+                        ? `${row.matrix[`C(${name},${name})`].toFixed(2)} pF/m` : '—'}
                     </td>
                   </tr>
                 ))}

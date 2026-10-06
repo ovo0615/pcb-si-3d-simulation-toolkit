@@ -121,7 +121,7 @@ export default function ReportSnapshotButton({
           },
         })
       }
-      setMessage(`快照已保存，共 ${details.length + 1} 張；眼圖已各自完整輸出。`)
+      setMessage(`快照已保存，共 ${details.length + 1} 張；捲動的結果已各自完整輸出。`)
       window.dispatchEvent(new CustomEvent('pcbsi-report-snapshot-saved', {
         detail: { workspace: workspaceResult.workspace, kind },
       }))
@@ -151,7 +151,7 @@ export default function ReportSnapshotButton({
             <h3>更新報告快照</h3>
             <div className="report-muted">{title}</div>
             <div className="report-muted">
-              若畫面含多張眼圖，系統會同時保存工作畫面總覽與每張眼圖的獨立完整快照。
+              眼圖與會捲動的表格會另存完整快照，不會只拍到看得見的部分。
             </div>
             <label>工程狀態
               <select value={status} onChange={event => setStatus(event.target.value as SnapshotStatus)}>

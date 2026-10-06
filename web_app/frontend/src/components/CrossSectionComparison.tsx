@@ -7,6 +7,7 @@
 // 第三種可能。
 
 import { useMemo } from 'react'
+import { impedanceRange, minMax } from './chartScale'
 
 const TEXT = '#d1dbe7'
 const HEADING = '#e8eef5'
@@ -53,6 +54,11 @@ export interface ComparisonRow {
   tdr_max_ohm?: number
   window_spread?: number
   unstable?: boolean
+  /** 這條切線的座標被同一條走線跨過幾次（等長繞線上很常見）。 */
+  crossings?: number
+  /** 跨過不只一次——後端挑了離切線框中心最近的那一次，可能挑錯折。
+   *  這是「這個數字對到哪裡」的問題，跟差多少無關，所以有值的列也要標。 */
+  ambiguous?: boolean
   features?: ComparisonFeature[]
 }
 
@@ -74,10 +80,14 @@ interface Props {
   result: ComparisonResult
   tdrDistanceMm: number[]
   tdrImpedanceOhm: number[]
+  /** 與上方 TDR 圖同一組截斷條件；不給就畫完整條曲線（見下方 useMemo）。 */
+  pathLengthMm?: number | null
+  xMaxMm?: number | null
 }
 
 export default function CrossSectionComparison({
   result, tdrDistanceMm, tdrImpedanceOhm,
+  pathLengthMm = null, xMaxMm = null,
 }: Props) {
   const matched = result.rows.filter(
     r => r.matched && r.tdr_ohm != null && r.q2d_ohm != null)
@@ -86,20 +96,47 @@ export default function CrossSectionComparison({
     if (tdrDistanceMm.length < 2) return null
     const W = 480, H = 210, L = 42, R = 10, T = 10, B = 26
     const xMin = tdrDistanceMm[0]
-    const xMax = tdrDistanceMm[tdrDistanceMm.length - 1]
-    // 縱軸要同時容得下兩種方法的值，否則差最多的那個點會被切在框外——
-    // 而那個點正是最需要看到的。
-    const all = [...tdrImpedanceOhm, ...matched.map(r => r.q2d_ohm as number)]
-    const spread = Math.max(...all) - Math.min(...all)
-    const pad = Math.max(0.5, spread * 0.15)
-    const yMin = Math.min(...all) - pad
-    const yMax = Math.max(...all) + pad
+    // X 的截斷條件要跟上面那張 TDR 圖一樣，否則兩張並排的圖橫軸長度不同，
+    // 讀起來像兩條不同的曲線。
+    let xMax = tdrDistanceMm[tdrDistanceMm.length - 1]
+    if (pathLengthMm && pathLengthMm > 0) xMax = Math.min(xMax, pathLengthMm * 1.5)
+    if (xMaxMm && xMaxMm > 0) xMax = Math.min(xMax, xMaxMm)
+    const visible: number[] = []
+    for (let i = 0; i < tdrDistanceMm.length; i++) {
+      if (tdrDistanceMm[i] <= xMax
+        && Number.isFinite(tdrImpedanceOhm[i])) visible.push(i)
+    }
+    if (visible.length < 2) return null
+
+    // 橫軸被截斷之後，落在框外的那幾條切線不能照畫——`px()` 會算出比畫布還
+    // 遠的座標，SVG 不裁切，記號就直接畫到圖框外面（或疊在右邊界上），看起來
+    // 像那條切線的阻抗真的長在那裡。畫得出來的才畫，其餘的在圖下說明有幾條。
+    const inRange = matched.filter(row => {
+      const d = row.distance_mm
+      return d != null && d >= xMin && d <= xMax
+    })
+
+    // 縱軸：直接 min/max 會被開路端 kΩ 級的發散壓成一條貼底的直線，而這張圖
+    // 存在的理由就是讀幾歐姆的差。用 TDR 圖同一支中位數夾持（chartScale），
+    // 再把 Q2D 的點納進來——差最多的那個點正是最需要看到的，不能切在框外。
+    // 只納入畫得出來的那幾條：被橫軸截掉的點不會出現在圖上，讓它撐開縱軸
+    // 只會把留下來的曲線壓扁。
+    const base = impedanceRange(visible.map(i => tdrImpedanceOhm[i]))
+    const q2d = inRange.map(r => r.q2d_ohm as number).filter(Number.isFinite)
+    const { min: qLo, max: qHi } = minMax(q2d)
+    let yMin = base.yMin, yMax = base.yMax
+    if (q2d.length) {
+      const pad = Math.max(0.5, (qHi - qLo) * 0.15)
+      yMin = Math.min(yMin, qLo - pad)
+      yMax = Math.max(yMax, qHi + pad)
+    }
     return {
-      W, H, L, R, T, B, xMin, xMax, yMin, yMax,
+      W, H, L, R, T, B, xMin, xMax, yMin, yMax, visible,
+      rows: inRange, hidden: matched.length - inRange.length,
       px: (v: number) => L + (v - xMin) / Math.max(xMax - xMin, 1e-9) * (W - L - R),
       py: (v: number) => T + (yMax - v) / Math.max(yMax - yMin, 1e-9) * (H - T - B),
     }
-  }, [tdrDistanceMm, tdrImpedanceOhm, matched])
+  }, [tdrDistanceMm, tdrImpedanceOhm, matched, pathLengthMm, xMaxMm])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10,
@@ -131,11 +168,14 @@ export default function CrossSectionComparison({
               </g>
             )
           })}
+          {/* 超出上限的點裁在頂端格線上（與 TDR 圖同一種畫法），
+              不要讓一次發散把整條曲線拉出框外。 */}
           <polyline
-            points={tdrDistanceMm.map((d, i) =>
-              `${chart.px(d)},${chart.py(tdrImpedanceOhm[i])}`).join(' ')}
+            points={chart.visible.map(i =>
+              `${chart.px(tdrDistanceMm[i])},`
+              + `${chart.py(Math.min(tdrImpedanceOhm[i], chart.yMax))}`).join(' ')}
             fill="none" stroke={TDR_COLOR} strokeWidth={1.4} />
-          {matched.map(row => {
+          {chart.rows.map(row => {
             const d = row.distance_mm as number
             const half = (row.resolution_mm || 0) / 2
             const zTdr = row.tdr_ohm as number
@@ -149,8 +189,17 @@ export default function CrossSectionComparison({
                 <line x1={chart.px(d)} x2={chart.px(d)}
                   y1={chart.py(zTdr)} y2={chart.py(zQ2d)}
                   stroke={Q2D_COLOR} strokeWidth={1} strokeDasharray="2 2" />
+                {/* 對到哪一折不確定的點畫一圈外環：位置本身有疑問，
+                    不能跟位置明確的點長得一模一樣。 */}
+                {row.ambiguous && (
+                  <circle cx={chart.px(d)} cy={chart.py(zQ2d)} r={6.4}
+                    fill="none" stroke={WARN} strokeWidth={1.4}
+                    strokeDasharray="2 2" />
+                )}
                 <circle cx={chart.px(d)} cy={chart.py(zQ2d)} r={3.6} fill={Q2D_COLOR}>
-                  <title>{`${row.name}\nQ2D ${zQ2d.toFixed(3)} Ω\nTDR ${zTdr.toFixed(3)} Ω`}</title>
+                  <title>{`${row.name}\nQ2D ${zQ2d.toFixed(3)} Ω\nTDR ${zTdr.toFixed(3)} Ω`
+                    + (row.ambiguous
+                      ? `\n跨過這個座標 ${row.crossings ?? 2} 次，位置可能對錯折` : '')}</title>
                 </circle>
               </g>
             )
@@ -165,6 +214,15 @@ export default function CrossSectionComparison({
           <text x={chart.W - chart.R} y={chart.T + 30} fill={TDR_COLOR}
             fontSize={13} fontWeight={700} textAnchor="end">— TDR（粗帶＝解析度）</text>
         </svg>
+      )}
+
+      {/* 被橫軸截斷條件擋在框外的切線：不畫，但一定要說有幾條，
+          否則圖上少了兩個點跟「那兩條沒對到」看起來完全一樣。 */}
+      {chart && chart.hidden > 0 && (
+        <div style={HINT}>
+          另有 {chart.hidden} 條超出顯示範圍（橫軸截到 {chart.xMax.toFixed(1)} mm），
+          圖上沒有畫；下表仍然完整。
+        </div>
       )}
 
       {result.rows.filter(r => r.unstable).map(row => (
@@ -183,17 +241,27 @@ export default function CrossSectionComparison({
           color: '#c8e6c9', background: 'rgba(126, 231, 135, 0.10)',
           border: '1px solid rgba(126, 231, 135, 0.28)',
         }}>
+          {/* 缺值就寫「—」，不要補 0：`中位差 0.0000 Ω` 讀起來是量到了完美
+              吻合，而實際上是沒有這個數字（ADR-0030）。 */}
           {result.summary.comparable} 條切線對得到 TDR 曲線，
-          中位差 {(result.summary.median_delta_ohm ?? 0).toFixed(4)} Ω。
-          差最多的是 {result.summary.worst}
-          （{((result.summary.worst_relative ?? 0) * 100).toFixed(2)}%）。
+          中位差 {result.summary.median_delta_ohm == null
+            ? '—' : `${result.summary.median_delta_ohm.toFixed(4)} Ω`}。
+          差最多的是 {result.summary.worst || '—'}
+          （{result.summary.worst_relative == null
+            ? '—' : `${(result.summary.worst_relative * 100).toFixed(2)}%`}）。
           {(result.summary.unstable ?? 0) > 0
             ? `另有 ${result.summary.unstable} 條落在劇變邊緣，沒有列入統計。` : ''}
         </div>
       )}
 
       <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+        {/* 這張表在窄視窗下是橫向捲動的，整頁快照只拍得到左半邊。另存一張
+            完整的，讀報告的人才看得到右邊那幾欄。 */}
+        <table
+          data-report-separate-snapshot="true"
+          data-report-kind="cross-section-comparison"
+          data-report-title="截面阻抗與 TDR 對照表"
+          style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <thead>
             <tr>
               <th style={headCell}>切線</th>
@@ -206,7 +274,17 @@ export default function CrossSectionComparison({
           <tbody>
             {result.rows.map(row => (
               <tr key={row.name}>
-                <td style={cell}>{row.name}</td>
+                <td style={cell}>
+                  {row.name}
+                  {/* 跨過同一個座標好幾次時，這一列的距離與 TDR 值都是「猜的
+                      那一折」。數字照給，但不能不標——標了才會有人去確認框
+                      在哪一折上。 */}
+                  {row.ambiguous && (
+                    <span style={{ color: WARN }}>
+                      　⚠ 跨 {row.crossings ?? 2} 次
+                    </span>
+                  )}
+                </td>
                 <td style={{ ...cell, textAlign: 'right' }}>
                   {row.distance_mm != null ? row.distance_mm.toFixed(2) : '—'}
                 </td>
@@ -231,7 +309,14 @@ export default function CrossSectionComparison({
                     : row.delta_ohm != null
                       ? `${row.delta_ohm > 0 ? '+' : ''}${row.delta_ohm.toFixed(3)}`
                         + `（${((row.relative ?? 0) * 100).toFixed(2)}%）`
-                      : (row.reason || row.note || '—')}
+                      : (row.reason || '—')}
+                  {/* `note` 以前只在算不出差值時才顯示，於是「跨過六次、
+                      這裡取的是最近的那一折」這種說明，剛好在有數字可看
+                      （最需要提醒的時候）整句消失。有就印，跟數字並存。 */}
+                  {row.note && !row.unstable && (
+                    <div style={{ color: '#9fb0c3', fontSize: 10.5,
+                                  fontWeight: 400 }}>{row.note}</div>
+                  )}
                 </td>
               </tr>
             ))}

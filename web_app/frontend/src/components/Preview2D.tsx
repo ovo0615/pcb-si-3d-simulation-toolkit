@@ -156,16 +156,6 @@ interface Preview2DProps {
   onCrossSectionRegionDrawn?: (region: CrossSectionRegion) => void
   onCrossSectionCutDrawn?: (cut: CrossSectionCut) => void
   estimatedCutoutBoundary?: number[][] | null // PyEDB 唯讀預檢外框（mm）
-  actualCutoutBoundary?: number[][] | null // 正式裁切回傳外框（mm）
-  showBoundaryDifferenceFill?: boolean // 正式裁切比對：是否顯示橘／藍／綠半透明差異填色
-  onBoundaryDifferenceFillChange?: (visible: boolean) => void
-  boundaryComparison?: {
-    available: boolean
-    within_tolerance: boolean
-    tolerance_mm: number
-    max_boundary_error_mm: number | null
-    area_difference_percent: number | null
-  } | null
 }
 
 // ── 顏色常數 ────────────────────────────────────────────────
@@ -237,10 +227,6 @@ export default function Preview2D({
   focusBounds = null,
   tdrMarkers = null,
   estimatedCutoutBoundary = null,
-  actualCutoutBoundary = null,
-  showBoundaryDifferenceFill = true,
-  onBoundaryDifferenceFillChange,
-  boundaryComparison = null,
   crossSectionMode = 'none',
   onCrossSectionModeChange,
   crossSectionRegion = null,
@@ -350,6 +336,13 @@ export default function Preview2D({
     return { min:[minX,minY], max:[maxX,maxY] }
   }, [data])
 
+  /** 這一份資料是否已經真的完成過一次全覽定位（見 ResizeObserver）。 */
+  const fittedRef = useRef(false)
+  /** 使用者是否在上次全覽之後自己平移／縮放過。沒動過的話，畫布尺寸一變
+   *  （載入後圖層面板展開、拖動日誌面板、視窗縮放）就重新置中——原本只在
+   *  「還沒 fit 過」時重算，板子停在舊尺寸的中心，看起來偏一邊（#0062）。 */
+  const userMovedViewRef = useRef(false)
+
   const fitView = useCallback(() => {
     if (!data || !containerRef.current) return
     const { min, max } = computeContentBounds() || data.bounds
@@ -357,12 +350,18 @@ export default function Preview2D({
     if (cW <= 0 || cH <= 0) return
     const w = containerRef.current.clientWidth
     const h = containerRef.current.clientHeight
+    // 容器還沒排版（被隱藏、或第一次 layout）時量到 0：算出 scale=0，
+    // 之後每一次繪圖都變成無聲的無效操作，畫面就一直是空白板。
+    if (w <= 0 || h <= 0) return
     const s = Math.min(w*0.85/cW, h*0.85/cH)
+    if (!Number.isFinite(s) || s <= 0) return
     const cx = (min[0]+max[0])/2, cy = (min[1]+max[1])/2
     setTransform({ x: w/2 - cx*s, y: -h/2 + cy*s, scale: s })
+    fittedRef.current = true
+    userMovedViewRef.current = false
   }, [data, computeContentBounds])
 
-  useEffect(() => { fitView() }, [data, fitKey, fitView])
+  useEffect(() => { fittedRef.current = false; fitView() }, [data, fitKey, fitView])
 
   useEffect(() => {
     if (!focusBounds || !containerRef.current) return
@@ -377,6 +376,7 @@ export default function Preview2D({
     const cx = (focusBounds.min[0] + focusBounds.max[0]) / 2
     const cy = (focusBounds.min[1] + focusBounds.max[1]) / 2
     setTransform({ x: w / 2 - cx * scale, y: -h / 2 + cy * scale, scale })
+    userMovedViewRef.current = true
   }, [focusBounds])
 
   // ── 顏色 ──────────────────────────────────────────────────
@@ -674,7 +674,13 @@ export default function Preview2D({
     }
 
     // ── 功能2：禁切外框、理想位置、拒絕候選與選定切面 ───────
-    if (segmentCuts && segmentCuts.positions_mm.length > 0) {
+    // 不能只看 `positions_mm`：規劃不出切點（feasible=false）時它是空的，
+    // 但複雜區與分段矩形還在——那正是「為什麼刀下不去」的唯一圖示，
+    // 偏偏就在這個情況下整組疊圖消失，畫面只剩一塊乾淨的板子。
+    if (segmentCuts && (segmentCuts.positions_mm.length > 0
+      || segmentCuts.cuts?.length
+      || segmentCuts.segment_boxes?.length
+      || segmentCuts.complexity_regions?.length)) {
       const contentBounds = computeContentBounds() || data.bounds
       const axis = segmentCuts.direction === 'x' ? 0 : 1
       ctx.save()
@@ -897,31 +903,33 @@ export default function Preview2D({
           ctx.restore()
         })
         ctx.globalAlpha = 1
-        ctx.restore()
-        return
-      }
-
-      const edges = regionEdges
-      for (let index = 0; index + 1 < edges.length; index++) {
-        const center = (edges[index] + edges[index + 1]) / 2
-        const labelX = axis === 0 ? center : contentBounds.max[0]
-        const labelY = axis === 0 ? contentBounds.max[1] : center
-        ctx.save()
-        ctx.translate(labelX, labelY)
-        ctx.scale(1 / transform.scale, -1 / transform.scale)
-        ctx.font = 'bold 12px "Calibri","Microsoft JhengHei",sans-serif'
-        const regionSolver = segmentCuts.region_solvers?.[index]
-        const regionScore = segmentCuts.region_scores?.[index]
-        ctx.fillStyle = regionSolver === 'siwave'
-          ? 'rgba(91, 245, 154, 0.98)'
-          : regionSolver === 'hfss'
-            ? 'rgba(190, 160, 255, 0.98)'
-            : 'rgba(0, 229, 255, 0.95)'
-        const suffix = regionSolver
-          ? ` ${regionSolver.toUpperCase()}${Number.isFinite(regionScore) ? ` · ${regionScore}` : ''}`
-          : ''
-        ctx.fillText(`S${index + 1}${suffix}`, -8, -8)
-        ctx.restore()
+      } else {
+        // 這裡原本是 `return`，會把整個 drawCanvas 收掉，連後面的 TDR 標記、
+        // 截面切線與外框比對都不畫。實際上只是「矩形分段已經標好了，不必再
+        // 標帶狀分段」——跳過這一段就好，不要順手把其他疊圖一起帶走。
+        // 一刀都沒有時整片板子就是「第 1 段」，標一個 S1 只是雜訊。
+        const edges = segmentCuts.positions_mm.length ? regionEdges : []
+        for (let index = 0; index + 1 < edges.length; index++) {
+          const center = (edges[index] + edges[index + 1]) / 2
+          const labelX = axis === 0 ? center : contentBounds.max[0]
+          const labelY = axis === 0 ? contentBounds.max[1] : center
+          ctx.save()
+          ctx.translate(labelX, labelY)
+          ctx.scale(1 / transform.scale, -1 / transform.scale)
+          ctx.font = 'bold 12px "Calibri","Microsoft JhengHei",sans-serif'
+          const regionSolver = segmentCuts.region_solvers?.[index]
+          const regionScore = segmentCuts.region_scores?.[index]
+          ctx.fillStyle = regionSolver === 'siwave'
+            ? 'rgba(91, 245, 154, 0.98)'
+            : regionSolver === 'hfss'
+              ? 'rgba(190, 160, 255, 0.98)'
+              : 'rgba(0, 229, 255, 0.95)'
+          const suffix = regionSolver
+            ? ` ${regionSolver.toUpperCase()}${Number.isFinite(regionScore) ? ` · ${regionScore}` : ''}`
+            : ''
+          ctx.fillText(`S${index + 1}${suffix}`, -8, -8)
+          ctx.restore()
+        }
       }
       ctx.restore()
     }
@@ -1014,15 +1022,15 @@ export default function Preview2D({
     // 裁切可能相差甚遠，容易讓人誤以為那就是實際裁切範圍，已整段移除。
     // 現在只在按下「分析精確裁切外框」（後端唯讀呼叫與正式裁切相同的
     // 演算法）之後才會畫預估外框。
+    // 裁切完成後的「預估 vs 實際」外框比對與填色已移除（#0062）：裁切後
+    // 分頁只畫裁切後的板子，這裡只剩裁切前的預估外框。
     const hasBackendEstimate = (estimatedCutoutBoundary?.length || 0) >= 3
-    const hasActualBoundary = (actualCutoutBoundary?.length || 0) >= 3
     if (hasBackendEstimate) {
       let sx1 = Infinity, sy1 = Infinity, sx2 = -Infinity, sy2 = -Infinity
       {
         const exp = expansionMm || 0
         const previewPoly: number[][] = estimatedCutoutBoundary || []
-        const actualPoly = hasActualBoundary ? actualCutoutBoundary! : null
-        const outlinePoints = actualPoly || previewPoly
+        const outlinePoints = previewPoly
         const outlineXs = outlinePoints.map(point => point[0])
         const outlineYs = outlinePoints.map(point => point[1])
         sx1 = Math.min(...outlineXs); sx2 = Math.max(...outlineXs)
@@ -1050,42 +1058,16 @@ export default function Preview2D({
           ctx.closePath()
         }
 
-        if (!actualPoly) {
-          // 尚未正式裁切：壓暗外部區域，橘框代表「預估」而非已完成結果。
-          ctx.fillStyle = 'rgba(0,0,0,0.52)'
-          ctx.beginPath()
-          ctx.rect(mx1, my1, mx2-mx1, my2-my1)
-          ctx.moveTo(previewPoly[0][0], previewPoly[0][1])
-          for (let index = 1; index < previewPoly.length; index++) {
-            ctx.lineTo(previewPoly[index][0], previewPoly[index][1])
-          }
-          ctx.closePath()
-          ctx.fill('evenodd')
-        } else {
-          if (showBoundaryDifferenceFill) {
-            // 先畫兩側差異，再把交集覆成綠色：橘＝僅預估、藍＝僅實際、綠＝共同。
-            polygonPath(previewPoly)
-            ctx.fillStyle = 'rgba(255,140,0,0.38)'
-            ctx.fill()
-            polygonPath(actualPoly)
-            ctx.fillStyle = 'rgba(0,229,255,0.34)'
-            ctx.fill()
-            ctx.save()
-            polygonPath(previewPoly)
-            ctx.clip()
-            polygonPath(actualPoly)
-            ctx.fillStyle = 'rgba(62,207,142,0.52)'
-            ctx.fill()
-            ctx.restore()
-          }
-
-          polygonPath(actualPoly)
-          ctx.strokeStyle = '#00e5ff'
-          ctx.lineWidth = px2(2.5)
-          ctx.setLineDash([])
-          ctx.stroke()
+        // 尚未正式裁切：壓暗外部區域，橘框代表「預估」而非已完成結果。
+        ctx.fillStyle = 'rgba(0,0,0,0.52)'
+        ctx.beginPath()
+        ctx.rect(mx1, my1, mx2-mx1, my2-my1)
+        ctx.moveTo(previewPoly[0][0], previewPoly[0][1])
+        for (let index = 1; index < previewPoly.length; index++) {
+          ctx.lineTo(previewPoly[index][0], previewPoly[index][1])
         }
-
+        ctx.closePath()
+        ctx.fill('evenodd')
         polygonPath(previewPoly)
         ctx.strokeStyle = '#ff8c00'
         ctx.lineWidth = px2(2.5)
@@ -1101,42 +1083,54 @@ export default function Preview2D({
         // Conforming 加入後會把貼合外框標成 Bounding——畫布上的說明與
         // 系統日誌矛盾，截進文件的圖會自打嘴巴。
         const modeLabel = extentType || 'Bounding'
-        if (actualPoly) {
-          const errorText = boundaryComparison?.available
-            ? `最大差異 ${boundaryComparison.max_boundary_error_mm?.toFixed(3)} mm／容差 ${boundaryComparison.tolerance_mm.toFixed(3)} mm`
-            : '差異量測不可用'
-          ctx.fillStyle = boundaryComparison?.within_tolerance ? '#7ee787' : '#ffb347'
-          const legend = showBoundaryDifferenceFill
-            ? '綠＝共同　橘＝僅預估　藍＝僅實際'
-            : '差異填色已關閉　橘虛線＝預估　藍實線＝實際'
-          ctx.fillText(`${legend}　${errorText}`, 12, rect.height - 12)
-        } else {
-          ctx.fillStyle = '#ff8c00'
-          ctx.fillText(`▣ PyEDB 精確預估 [${modeLabel}]  向外 ±${exp} mm`, 12, rect.height - 12)
-        }
+        ctx.fillStyle = '#ff8c00'
+        ctx.fillText(`▣ PyEDB 精確預估 [${modeLabel}]  向外 ±${exp} mm`, 12, rect.height - 12)
         ctx.restore()
       }
     }
-  }, [data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, actualCutoutBoundary, showBoundaryDifferenceFill, boundaryComparison, segmentCuts, draggingCut, showSegmentSafetyOverlay, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, tdrMarkers, crossSectionRegion, crossSectionCut, drawingRegion, getLayerColor, getStackupLayers, computeContentBounds])
+  }, [data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, segmentCuts, draggingCut, showSegmentSafetyOverlay, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, tdrMarkers, crossSectionRegion, crossSectionCut, drawingRegion, getLayerColor, getStackupLayers, computeContentBounds])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
   useEffect(() => {
     const cont = containerRef.current
     if (!cont) return
-    const obs = new ResizeObserver(() => drawCanvas())
+    const obs = new ResizeObserver(() => {
+      // 之前容器量到 0（隱藏的分頁、第一次 layout）時 fitView 直接放棄，
+      // 尺寸回來時要補做一次，否則畫面停在還沒有比例尺的空白狀態。
+      if (!fittedRef.current || !userMovedViewRef.current) fitView()
+      drawCanvas()
+    })
     obs.observe(cont)
     return () => obs.disconnect()
-  }, [drawCanvas])
+  }, [drawCanvas, fitView])
 
   // ── 滑鼠事件 ─────────────────────────────────────────────
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault()
-    const f = Math.exp(-e.deltaY * 0.001)
-    const r = canvasRef.current!.getBoundingClientRect()
-    const mx = e.clientX-r.left, my = e.clientY-r.top
-    setTransform(prev => ({ x: mx-(mx-prev.x)*f, y: my-(my-prev.y)*f, scale: prev.scale*f }))
-  }
+  /**
+   * 滾輪縮放要掛**原生**監聽器，不能用 React 的 `onWheel`。
+   *
+   * React 18 把 `wheel` 掛在根節點而且是 passive 的，裡面呼叫
+   * `preventDefault()` 只會在主控台印一行警告然後被忽略——結果是使用者
+   * 縮放板子時整頁跟著捲動。`{ passive: false }` 才擋得住。
+   */
+  useEffect(() => {
+    const cont = containerRef.current
+    if (!cont) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const canvas = canvasRef.current
+      if (!canvas) return                 // 卸載途中還可能收到事件
+      const f = Math.exp(-e.deltaY * 0.001)
+      const r = canvas.getBoundingClientRect()
+      const mx = e.clientX - r.left, my = e.clientY - r.top
+      userMovedViewRef.current = true
+      setTransform(prev => ({
+        x: mx - (mx - prev.x) * f, y: my - (my - prev.y) * f, scale: prev.scale * f,
+      }))
+    }
+    cont.addEventListener('wheel', onWheel, { passive: false })
+    return () => cont.removeEventListener('wheel', onWheel)
+  }, [])
   /** 鍵盤操作。**掛在畫布上而不是掛 window**——方向鍵在整個應用程式裡
    *  是文字欄位的游標鍵，全域攔截會讓使用者在輸入路徑時游標動不了。
    *  要用鍵盤就先點一下畫布（容器有 tabIndex，點擊即取得焦點）。
@@ -1150,14 +1144,17 @@ export default function Preview2D({
       const rect = canvasRef.current?.getBoundingClientRect()
       // 以畫布中心為基準縮放，不是游標——鍵盤操作沒有游標位置可用。
       const mx = (rect?.width ?? 0) / 2, my = (rect?.height ?? 0) / 2
+      userMovedViewRef.current = true
       setTransform(prev => ({
         x: mx - (mx - prev.x) * factor,
         y: my - (my - prev.y) * factor,
         scale: prev.scale * factor,
       }))
     }
-    const pan = (dx: number, dy: number) =>
+    const pan = (dx: number, dy: number) => {
+      userMovedViewRef.current = true
       setTransform(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
+    }
 
     switch (e.key) {
       case 'ArrowLeft':  pan(step, 0); break
@@ -1268,6 +1265,7 @@ export default function Preview2D({
       setHoverCutAxis(target ? target.axis : null)
       return
     }
+    userMovedViewRef.current = true
     setTransform(prev => ({ ...prev, x: e.clientX-dragStart.x, y: e.clientY-dragStart.y }))
   }
   const handleMouseUp = (e: React.MouseEvent) => {
@@ -1428,7 +1426,6 @@ export default function Preview2D({
         tabIndex={0}
         onKeyDown={handleKeyDown}
         title="點一下畫布後可用鍵盤：方向鍵平移（Shift 跨大步）、+／− 縮放、0 回到全覽。"
-        onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -1474,29 +1471,6 @@ export default function Preview2D({
           </div>
         )}
 
-        {/* 裁切外框差異填色開關：與 Canvas 同層，避免被預覽畫布遮住。 */}
-        {onBoundaryDifferenceFillChange && (
-          <div
-            style={{ position: 'absolute', left: 16, top: 38, zIndex: 20 }}
-            onMouseDown={event => event.stopPropagation()}
-          >
-            <button
-              className={'boundary-fill-toggle' + (showBoundaryDifferenceFill ? ' boundary-fill-toggle--active' : '')}
-              type="button"
-              aria-pressed={showBoundaryDifferenceFill}
-              title={showBoundaryDifferenceFill
-                ? '關閉半透明差異填色，讓 Layout 細節更清楚'
-                : '顯示預估與實際裁切外框的差異填色'}
-              onClick={event => {
-                event.stopPropagation()
-                onBoundaryDifferenceFillChange(!showBoundaryDifferenceFill)
-              }}
-            >
-              差異填色：{showBoundaryDifferenceFill ? '開啟' : '關閉'}
-            </button>
-          </div>
-        )}
-
         {segmentCuts?.safety_overlay && onSegmentSafetyOverlayChange && (
           <div
             style={{ position: 'absolute', left: 16, top: 38, zIndex: 20 }}
@@ -1519,7 +1493,9 @@ export default function Preview2D({
           </div>
         )}
 
-        {segmentCuts?.region_solvers?.length && onSolverRegionOverlayChange && (
+        {/* 要用 `!!`：陣列是空的時候這個式子的值是數字 0，React 會把它
+            當成文字節點，畫布上就浮出一個沒有人放的「0」。 */}
+        {!!segmentCuts?.region_solvers?.length && onSolverRegionOverlayChange && (
           <div
             style={{
               position: 'absolute', left: 16,

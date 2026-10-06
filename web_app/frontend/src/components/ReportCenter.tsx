@@ -62,7 +62,12 @@ function normalizedSettings(value: Partial<ReportSettings> | undefined): ReportS
   return {
     ...DEFAULT_REPORT_SETTINGS,
     ...(value || {}),
-    sections: value?.sections?.length ? value.sections : REPORT_SECTION_ORDER,
+    // `null`／缺欄位＝沒設定過，塞回預設清單；`[]`＝使用者明確一節都不要。
+    // 後端（reporting.py，manifest schema 2）對新工作區寫 `"sections": null`，
+    // 舊工作區的 `[]` 會在讀取時翻成 `null`，而明確的 `[]` 產出的報告就是
+    // 沒有選配章節——所以這裡必須用 `??`，不能用長度判斷，否則「全部取消」
+    // 會被塞回全選。
+    sections: value?.sections ?? REPORT_SECTION_ORDER,
     acceptance_criteria: value?.acceptance_criteria || {},
     watermark: { ...DEFAULT_WATERMARK, ...(value?.watermark || {}) },
   }
@@ -134,9 +139,17 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
         setSettings(normalizedSettings(result.manifest.settings))
         setWorkspaceInput(result.workspace)
         onWorkspaceChange?.(result.workspace)
-      }).catch(() => undefined)
+      }).catch(error => {
+        // 吞掉的話畫面只會寫「工作區：尚未開啟」，一個字都不說為什麼；
+        // 而且 `workspace` 一直是空的，App 每次重繪都會再 POST 一次。
+        setMessage(`開啟工作區失敗：${String((error as Error)?.message || error)}`)
+      })
     }
-  }, [basePath, projectName, workspace, onWorkspaceChange])
+    // `onWorkspaceChange` 在 App 那邊每次 render 都是新的函式（沒有包
+    // useCallback，見 Handoff），列進相依會讓這個 effect 一直重跑。開工作區
+    // 只跟 basePath／projectName／是否已開有關。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basePath, projectName, workspace])
 
   useEffect(() => {
     const listener = (event: Event) => {
@@ -176,22 +189,44 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
     }
   }
 
+  // 這兩個都是 `void …(…)` 叫的，沒有 catch 就等於「按了什麼都沒發生」：
+  // 12 MB 的截圖被後端以 400 擋掉、manifest 讀不到、版本數滿了回 409——
+  // 使用者只會看到對話框關掉、畫面沒變，錯誤躺在主控台裡。與 patchSnapshot
+  // 同一套 try/catch → setMessage。
   const useVersion = async (snapshot: ReportSnapshot) => {
     if (!workspace) return
-    await activateReportSnapshot(workspace, snapshot.id)
-    await refresh()
+    try {
+      await activateReportSnapshot(workspace, snapshot.id)
+      await refresh()
+    } catch (error) {
+      setMessage(`設為目前版本失敗：${String((error as Error)?.message || error)}`)
+    }
   }
 
   const uploadExternal = async (file: File | undefined) => {
     if (!file || !workspace) return
-    const caption = window.prompt('請輸入這張補充圖片的圖說：', file.name) ?? ''
-    const dataUrl = await fileToDataUrl(file)
-    await createReportSnapshot({
-      workspace, kind: `external-${Date.now()}`, title: file.name,
-      image_data_url: dataUrl, caption, engineering_status: 'display',
-      section: 'external', external: true,
-    })
-    await refresh()
+    try {
+      const caption = window.prompt('請輸入這張補充圖片的圖說：', file.name) ?? ''
+      const dataUrl = await fileToDataUrl(file)
+      const payload = {
+        workspace, kind: `external-${Date.now()}`, title: file.name,
+        image_data_url: dataUrl, caption, engineering_status: 'display' as const,
+        section: 'external', external: true,
+      }
+      try {
+        await createReportSnapshot(payload)
+      } catch (error) {
+        // 409＝版本數已滿。與快照按鈕一樣，問過使用者才刪最舊的那一版。
+        const typed = error as Error & { status?: number }
+        if (typed.status !== 409
+          || !window.confirm(`${typed.message}\n\n是否移除最舊版本並建立新快照？`)) throw error
+        await createReportSnapshot({ ...payload, prune_confirmed: true })
+      }
+      await refresh()
+      setMessage(`補充圖片已加入：${file.name}`)
+    } catch (error) {
+      setMessage(`加入補充圖片失敗：${String((error as Error)?.message || error)}`)
+    }
   }
 
   const saveBrand = async () => {
@@ -471,7 +506,7 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
                 {(settings.watermark.mode === 'image' || settings.watermark.mode === 'both') && watermarkDataUrl && <img src={watermarkDataUrl} alt="浮水印" />}
                 {(settings.watermark.mode === 'text' || settings.watermark.mode === 'both') && <span>{settings.watermark.text || '機密文件'}</span>}
               </div>
-              <strong>S 參數／Layout 報告預覽區</strong><p>浮水印只作為識別與提醒，不是防止 HTML 被修改的 DRM。</p>
+              <strong>S 參數／Layout 報告預覽區</strong><p>產生報告時浮水印會燒進每張快照的像素，報告裡不留無浮水印的原圖；它是識別與嚇阻，不是 DRM。</p>
             </div>
           </div>
         )}
