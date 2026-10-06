@@ -57,12 +57,32 @@ export const saveLogSplit = (sizes: number[]) => save(LOG_KEY, sizes)
 // 依目前檔案推導出預設值。
 
 const REPORT_WORKSPACE_KEY = 'pcbsi.reportWorkspace.v1'
+const REPORT_WORKSPACE_INSTANCE_KEY = 'pcbsi.reportWorkspace.instance'
 
 export function loadReportWorkspace(): string {
   try {
     return window.localStorage.getItem(REPORT_WORKSPACE_KEY) || ''
   } catch {
     return ''
+  }
+}
+
+/** 後端換了一次啟動（instance id 不同）就忘掉記住的工作區，回傳 true。
+ *
+ *  「跨越換匯入來源而不變」只該在同一次啟動內成立。跨啟動也記的話，
+ *  新解壓的工具一開就指回上一個案子的 report_workspace，舊快照全部
+ *  跑出來——使用者以為新包帶著舊照。 */
+export function resetReportWorkspaceIfNewInstance(instanceId: string): boolean {
+  if (!instanceId) return false
+  try {
+    const previous = window.localStorage.getItem(REPORT_WORKSPACE_INSTANCE_KEY) || ''
+    if (previous === instanceId) return false
+    window.localStorage.setItem(REPORT_WORKSPACE_INSTANCE_KEY, instanceId)
+    const hadWorkspace = !!window.localStorage.getItem(REPORT_WORKSPACE_KEY)
+    window.localStorage.removeItem(REPORT_WORKSPACE_KEY)
+    return hadWorkspace
+  } catch {
+    return false
   }
 }
 

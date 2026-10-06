@@ -7,6 +7,7 @@
 // 先前用固定 viewBox 等比縮放，寬螢幕上圖會被撐到六百多 px 高，整個
 // TDR 分頁因此出現捲軸，報告快照截不完整。
 import { useEffect, useRef, useState } from 'react'
+import { impedanceRange, niceStep, tickDecimals } from './chartScale'
 
 export interface TdrChartMarker {
   distance_mm: number
@@ -64,16 +65,21 @@ export default function TdrChart({
   for (let i = 0; i < n; i++) if (distanceMm[i] <= xMax) visible.push(i)
   if (visible.length < 2) return <div ref={containerRef} />
 
+  // X 軸整段是 0 時（全部距離都是 0）比例尺會除以 0，刻度迴圈也不前進，
+  // 分頁會直接卡住——那不是一張畫得出來的圖，直接說清楚。
+  if (!(xMax > 0)) {
+    return (
+      <div ref={containerRef}
+        style={{ color: '#8fa1b5', fontSize: 12, padding: 12, fontFamily: FONT }}>
+        距離資料全為 0，畫不出曲線。
+      </div>
+    )
+  }
+
   const zs = visible.map(i => impedanceOhm[i])
-  const zLo = Math.min(...zs)
-  // Y 尺度要強韌：開路端附近 Z 發散到 kΩ 級，min/max 縮放會把整段有用
-  // 曲線壓成貼地平線。上限取「中位數的 4 倍」與實際最大值的較小者，
-  // 超出的曲線裁在頂端格線上（TDR 圖的標準做法）。
-  const sorted = [...zs].sort((a, b) => a - b)
-  const median = sorted[Math.floor(sorted.length / 2)]
-  const zHi = Math.min(Math.max(...zs), Math.max(4 * median, median + 50))
-  const zPad = Math.max((zHi - zLo) * 0.12, 2)
-  const yMin = zLo - zPad, yMax = zHi + zPad
+  // Y 尺度的中位數夾持與截面阻抗對照圖共用同一支（chartScale.impedanceRange），
+  // 免得兩張並排的圖對同一條曲線用不同的縮放。
+  const { yMin, yMax } = impedanceRange(zs)
 
   const plotW = width - pad.left - pad.right
   const plotH = height - pad.top - pad.bottom
@@ -86,14 +92,11 @@ export default function TdrChart({
     .join(' ')
 
   // 刻度：X 取 6 格、Y 取 5 格的「好看數字」
-  const niceStep = (span: number, target: number) => {
-    const raw = span / target
-    const mag = Math.pow(10, Math.floor(Math.log10(raw)))
-    for (const m of [1, 2, 5, 10]) if (raw <= m * mag) return m * mag
-    return 10 * mag
-  }
   const xStep = niceStep(xMax, 6)
   const yStep = niceStep(yMax - yMin, 5)
+  // 3 mm 的切線步長是 0.5，印成整數會變成「0 1 1 2 2 3」——同一個數字連兩格。
+  const xDecimals = tickDecimals(xStep)
+  const yDecimals = tickDecimals(yStep)
   const xTicks: number[] = []
   for (let v = 0; v <= xMax + 1e-9; v += xStep) xTicks.push(v)
   const yTicks: number[] = []
@@ -109,7 +112,7 @@ export default function TdrChart({
             <line x1={pad.left} x2={width - pad.right} y1={sy(v)} y2={sy(v)}
               stroke="#232b36" strokeWidth={1} />
             <text x={pad.left - 7} y={sy(v) + 4} textAnchor="end"
-              fontSize={11} fill="#8fa1b5" fontFamily={FONT}>{v.toFixed(0)}</text>
+              fontSize={11} fill="#8fa1b5" fontFamily={FONT}>{v.toFixed(yDecimals)}</text>
           </g>
         ))}
         {xTicks.map(v => (
@@ -117,7 +120,7 @@ export default function TdrChart({
             <line y1={pad.top} y2={height - pad.bottom} x1={sx(v)} x2={sx(v)}
               stroke="#1a212b" strokeWidth={1} />
             <text y={height - pad.bottom + 16} x={sx(v)} textAnchor="middle"
-              fontSize={11} fill="#8fa1b5" fontFamily={FONT}>{v.toFixed(0)}</text>
+              fontSize={11} fill="#8fa1b5" fontFamily={FONT}>{v.toFixed(xDecimals)}</text>
           </g>
         ))}
         <text x={width / 2} y={height - 6} textAnchor="middle" fontSize={11.5}

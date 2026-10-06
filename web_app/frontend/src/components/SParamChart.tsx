@@ -1,6 +1,6 @@
 // S 參數曲線圖（純 SVG，無外部相依）— 功能3 電路串接結果檢視
 
-import { useEffect, useId, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 export interface SParamSeries {
   label: string
@@ -71,6 +71,8 @@ export default function SParamChart({
    *  一直開著的話游標移過去就跳出一大塊數值蓋住曲線，而且沒有辦法關掉。 */
   const [readout, setReadout] = useState(false)
   const dragRef = useRef<{ x: number, y: number, view: ViewRange } | null>(null)
+  /** 原生 wheel 監聽器實際要呼叫的函式（每次 render 更新，見下方 effect）。 */
+  const zoomAtRef = useRef<(event: globalThis.WheelEvent) => void>(() => undefined)
   const [axisMode, setAxisMode] = useState<AxisMode>('xy')
   const [yPreset, setYPreset] = useState<YPreset>('auto')
   const [view, setView] = useState<ViewRange | null>(null)
@@ -90,11 +92,25 @@ export default function SParamChart({
   )
 
   const autoView = useMemo<ViewRange>(() => {
-    const allF = validSeries.flatMap(item => item.points.map(point => point.freq))
-    const allD = validSeries.flatMap(item => item.points.map(point => point.db))
-    const [rawFMin, rawFMax] = normalizedRange(Math.min(...allF), Math.max(...allF), 1)
-    let dMax = Math.min(Math.ceil(Math.max(...allD) / 5) * 5, 5)
-    let dMin = Math.floor(Math.min(...allD) / 5) * 5
+    // 逐點掃過去，不要 `Math.min(...allF)`：串音檢視最多 28 條曲線 × 幾千點，
+    // 展開成參數列會直接撞上引擎的上限丟 RangeError，整個 S 參數面板被
+    // ErrorBoundary 換掉。
+    let fLo = Infinity, fHi = -Infinity, dLo = Infinity, dHi = -Infinity
+    for (const item of validSeries) {
+      for (const point of item.points) {
+        if (point.freq < fLo) fLo = point.freq
+        if (point.freq > fHi) fHi = point.freq
+        if (point.db < dLo) dLo = point.db
+        if (point.db > dHi) dHi = point.db
+      }
+    }
+    const [rawFMin, rawFMax] = normalizedRange(fLo, fHi, 1)
+    // 上限**不夾在 +5 dB**。夾住的話，增益超過 0 dB 的通道（去嵌入做錯、
+    // 重正規化參考阻抗不對、埠序接反、修過的非被動檔）畫出來就是一條在框頂
+    // 戛然而止的曲線，而那正是打開這張圖要找的異常。Fit All 也救不回來，
+    // 因為夾持就寫在 autoView 裡。
+    let dMax = Math.ceil(dHi / 5) * 5
+    let dMin = Math.floor(dLo / 5) * 5
     if (!Number.isFinite(dMin) || !Number.isFinite(dMax)) {
       dMin = -100
       dMax = 0
@@ -138,6 +154,24 @@ export default function SParamChart({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interactive, validSeries.length])
 
+  /**
+   * 滾輪縮放走**原生**監聽器。
+   *
+   * React 把 `wheel` 掛在根節點且是 passive 的，`onWheel` 裡的
+   * `preventDefault()` 只會換來一行主控台警告：使用者在圖上滾輪縮放時，
+   * 整頁還是跟著捲。`{ passive: false }` 才擋得住。
+   *
+   * 實際的處理函式每次 render 都會換一個（它讀 activeView／plotW），所以
+   * 監聽器固定呼叫 ref，ref 每次 render 更新——不必反覆拆裝監聽器。
+   */
+  useEffect(() => {
+    const box = svgRef.current
+    if (!box || !interactive) return
+    const handler = (event: globalThis.WheelEvent) => zoomAtRef.current(event)
+    box.addEventListener('wheel', handler, { passive: false })
+    return () => box.removeEventListener('wheel', handler)
+  }, [interactive, validSeries.length])
+
   if (validSeries.length === 0) {
     return (
       <div style={{
@@ -163,12 +197,15 @@ export default function SParamChart({
     activeView.fMin + (activeView.fMax - activeView.fMin) * index / 6)
   const yticks = Array.from({ length: 7 }, (_, index) =>
     activeView.dMin + (activeView.dMax - activeView.dMin) * index / 6)
-  const clippedBelow = yPreset !== 'auto' && validSeries.some(item =>
+  // 「資料被裁掉」要無條件判斷。原本綁在 `yPreset !== 'auto'` 上，而 auto 是
+  // 預設值、換資料／縮放／平移都會被重設回 auto——等於縮放後被切掉的那一段
+  // 從來不會被提醒。裁切與否只跟目前視窗有關，跟怎麼設定這個視窗無關。
+  const clippedBelow = validSeries.some(item =>
     item.points.some(point => point.db < activeView.dMin))
-  const clippedAbove = yPreset !== 'auto' && validSeries.some(item =>
+  const clippedAbove = validSeries.some(item =>
     item.points.some(point => point.db > activeView.dMax))
 
-  const zoomAt = (event: WheelEvent<SVGSVGElement>) => {
+  const zoomAt = (event: globalThis.WheelEvent) => {
     if (!interactive) return
     event.preventDefault()
     const rect = svgRef.current?.getBoundingClientRect()
@@ -196,6 +233,7 @@ export default function SParamChart({
       return next
     })
   }
+  zoomAtRef.current = zoomAt
 
   const beginPan = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (!interactive || event.button !== 0) return
@@ -207,8 +245,12 @@ export default function SParamChart({
     const drag = dragRef.current
     const rect = svgRef.current?.getBoundingClientRect()
     if (!interactive || !rect) return
+    // 沒開讀值又不在拖曳中，就什麼都不用算。底下那圈最近點搜尋是
+    // 「每條曲線的每一點」——串音檢視 28 條 × 幾千點，每動一次滑鼠十萬次
+    // 迴圈，而結果根本沒有人要。
+    if (!readout && !drag) return
     const svgX = (event.clientX - rect.left) / rect.width * W
-    if (svgX >= PAD.left && svgX <= PAD.left + plotW) {
+    if (readout && svgX >= PAD.left && svgX <= PAD.left + plotW) {
       const frequency = activeView.fMin
         + (svgX - PAD.left) / plotW * (activeView.fMax - activeView.fMin)
       const values = validSeries.map(item => {
@@ -218,8 +260,8 @@ export default function SParamChart({
         }
         return { label: item.label, color: item.color, db: nearest.db }
       })
-      if (readout) setHover({ freq: frequency, svgX, values })
-    } else {
+      setHover({ freq: frequency, svgX, values })
+    } else if (readout) {
       setHover(null)
     }
     if (!drag) return
@@ -262,10 +304,13 @@ export default function SParamChart({
     setHover(null)
   }
 
-  const tooltipWidth = 280
+  // 繪圖區比 280 px 還窄時，`Math.min` 的上界會小於 `Math.max` 的下界，
+  // 夾一夾反而把提示框推到圖的左邊外面去。窄的時候就讓它縮，別讓它跑掉。
+  const tooltipWidth = Math.min(280, Math.max(plotW - 12, 120))
   const tooltipHeight = 28 + Math.min(hover?.values.length ?? 0, 8) * 19
   const tooltipX = hover
-    ? Math.min(Math.max(PAD.left + 6, hover.svgX + 12), PAD.left + plotW - tooltipWidth - 6)
+    ? Math.max(PAD.left + 6,
+        Math.min(hover.svgX + 12, PAD.left + plotW - tooltipWidth - 6))
     : PAD.left
 
   return (
@@ -373,7 +418,7 @@ export default function SParamChart({
         </div>
       )}
       <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`}
-        onWheel={zoomAt} onPointerDown={beginPan} onPointerMove={pan}
+        onPointerDown={beginPan} onPointerMove={pan}
         onPointerUp={endPan} onPointerCancel={endPan} onPointerLeave={endPan}
         onDoubleClick={() => { setReadout(open => !open); setHover(null) }}
         preserveAspectRatio="none"
@@ -456,7 +501,7 @@ export default function SParamChart({
       {interactive && (
         <div style={{ color: clippedBelow || clippedAbove ? '#f0b429' : 'var(--faint)', fontSize: 12, marginTop: 5, textAlign: 'center', flex: '0 0 auto' }}>
           {clippedBelow || clippedAbove
-            ? `目前 Y 軸預設已裁掉範圍外資料${clippedBelow ? '（下方）' : ''}${clippedAbove ? '（上方）' : ''}；按 Auto 或 Fit All 查看全部。`
+            ? `目前 Y 軸已裁掉範圍外資料${clippedBelow ? '（下方）' : ''}${clippedAbove ? '（上方）' : ''}；按 Fit All 查看全部。`
             : readout
               ? '讀值開啟中；按兩下關閉。'
               : '滾輪縮放、拖曳平移、按兩下開啟讀值。'}

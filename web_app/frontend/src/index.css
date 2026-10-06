@@ -96,6 +96,23 @@ pre {
   color: transparent;
 }
 
+.app-version {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  vertical-align: middle;
+  border-radius: 999px;
+  border: 1px solid var(--line, #cfd8e3);
+  background: var(--panel, #f4f7fb);
+  color: var(--muted, #5b6b7f);
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: var(--muted, #5b6b7f);
+}
+
 .app-sub {
   margin: 4px 0 0;
   font-size: 13.5px;
@@ -323,7 +340,7 @@ pre {
   font-family: "Calibri", "Microsoft JhengHei", sans-serif;
   font-size: 12px;
 }
-
+/* 小型切換鈕：截面阻抗的模式鈕在用（原本也給已移除的裁切外框比對開關用）。 */
 .boundary-fill-toggle {
   padding: 5px 10px;
   border: 1px solid rgba(126, 231, 135, 0.45);
@@ -1848,14 +1865,16 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 
 /* 畫布的空狀態：一句話講清楚現在要做什麼，外加接受哪些檔案。
    線框圖示刻意畫得很淡——它是背景，不是要人去讀的東西。 */
+/* 用 inset + flex 置中，不用 translate(-50%,-50%)：這個元素掛了 rise-in
+   動畫（fill-mode both），動畫結束把 transform 設成 none，置中位移被蓋掉，
+   提示框的左上角落在中心點、整塊往右下偏（#0062）。 */
 .stage-empty {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   color: #6b7787;
   text-align: center;

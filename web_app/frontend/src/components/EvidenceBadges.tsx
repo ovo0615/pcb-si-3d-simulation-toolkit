@@ -25,6 +25,10 @@ type Evidence = {
   may_claim_verified_channel: boolean
   badges: Badge[]
   warnings: string[]
+  /** 查核沒過的**原因**（`verify_for_analysis` 的 issues）。缺哪個欄位、
+   *  哪一項對不上，只有這裡說得出來。後端已經在 `channel_evidence` 回傳
+   *  這個欄位了，舊版沒有才留成選填。 */
+  issues?: { check?: string; detail?: string }[]
   n_ports: number | null
 }
 
@@ -37,9 +41,13 @@ const LEVEL_STYLE: Record<Level, { dot: string; text: string }> = {
 }
 
 export default function EvidenceBadges(
-  { path, expectedPorts, extra, dark }: {
+  { path, expectedPorts, throughPaths, extra, dark }: {
     path: string
     expectedPorts?: number | null
+    /** 穿透路徑 `[輸出埠, 輸入埠]`，**0 起算**的 Port 索引。2 埠以上的因果性
+     *  只有給了這個才量得到，不給後端一律回「未判定」。呼叫端知道這次
+     *  分析用了哪對 Port（TDR 的 input／output）時就傳過來。 */
+    throughPaths?: [number, number][]
     /** 呼叫端已經知道、但不屬於這個檔案的證據（例如這次分析用了誰的
      *  緩衝器模型）。模型來源屬於分析，不屬於 Touchstone，所以由呼叫端傳。 */
     extra?: Badge[]
@@ -50,13 +58,19 @@ export default function EvidenceBadges(
   const [data, setData] = useState<Evidence | null>(null)
   const [error, setError] = useState('')
   const [open, setOpen] = useState<string>('')
+  // 陣列每次 render 都是新物件；用字串當相依，內容沒變就不重查。
+  const throughKey = (throughPaths || []).map(([o, i]) => `${o},${i}`).join(';')
 
   useEffect(() => {
     if (!path) { setData(null); setError(''); return }
     let cancelled = false
     const params = new URLSearchParams({ path })
     if (expectedPorts) params.set('expected_ports', String(expectedPorts))
+    for (const item of throughKey ? throughKey.split(';') : []) params.append('through_path', item)
     setError('')
+    // 換檔案要先把上一份判定收掉。留著的話，新查詢還在飛的那段時間裡，
+    // 上一個 Touchstone 的「通過」徽章會掛在新檔案的標題底下。
+    setData(null)
     void fetch(`/api/channel/evidence?${params.toString()}`)
       .then(async res => {
         if (!res.ok) throw new Error((await res.json())?.detail || `HTTP ${res.status}`)
@@ -65,7 +79,7 @@ export default function EvidenceBadges(
       .then(json => { if (!cancelled) setData(json) })
       .catch(err => { if (!cancelled) setError(String(err.message || err)) })
     return () => { cancelled = true }
-  }, [path, expectedPorts])
+  }, [path, expectedPorts, throughKey])
 
   const root = 'evidence-badges' + (dark ? ' evidence-badges--dark' : '')
   if (!path) return null
@@ -106,6 +120,11 @@ export default function EvidenceBadges(
       {badges.filter(b => b.key === open && b.detail).map(b => (
         <div key={b.key} className="evidence-badges__detail">{b.detail}</div>
       ))}
+      {/* 後端算出來的提醒本來完全沒有出口：型別裡宣告了、端點也回了，
+          畫面上一個字都沒有。 */}
+      {(data.warnings || []).map((text, index) => (
+        <div key={`warn-${index}`} className="evidence-badges__detail">{text}</div>
+      ))}
       {!data.may_claim_verified_channel && (
         <div className="evidence-badges__detail">
           這份結果<b>不得標示為「通道求解已驗證」</b>——
@@ -114,6 +133,14 @@ export default function EvidenceBadges(
             : '旁邊沒有來源證據檔，工具無從確認它怎麼來的。'}
         </div>
       )}
+      {/* 沒通過查核的話，把「哪一項沒過」也寫出來。只說「未通過查核」而不說
+          原因，使用者無從修——而缺的常常只是 sidecar 少一個欄位。 */}
+      {!data.may_claim_verified_channel
+        && (data.issues || []).filter(item => item.detail).map((item, index) => (
+          <div key={`issue-${index}`} className="evidence-badges__detail">
+            {item.detail}
+          </div>
+        ))}
     </div>
   )
 }

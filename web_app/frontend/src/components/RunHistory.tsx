@@ -79,7 +79,9 @@ function restorableOf(manifest: any): RestorableRun {
   if (binding.ports?.length) unrestored.push('Port 綁定')
   if (binding.lanes?.length) unrestored.push('道的配對')
   if (binding.tx?.model || binding.rx?.model) unrestored.push('緩衝器型號')
-  if (stimulus.random_seed !== undefined) unrestored.push('亂數種子')
+  // `!= null` 而不是 `!== undefined`：種子 0 是合法值要算進來，但 JSON `null`
+  // （Python `None`）代表這一輪根本沒種子，講成「有種子還原不了」是假的。
+  if (stimulus.random_seed != null) unrestored.push('亂數種子')
   return {
     touchstonePath: String(channel.source_path || ''),
     txPackageId: String(binding.tx?.package_id || ''),
@@ -220,7 +222,13 @@ export default function RunHistory(
             {run.error && <div className="run-history__note">{run.error}</div>}
             <div className="run-history__actions">
               <button className="btn" style={{ fontSize: 10, padding: '0 7px' }}
-                onClick={() => void revealPath(run.run_dir)}>開啟資料夾</button>
+                onClick={() => void (async () => {
+                  // `revealPath` 回傳錯誤字串而不是丟例外，丟掉它就變成
+                  // 「按了沒反應」——舊後端回 405 的那句提示也一起消失。
+                  const failure = await revealPath(run.run_dir)
+                  // 用 note 不用 error：error 前面掛著「讀不到：」的字樣。
+                  if (failure) setNote(failure)
+                })()}>開啟資料夾</button>
               {restorable && onRestore && (
                 <button className="btn" style={{ fontSize: 10, padding: '0 7px' }}
                   onClick={() => onRestore(restorable)}>回到這一版設定</button>

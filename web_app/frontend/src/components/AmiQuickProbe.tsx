@@ -4,6 +4,8 @@
 // 後端一秒回波形（引擎免授權、不開 AEDT），這裡只負責把「等化前後」
 // 畫得一眼能比。正式眼圖仍走 AMI 通道分析，這是模型行為的即時檢視。
 
+import { minMaxBy } from './chartScale'
+
 export interface QuickProbeSeries {
   name: string
   label: string
@@ -76,10 +78,10 @@ export function MiniWave({ series }: { series: QuickProbeSeries[] }) {
   const pad = { left: 8, right: 8, top: 8, bottom: 18 }
   const all = series.flatMap(item => item.points)
   if (!all.length) return null
-  const tMin = Math.min(...all.map(p => p[0]))
-  const tMax = Math.max(...all.map(p => p[0]))
-  const vMin = Math.min(...all.map(p => p[1]))
-  const vMax = Math.max(...all.map(p => p[1]))
+  // 逐點掃，不要 `Math.min(...arr)`：GetWave 一次回幾萬點，展開成參數列會
+  // 撞上引擎的參數上限丟 RangeError，整個面板連錯誤訊息都畫不出來。
+  const { min: tMin, max: tMax } = minMaxBy(all, p => p[0])
+  const { min: vMin, max: vMax } = minMaxBy(all, p => p[1])
   const vSpan = vMax - vMin || 1
   const tSpan = tMax - tMin || 1
   const x = (t: number) => pad.left + ((t - tMin) / tSpan) * (width - pad.left - pad.right)
@@ -118,9 +120,9 @@ export function EyeView({ eye }: { eye: QuickEyeResult }) {
   const lowerShifted = shifted(eye.lower)
   const all = [...eye.traces.flat(), ...upperShifted, ...lowerShifted]
   if (!all.length) return null
-  const tMin = Math.min(...all.map(p => p[0]))
-  const tMax = Math.max(...all.map(p => p[0]))
-  const vAbs = Math.max(...all.map(p => Math.abs(p[1])), 1e-6)
+  // 同上：疊圖是每個 UI 一條折線，幾千條乘上取樣數遠超過參數列的上限。
+  const { min: tMin, max: tMax } = minMaxBy(all, p => p[0])
+  const vAbs = Math.max(minMaxBy(all, p => Math.abs(p[1])).max, 1e-6)
   const x = (t: number) => pad.left + ((t - tMin) / (tMax - tMin || 1)) * (width - pad.left - pad.right)
   const y = (v: number) => pad.top + (1 - (v + vAbs) / (2 * vAbs)) * (height - pad.top - pad.bottom)
   const toPath = (points: [number, number][]) =>

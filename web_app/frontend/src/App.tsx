@@ -1,13 +1,17 @@
 // PCB SI 3D 模擬分析工具 — 前端主程式
 // 裁切流程：載入電路板 → 選擇訊號／參考網路 → 裁切設定 → Port 設定 → 執行裁切
-import { useState, useEffect, useMemo, useRef, type CSSProperties, type ChangeEvent } from 'react'
+import {
+  useState, useEffect, useMemo, useRef, useCallback,
+  type CSSProperties, type ChangeEvent,
+} from 'react'
 import { Allotment } from 'allotment'
 import {
   loadLogSplit, loadMainSplit, saveLogSplit, saveMainSplit,
-  loadReportWorkspace, saveReportWorkspace,
+  loadReportWorkspace, saveReportWorkspace, resetReportWorkspaceIfNewInstance,
 } from './splitLayout'
 import { logColor } from './logLevel'
 import { revealPath } from './revealPath'
+import { describeJobFailure, fatalJobError, isFatalJobError } from './jobError'
 import RunHistory from './components/RunHistory'
 import 'allotment/dist/style.css'
 import Preview2D, {
@@ -43,7 +47,11 @@ import ReportCenter from './components/ReportCenter'
 import ReportSnapshotButton from './components/ReportSnapshotButton'
 import ModelLibrary from './components/ModelLibrary'
 import { modelsReportMetadata } from './components/reportMetadataStore'
+import { notifyCascadedChannelChanged } from './components/useCascadedChannel'
 import { markReportSnapshotsStale } from './reportApi'
+import { AnsysLicensePanel } from './components/AnsysLicensePanel'
+import { LicenseTag } from './components/LicenseTag'
+import { licenseBlock, useAnsysLicense, type AnsysFunction } from './ansysLicense'
 
 const normalizeUserPath = (path: string): string => {
   let value = path.trim()
@@ -224,7 +232,9 @@ interface SegmentRunResult {
     all_ports: string[]
     solver_plan?: Omit<SegmentSolverPlan, 'index' | 'path'>
   }[]
-  cut_pairs: { cut_index: number; position_mm: number; pairs: string[][] }[]
+  // `position_mm` 可以是 null：`_cut_face_position_mm` 找不到那把刀的實際
+  // 切面時回 None，寧可缺值也不拿別把刀的座標充數（segment.py）。
+  cut_pairs: { cut_index: number; position_mm: number | null; pairs: string[][] }[]
   previews: (PreviewData | null)[]
 }
 
@@ -289,6 +299,14 @@ interface ComponentInfo {
 /** 側向收斂驗證的加寬倍率。1.5 是常用的起點，也是回報訊息裡那個「加寬 50%」。 */
 const WIDEN_FACTOR = 1.5
 
+/** 系統日誌保留的行數上限。
+ *
+ *  日誌是從 WebSocket 一行一行推進來的，而畫面上那一塊是整份 `logs.map()`
+ *  出來的——沒有上限的話，一趟數小時的 HFSS 求解會讓陣列與 DOM 一路長大，
+ *  每來一行就重繪整個元件。5000 行足夠回頭看完一個階段（AEDT 自己的訊息
+ *  視窗也是同一個量級），又不會把記憶體吃到影響求解。 */
+const MAX_LOG_LINES = 5000
+
 const NETLIST_ROW_HEIGHT = 24
 const NETLIST_CHROME_HEIGHT = 27
 const NETLIST_SIGNAL_MIN_HEIGHT = 5 * NETLIST_ROW_HEIGHT + NETLIST_CHROME_HEIGHT
@@ -333,7 +351,7 @@ function useMeasuredHeight<T extends HTMLElement>() {
  *  2026-08-19 實測兩種都發生了。
  *
  *  加端點或改送出欄位時兩邊一起 +1；`test_api_contract_version.py` 會擋住只改一邊。 */
-const API_CONTRACT_VERSION = 6
+const API_CONTRACT_VERSION = 8
 
 /** 結果物件換版後，將同類報告快照標記為可能過期；第一次載入不誤報。 */
 function useReportStaleRevision(
@@ -373,6 +391,25 @@ const BD_NET_STYLE: CSSProperties = {
   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
 }
 
+/** 保留殘樁低於這個值就警告（與後端 backdrill.MIN_SAFE_TARGET_STUB_M 同值）。
+ *  背鑽深度有製造公差，留得比公差還短，鑽深一點就把出線層鑽斷。 */
+const BACKDRILL_MIN_SAFE_STUB_MIL = 4
+
+/** 保留殘樁過短的警告；空字串＝沒問題（或還沒填好，由送出時再擋）。 */
+const backdrillStubWarning = (text: string): string => {
+  const mil = Number(text)
+  if (text.trim() === '' || !Number.isFinite(mil) || mil < 0) return ''
+  if (mil === 0) {
+    return '保留殘樁 0 mil：鑽頭會鑽到出線層本身，深度只要有一點公差就會把出線層與孔壁的'
+      + `連接鑽斷，訊號變成開路。建議至少保留 ${BACKDRILL_MIN_SAFE_STUB_MIL} mil，並向板廠確認可做的最小殘樁。`
+  }
+  if (mil < BACKDRILL_MIN_SAFE_STUB_MIL) {
+    return `保留殘樁 ${mil} mil 小於常見背鑽深度公差（約 ±2～4 mil），實際製作可能鑽斷出線層造成開路。`
+      + `建議至少保留 ${BACKDRILL_MIN_SAFE_STUB_MIL} mil，並向板廠確認。`
+  }
+  return ''
+}
+
 type CleanupCompareMode = 'side-by-side' | 'before' | 'after' | 'overlay'
 
 interface ExtFileInfo {
@@ -384,20 +421,6 @@ interface ExtFileInfo {
 
 interface ExtConn { a_file: number; a_port: string; b_file: number; b_port: string }
 interface ExtShort { file: number; ports: string[] }
-
-interface CutoutBoundaryComparison {
-  available: boolean
-  within_tolerance: boolean
-  tolerance_mm: number
-  max_boundary_error_mm: number | null
-  area_difference_percent: number | null
-}
-
-interface CutoutBoundaryResult {
-  estimated: number[][]
-  actual: number[][]
-  comparison: CutoutBoundaryComparison | null
-}
 
 /** 疊構／背鑽／清理會改動幾何，對已建好的元件端 Port 有風險。
  *
@@ -498,6 +521,9 @@ export default function App() {
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null)
   // S 參數分頁：自動曲線（單端／差動、IL／RL／NEXT／FEXT）
   const [spMode, setSpMode] = useState<'single' | 'diff'>('diff')
+  // 使用者有沒有自己按過模式。沒按過而差動配不出來（兩條互不相干的單端
+  // 網路）就自動改單端，不要讓人第一眼看到的是紅字「找不到可配對的差動對」。
+  const spModePicked = useRef(false)
   const [spKinds, setSpKinds] = useState<Record<string, boolean>>(
     { il: true, rl: true, next: false, fext: false })
   const [spData, setSpData] = useState<any | null>(null)
@@ -513,6 +539,8 @@ export default function App() {
   const [stackupConfirmRemoval, setStackupConfirmRemoval] = useState(false)
   // 6d 背鑽
   const [bdTargetStubMil, setBdTargetStubMil] = useState('5')
+  // 鑽頭加大是選項，預設不加大：鑽頭直徑＝Via Hole（#0062）。
+  const [bdDrillOversize, setBdDrillOversize] = useState(false)
   const [bdDiameterIncMil, setBdDiameterIncMil] = useState('8')
   const [bdResult, setBdResult] = useState<any | null>(null)
   const [bdOutputPath, setBdOutputPath] = useState('')
@@ -538,8 +566,6 @@ export default function App() {
   const [preciseBoundaryPreviewKey, setPreciseBoundaryPreviewKey] = useState('')
   /** 貼合外框比凸包少包多少面積（%）；只有 Conforming 預檢成功時才有值。 */
   const [boundaryAreaSaving, setBoundaryAreaSaving] = useState<number | null>(null)
-  const [completedBoundary, setCompletedBoundary] = useState<CutoutBoundaryResult | null>(null)
-  const [showCutoutDifferenceFill, setShowCutoutDifferenceFill] = useState(true)
   // 甲1（2026-08-29 拍板）：預設自動——細間距陣列整板 Pin Group，其餘 Coax。
   const [portType, setPortType] = useState('auto')
   const [checkedComps, setCheckedComps] = useState<Record<string, boolean>>({})
@@ -571,17 +597,29 @@ export default function App() {
   const [maxRefinementPerPass, setMaxRefinementPerPass] = useState('15')
   const [minConvergedPasses, setMinConvergedPasses] = useState('2')
   // HFSS 網格方法：EDB 無此設定，求解時由 PyAEDT 套用；隨 segments.json 保存
-  const [hfssMeshMethod, setHfssMeshMethod] = useState<'Phi' | 'PhiPlus' | 'Classic'>('PhiPlus')
+  // 預設 Phi：PhiPlus 在 AEDT 2026.1 非圖形化求解實測會讓 AEDT 崩潰（2026-09-05）。
+  const [hfssMeshMethod, setHfssMeshMethod] = useState<'Phi' | 'PhiPlus' | 'Classic'>('Phi')
+  /** 使用者自己選過網格方法就不再被 segments.json 的值回寫掉。
+   *
+   *  `/api/schedule/plan` **一定**會回一個正規化後的值（舊檔沒有這個欄位時
+   *  回預設 Phi）。無條件採用等於：選了 Classic 的人只要按一次「瀏覽…」
+   *  或「收回結果」，下拉就靜靜跳回 Phi，之後也真的用 Phi 去解。 */
+  const hfssMeshMethodTouched = useRef(false)
+  const pickHfssMeshMethod = (value: 'Phi' | 'PhiPlus' | 'Classic') => {
+    hfssMeshMethodTouched.current = true
+    setHfssMeshMethod(value)
+  }
   // Ansys BKM：自適應方式與平行自適應區
   const [adaptiveMode, setAdaptiveMode] = useState<'broadband' | 'multi' | 'single'>('broadband')
   const [parallelRefinement, setParallelRefinement] = useState(true)
-  const [solverCores, setSolverCores] = useState('4')
+  const [solverCores, setSolverCores] = useState('12')
   const [solverMemoryPercent, setSolverMemoryPercent] = useState('90')
   const [solverResourcePreview, setSolverResourcePreview] = useState<any>(null)
 
   // ── Layout 保守清理 ──
-  const [cleanupGuardMm, setCleanupGuardMm] = useState('2')
-  const [cleanupMode, setCleanupMode] = useState<'conservative' | 'em_field'>('conservative')
+  // 預設＝建議設定：第一級電磁範圍、最小保護距離 0.2 mm、40 dB（#0062）。
+  const [cleanupGuardMm, setCleanupGuardMm] = useState('0.2')
+  const [cleanupMode, setCleanupMode] = useState<'conservative' | 'em_field'>('em_field')
   const [cleanupIsolationDb, setCleanupIsolationDb] = useState('40')
   const [cleanupOutputPath, setCleanupOutputPath] = useState('')
   const [cleanupAnalysis, setCleanupAnalysis] = useState<CleanupAnalysis | null>(null)
@@ -689,7 +727,28 @@ export default function App() {
   // 量測波形匯入（乙路）：示波器 CSV → 錨點指認 → 同一套劇變定位
   const [tmCsvPath, setTmCsvPath] = useState('')
   const [tmPreview, setTmPreview] = useState<any | null>(null)
+  // 時間單位：auto＝由表頭與取樣間隔判定；0.1 這種步長在 ps 與 ns 下數字一樣，
+  // 判不出來時後端會拒絕並要求明選，這個下拉就是那條路。
+  const [tmTimeUnit, setTmTimeUnit] = useState<'auto' | 's' | 'ms' | 'us' | 'ns' | 'ps'>('auto')
   const [tmT0, setTmT0] = useState('')       // 板端入口（ns）
+  /** TDR 這次用的穿透路徑，換成 Touchstone 的 0 起算 Port 索引給證據徽章：
+   *  多埠檔的因果性只有指定了「哪個輸出對哪個輸入」才量得到。名稱對不到
+   *  索引（還沒選、或選的不在這份檔裡）就不傳，徽章維持「未判定」。 */
+  const tdrThroughPaths = useMemo<[number, number][]>(() => {
+    const names: string[] = cascadeResult?.port_names || []
+    if (!names.length) return []
+    const pairs: [string, string][] = tdrMode === 'differential'
+      ? [[tdrOutputP, tdrInputP], [tdrOutputN, tdrInputN]]
+      : [[tdrOutputP, tdrInputP]]
+    const out: [number, number][] = []
+    for (const [o, i] of pairs) {
+      const oi = names.indexOf(o), ii = names.indexOf(i)
+      if (oi >= 0 && ii >= 0 && oi !== ii) out.push([oi, ii])
+    }
+    return out
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cascadeResult?.port_names, tdrMode, tdrInputP, tdrInputN, tdrOutputP, tdrOutputN])
+
   const [tmTEnd, setTmTEnd] = useState('')   // 線尾反射（ns）
   const [tmRise, setTmRise] = useState('')   // 歐姆／rho 波形的儀器上升時間（ps）
   const [tmBusy, setTmBusy] = useState(false)
@@ -708,6 +767,13 @@ export default function App() {
   const [xsRoleOverrides, setXsRoleOverrides] = useState<Record<string, string>>({})
   const [xsSavedCuts, setXsSavedCuts] = useState<any[]>([])
   const [xsCutsSource, setXsCutsSource] = useState('')
+  /** 這片板子的切線集是不是「真的讀回來過」。
+   *
+   *  存檔是整份覆寫（ADR-0053 的 sidecar 就是一個檔），所以在沒讀成功的
+   *  情況下存一條切線，等於把這片板子先前存的全部切線刪掉。讀不到有兩種：
+   *  「還沒標註過」後端回的是 `{"cuts": []}`（成功，旗標為 true），
+   *  真正的失敗才會落到 catch——那時候不准存。 */
+  const [xsCutsLoaded, setXsCutsLoaded] = useState(false)
   const [xsSolveMode, setXsSolveMode] = useState('standard')
   const [xsFrequency, setXsFrequency] = useState('8GHz')
   const [xsWidenCheck, setXsWidenCheck] = useState(false)
@@ -726,7 +792,19 @@ export default function App() {
   // 純粹用來讓「求解中」的段耗時每秒跳動；不打 API，只觸發重繪
   const [nowTick, setNowTick] = useState(() => Date.now() / 1000)
 
+  /** 使用者自己定過工作頻率（手打或套設定檔）就不再由掃頻表推導。
+   *
+   *  這個旗標存在的原因：設定檔存的是 sweeps **與** solutionFreq，套用時兩個
+   *  都寫下去，而下面這個 effect 會被新的 sweeps 觸發、立刻把剛套上的
+   *  solutionFreq 用掃頻表重算掉——訊息還說「已套用 N 個欄位」。 */
+  const solutionFreqTouched = useRef(false)
+  const pickSolutionFreq = (value: string) => {
+    solutionFreqTouched.current = true
+    setSolutionFreq(value)
+  }
+
   useEffect(() => {
+    if (solutionFreqTouched.current) return
     if (sweeps.length > 0) {
       const startGHz = parseFreqToGHz(sweeps[0].start);
       const endGHz = parseFreqToGHz(sweeps[sweeps.length - 1].end);
@@ -808,10 +886,13 @@ export default function App() {
   // report_workspace，快照散在好幾個資料夾裡，事後根本找不到是哪一個。
   // 要換位置仍然可以，在報告中心的工作區欄位改就好。
   const [reportWorkspace, setReportWorkspace] = useState(loadReportWorkspace)
-  const rememberReportWorkspace = (value: string) => {
+  // 用 useCallback 包住：這個函式當成 prop 傳給報告中心與快照按鈕，每次
+  // App 重繪（日誌一行、輪詢一次就會重繪）都換一個新的函式參考，下游的
+  // memo 與 effect 相依就跟著全數失效。它本身不依賴任何 state。
+  const rememberReportWorkspace = useCallback((value: string) => {
     setReportWorkspace(value)
     saveReportWorkspace(value)
-  }
+  }, [])
 
   // 是否可進行分段：裁切完成、或直接匯入分段模式已載入
   const canSegment = !!cutScene || (directSegmentMode && allNets.length > 0)
@@ -846,6 +927,9 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [loadingMsg, setLoadingMsg] = useState('處理中…')
   const [showLogs, setShowLogs] = useState(true)
+  // Ansys 授權對照（ADR-0062）：按鈕變灰與「說明 → Ansys 授權對照」共用同一份狀態。
+  const [licensePanelOpen, setLicensePanelOpen] = useState(false)
+  const { status: licenseStatus } = useAnsysLicense()
   const [openMenu, setOpenMenu] = useState<string | null>(null)
 
   const logBoxRef = useRef<HTMLDivElement | null>(null)
@@ -877,7 +961,11 @@ export default function App() {
 
     const connect = () => {
       ws = new WebSocket(`ws://${window.location.host}/ws/logs`)
-      ws.onmessage = (event) => setLogs(prev => [...prev, event.data])
+      ws.onmessage = (event) => setLogs(prev => {
+        const next = [...prev, event.data]
+        // 超過上限就從頭砍掉，最舊的先走。求解中的人看的是最後幾行。
+        return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next
+      })
       ws.onclose = () => {
         if (!closed) retry = window.setTimeout(connect, 2000)
       }
@@ -933,6 +1021,11 @@ export default function App() {
       }
       throw new Error(`伺服器回應格式錯誤（非 JSON）：${text.slice(0, 300)}`)
     }
+    // 後端啟用本機 token 而這個分頁沒有 cookie（自己打網址、或 cookie 被清掉）。
+    // 訊息要說出下一步，不能只有「HTTP 401」。
+    if (res.status === 401) {
+      throw new Error(String(data?.detail || '') || '後端拒絕存取（401）：請從 start.bat 開的瀏覽器視窗操作。')
+    }
     if (!res.ok) throw new Error(describeApiError(data, res))
     return data
   }
@@ -953,9 +1046,48 @@ export default function App() {
     return accepted ? true : null
   }
 
+  /** 後端拒絕覆寫既有分段結果時，訊息裡一定有的那句話。
+   *
+   *  認訊息不是好辦法（措辭一改這裡就靜靜失效），但那道閘門目前只有
+   *  HTTP 500 + 一段中文可認；等後端給得出可辨識的標記（例如 409）就換掉。
+   *  這裡不是輪詢迴圈——認錯了最壞的情況是回到「拒絕，請自己清資料夾」，
+   *  不會像輪詢那樣卡住不結束。 */
+  const SEGMENT_EXISTS_MARK = '已經有上一次的分段結果'
+
+  /** 送出分段（`/api/segment/run` 或 `run-single`），被「資料夾裡已經有
+   *  上一批」擋下就問一次。
+   *
+   *  分段的輸出是一整個資料夾裡的 segment_N.aedb，不是單一個 .aedb，
+   *  `/api/output_path/status`（裁切用的那條）只看得出「這個資料夾存在」——
+   *  拿它來事前探測，等於每次分段都跳一次確認，而且問的不是真正的問題。
+   *  所以沿用後端那道閘門：先照預設（不覆寫）送出，真的撞到既有結果時，
+   *  把後端寫的理由原封不動給使用者看，答應了才帶 `overwrite_existing`
+   *  重送。取消回 null，呼叫端安靜結束，不當成失敗。
+   *
+   *  措辭要跟後端現在的行為一致：帶 `overwrite_existing` 重送時，後端會
+   *  **真的把舊的 segment_N.aedb 整個資料夾刪掉**（連同 .aedt、.aedt.lock
+   *  與 .aedtresults）再裁切，不再只是「不擋你」。所以這裡講清楚刪的是什麼，
+   *  而不是含糊的「覆寫」。 */
+  const runSegmentJob = async (
+    endpoint: string, payload: Record<string, any>,
+  ) => {
+    try {
+      return await api(endpoint, { ...payload, overwrite_existing: false })
+    } catch (error) {
+      const message = String(error)
+      if (!message.includes(SEGMENT_EXISTS_MARK)) throw error
+      if (!confirm(
+        `${message}\n\n要由工具刪掉這些 segment_N.aedb 資料夾（連同裡面`
+        + `已經求解好的結果與 .aedtresults）再重跑嗎？刪掉就救不回來。`)) {
+        return null
+      }
+      return await api(endpoint, { ...payload, overwrite_existing: true })
+    }
+  }
+
   useEffect(() => {
     const controller = new AbortController()
-    const cores = parseInt(solverCores, 10) || 4
+    const cores = parseInt(solverCores, 10) || 12
     const memory = parseInt(solverMemoryPercent, 10) || 90
     fetch(`/api/system/solver_resources?num_cores=${cores}&memory_percent=${memory}`, {
       signal: controller.signal,
@@ -973,7 +1105,7 @@ export default function App() {
         setInputPath(data.path)
         setOutputPath(stripExtension(data.path) + '_Cutout.aedb')
       }
-    } catch (e) { console.error(e) }
+    } catch (e) { reportBrowseFailure('輸入檔案', e) }
   }
 
   /** 挑一個 CSV 填進指定欄位。示波器匯出的檔名又長又帶時間戳，
@@ -982,7 +1114,7 @@ export default function App() {
     try {
       const data = await api(`/api/browse_csv?title=${encodeURIComponent(title)}`)
       if (data.path) setter(data.path)
-    } catch (e) { console.error(e) }
+    } catch (e) { reportBrowseFailure('CSV 檔', e) }
   }
 
   const revealInExplorer = async (path: string) => {
@@ -990,11 +1122,21 @@ export default function App() {
     if (failure) setLogs(prev => [...prev, failure])
   }
 
+  /** 瀏覽視窗打不開時要說出來。
+   *
+   *  `browse_*` 端點自己吞掉例外並回 `{"path": ""}`（使用者按取消也是這樣），
+   *  所以會走到 catch 的只剩傳輸層失敗——後端沒起來、或前端新後端舊撞上
+   *  StaticFiles 的 405。原本只 `console.error`，畫面上按下去完全沒有反應，
+   *  看起來像按鈕壞了。跟 `revealInExplorer` 一樣寫進系統日誌。 */
+  const reportBrowseFailure = (what: string, error: unknown) => {
+    setLogs(prev => [...prev, `[錯誤] 開啟${what}的瀏覽視窗失敗：${String(error)}`])
+  }
+
   const handleBrowseOutput = async () => {
     try {
       const data = await api('/api/browse_output')
       if (data.path) setOutputPath(data.path)
-    } catch (e) { console.error(e) }
+    } catch (e) { reportBrowseFailure('輸出路徑', e) }
   }
 
   // 分隔線位置：讀一次當初始值，之後每次拖曳就記起來當下次的預設。
@@ -1045,9 +1187,78 @@ export default function App() {
         const status = await api('/api/status')
         const version = Number(status?.api_contract_version ?? 0)
         setStaleBackend(version === API_CONTRACT_VERSION ? null : version)
+        // 後端是新的一次啟動 → 報告工作區從頭開始，不帶上一輪的舊快照。
+        if (resetReportWorkspaceIfNewInstance(String(status?.instance_id || ''))) {
+          setReportWorkspace('')
+        }
       } catch { /* 連不上就讓其他地方去報，不在這裡疊一層 */ }
     })()
   }, [])
+
+  // 版本與建置資訊：標題列顯示、「關於本工具」列全部、支援包 manifest 也帶。
+  const [backendVersion, setBackendVersion] = useState<any>(null)
+  useEffect(() => {
+    void api('/api/version').then(setBackendVersion).catch(() => { /* 舊後端沒有這個端點 */ })
+  }, [])
+
+  const showAbout = () => {
+    const v = backendVersion
+    const lines = [
+      `PCB SI 3D 模擬分析工具  v${__APP_VERSION__}`,
+      '',
+    ]
+    if (v) {
+      if (v.app_version !== __APP_VERSION__) {
+        lines.push(`⚠ 後端版本 ${v.app_version} 與前端 ${__APP_VERSION__} 不一致——請關掉工具用 start.bat 重新啟動。`)
+      }
+      const build = v.build || {}
+      lines.push(`建置：${build.commit || '未知'}${build.built_at ? `（${build.built_at}）` : ''}`)
+      lines.push(`Python ${v.python || '?'}；pyedb ${v.packages?.pyedb || '?'}；pyaedt ${v.packages?.pyaedt || '?'}`)
+      lines.push(`AEDT 版本（本次流程）：${v.aedt_version_in_use || '?'}`)
+      lines.push('')
+    }
+    lines.push(
+      '電路板裁切與 Port 自動建立',
+      '疊構更換、背鑽與 Layout 清理',
+      'N 段分割與 HFSS／SIwave 混合求解',
+      '遠端求解包（求解機不需安裝 Python）',
+      'S 參數串接、TDR 與眼圖',
+      '',
+      '此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供',
+    )
+    alert(lines.join('\n'))
+  }
+
+  /** 一鍵支援包：日誌、設定檔、版本 manifest、AEDT 傾印與 pyaedt 記錄打成 zip，
+   *  然後在檔案總管開它所在的資料夾。不含模型檔與求解結果。 */
+  const makeSupportBundle = async () => {
+    try {
+      const result = await api('/api/support/bundle', {})
+      const failure = await revealPath(result.path)
+      const skipped = (result.skipped || []).length
+      alert(
+        `支援包已產生：\n${result.path}\n\n` +
+        `${(result.included || []).length} 個附件` + (skipped ? `，${skipped} 個略過（見 manifest.json）` : '') +
+        '\n\n不含模型檔、.aedb、Touchstone 與求解結果。回報問題時請把這個 zip 一起附上。' +
+        (failure ? `\n\n（開啟資料夾失敗：${failure}）` : ''),
+      )
+    } catch (e) {
+      alert('產生支援包失敗：' + String(e))
+    }
+  }
+
+  const openLogFolder = async () => {
+    try {
+      const status = await api('/api/support/status')
+      const failure = await revealPath(status.log_dir)
+      if (failure) alert(failure)
+      if (!status.file_logging_active) {
+        alert(`警告：這次執行的日誌沒有寫進檔案（${status.log_file}），只留在畫面上。請確認該目錄可寫。`)
+      }
+    } catch (e) {
+      alert('查詢日誌位置失敗：' + String(e))
+    }
+  }
 
   // 動過的輸出路徑建議都要跟著長出新的一節，檔名才完整記錄做過哪些加工。
   useEffect(() => {
@@ -1068,7 +1279,7 @@ export default function App() {
       const data = await api('/api/browse_stackup')
       // 換了疊構檔，舊的差異分析就不作數了。
       if (data.path) { setStackupFilePath(data.path); setStackupDiff(null) }
-    } catch (e) { console.error(e) }
+    } catch (e) { reportBrowseFailure('疊構檔', e) }
   }
 
   const applyLoadResult = (data: any, path: string) => {
@@ -1082,12 +1293,17 @@ export default function App() {
     setActualCutoutExtentType('')
     setPreciseBoundaryPreview(null)
     setPreciseBoundaryPreviewKey('')
-    setCompletedBoundary(null)
     setCleanupAnalysis(null)
     setCleanupBeforeScene(null)
     setCleanupAfterScene(null)
     setSegAnalysis(null)
     setSegRun(null)
+    // 換了一片板子＝重新開始。「使用者定過」的兩個旗標是綁在上一片板的
+    // 決定上（工作頻率跟著那片板的掃頻表、網格方法跟著那片板的分段），
+    // 不清掉的話新板子的掃頻表推導與 segments.json 回寫都會被永久凍結，
+    // 而畫面上沒有任何跡象說明為什麼欄位不動了。
+    solutionFreqTouched.current = false
+    hfssMeshMethodTouched.current = false
     setActiveView('full')
     if (path) {
       setInputPath(path)
@@ -1114,11 +1330,15 @@ export default function App() {
           transientErrors = 0
           const elapsed = state.started_at ? Math.max(0, Date.now() / 1000 - state.started_at) : 0
           setLoadingMsg(`${state.message || '背景載入中…'}（${state.progress || 0}%／${formatElapsed(elapsed)}）`)
-          if (state.status === 'error') throw new Error(state.error || 'EDB 匯入工作失敗')
+          if (state.status === 'error') {
+            throw fatalJobError(describeJobFailure(state, 'EDB 匯入工作失敗'))
+          }
           if (state.status === 'done') data = state.result
         } catch (error) {
+          // 工作本身失敗（終局）就立刻放棄；只有連線抖動才重試。
+          if (isFatalJobError(error)) throw error
           transientErrors += 1
-          if (transientErrors >= 3 || String(error).includes('匯入工作失敗')) throw error
+          if (transientErrors >= 3) throw error
         }
       }
       applyLoadResult(data, data.path || inputPath)
@@ -1148,7 +1368,12 @@ export default function App() {
     setIsLoading(true)
     try {
       const data = await api('/api/reload_original', {})
-      applyLoadResult(data, '')
+      // 後端 session 已經回到原始板，工作檔也要跟著回去。少了這一行，
+      // workingPath 會停在 …_Cutout_backdrill.aedb，之後每一步的輸出建議
+      // 都繼續掛著那串已經不成立的加工節（檔名是這條加工鏈唯一的紀錄）。
+      const original = String(data.path || '')
+      applyLoadResult(data, original)
+      setWorkingPath(original)
       const full = await api('/api/preview', { nets: [] })
       setFullScene(full)
     } catch (e) {
@@ -1212,7 +1437,7 @@ export default function App() {
           const countText = state.total ? `／${state.processed || 0}/${state.total}` : ''
           setLoadingMsg(`${state.message || '背景裁切中…'}（${state.progress || 0}%${countText}／${formatElapsed(elapsed)}）`)
           if (state.status === 'error') {
-            throw new Error(`${state.message || '裁切工作失敗'}${state.error ? `\n${state.error}` : ''}`)
+            throw fatalJobError(describeJobFailure(state, '裁切工作失敗'))
           }
           if (state.status === 'cancelled') {
             setCutoutStopping(false)
@@ -1221,18 +1446,14 @@ export default function App() {
           }
           if (state.status === 'done') data = state.result
         } catch (error) {
+          if (isFatalJobError(error)) throw error
           transientErrors += 1
-          if (transientErrors >= 3 || String(error).includes('裁切工作失敗')) throw error
+          if (transientErrors >= 3) throw error
         }
       }
       setCutScene(data.preview)
       const actualExtent = String(data.actual_extent_type || extentType)
       setActualCutoutExtentType(actualExtent)
-      setCompletedBoundary({
-        estimated: data.estimated_boundary_mm || [],
-        actual: data.actual_boundary_mm || data.estimated_boundary_mm || [],
-        comparison: data.boundary_comparison || null,
-      })
       if (actualExtent !== extentType) {
         setExtentType(actualExtent)
         setPreciseBoundaryPreview(data.estimated_boundary_mm || null)
@@ -1310,7 +1531,7 @@ export default function App() {
           const countText = state.total ? `／${state.processed || 0}/${state.total}` : ''
           setLoadingMsg(`${state.message || '建立 Port 中…'}（${state.progress || 0}%${countText}／${formatElapsed(elapsed)}）`)
           if (state.status === 'error') {
-            throw new Error(`${state.message || '建立 Port 失敗'}${state.error ? `\n${state.error}` : ''}`)
+            throw fatalJobError(describeJobFailure(state, '建立 Port 失敗'))
           }
           if (state.status === 'cancelled') {
             setCutoutStopping(false)
@@ -1319,12 +1540,12 @@ export default function App() {
           }
           if (state.status === 'done') data = state.result
         } catch (error) {
+          if (isFatalJobError(error)) throw error
           transientErrors += 1
-          if (transientErrors >= 3 || String(error).includes('建立 Port 失敗')) throw error
+          if (transientErrors >= 3) throw error
         }
       }
       setCutScene(data.preview)
-      setCompletedBoundary(null)
       setActiveView('cut')
       setWorkingPath(data.output_path)
       setCleanupAnalysis(null)
@@ -1404,14 +1625,14 @@ ${data.output_path}`)
           const elapsed = state.started_at ? Math.max(0, Date.now() / 1000 - state.started_at) : 0
           setLoadingMsg(`${state.message || '疊構更換中…'}（${state.progress || 0}%／${formatElapsed(elapsed)}）`)
           if (state.status === 'error') {
-            throw new Error(`${state.message || '疊構更換失敗'}${state.error ? `
-${state.error}` : ''}`)
+            throw fatalJobError(describeJobFailure(state, '疊構更換失敗'))
           }
           if (state.status === 'cancelled') { alert(state.message || '疊構更換已停止'); return }
           if (state.status === 'done') data = state.result
         } catch (error) {
+          if (isFatalJobError(error)) throw error
           transientErrors += 1
-          if (transientErrors >= 3 || String(error).includes('疊構更換失敗')) throw error
+          if (transientErrors >= 3) throw error
         }
       }
       setCutScene(data.preview)
@@ -1433,12 +1654,21 @@ ${state.error}` : ''}`)
   // ── 6d 背鑽 ────────────────────────────────────────
   const handleBackdrillAnalyze = async () => {
     if (signalNets.length === 0) { alert('請先選擇訊號網路'); return }
+    // 不能用 `parseFloat(x) || 5`：使用者填的 0 會被靜默改成 5 mil。
+    const stubMil = Number(bdTargetStubMil)
+    if (bdTargetStubMil.trim() === '' || !Number.isFinite(stubMil) || stubMil < 0) {
+      alert('保留殘樁請填 0 以上的數字（mil）'); return
+    }
+    const incMil = Number(bdDiameterIncMil)
+    if (bdDrillOversize && (bdDiameterIncMil.trim() === '' || !Number.isFinite(incMil) || incMil < 0)) {
+      alert('鑽頭加大量請填 0 以上的數字（mil）'); return
+    }
     setIsLoading(true); setLoadingMsg('分析訊號 Via 殘樁…')
     try {
       const data = await api('/api/backdrill/analyze', {
         signal_nets: signalNets,
-        target_stub_mil: parseFloat(bdTargetStubMil) || 5,
-        diameter_increment_mil: parseFloat(bdDiameterIncMil) || 8,
+        target_stub_mil: stubMil,
+        diameter_increment_mil: bdDrillOversize ? incMil : 0,
       })
       setBdResult(data)
       suggestOutputPath('backdrill', '_backdrill.aedb',
@@ -1465,6 +1695,8 @@ ${state.error}` : ''}`)
   const handleBackdrillApply = async () => {
     if (!bdResult) { alert('請先分析'); return }
     if (!bdOutputPath) { alert('請設定輸出路徑'); return }
+    if ((bdResult.warnings || []).length > 0
+        && !window.confirm(`${bdResult.warnings.join('\n')}\n\n仍要照這個保留殘樁寫入背鑽嗎？`)) return
     setLoadingMsg('背鑽準備中…'); setIsLoading(true); setCutoutStopping(false)
     try {
       const started = await api('/api/backdrill/apply', {
@@ -1482,13 +1714,14 @@ ${state.error}` : ''}`)
           const elapsed = state.started_at ? Math.max(0, Date.now() / 1000 - state.started_at) : 0
           setLoadingMsg(`${state.message || '背鑽中…'}（${state.progress || 0}%／${formatElapsed(elapsed)}）`)
           if (state.status === 'error') {
-            throw new Error(`${state.message || '背鑽失敗'}${state.error ? `\n${state.error}` : ''}`)
+            throw fatalJobError(describeJobFailure(state, '背鑽失敗'))
           }
           if (state.status === 'cancelled') { alert(state.message || '背鑽已停止'); return }
           if (state.status === 'done') data = state.result
         } catch (error) {
+          if (isFatalJobError(error)) throw error
           transientErrors += 1
-          if (transientErrors >= 3 || String(error).includes('背鑽失敗')) throw error
+          if (transientErrors >= 3) throw error
         }
       }
       setCutScene(data.preview)
@@ -1538,7 +1771,7 @@ ${state.error}` : ''}`)
       const data = await api('/api/cleanup/analyze', {
         signal_nets: signalNets,
         reference_nets: refNets,
-        guard_mm: parseFloat(cleanupGuardMm) || 2,
+        guard_mm: parseFloat(cleanupGuardMm) || (cleanupMode === 'em_field' ? 0.2 : 2),
         mode: cleanupMode,
         isolation_db: parseFloat(cleanupIsolationDb) || 40,
       })
@@ -1568,7 +1801,7 @@ ${state.error}` : ''}`)
       const data = await api('/api/cleanup/run', {
         signal_nets: signalNets,
         reference_nets: refNets,
-        guard_mm: parseFloat(cleanupGuardMm) || 2,
+        guard_mm: parseFloat(cleanupGuardMm) || (cleanupMode === 'em_field' ? 0.2 : 2),
         mode: cleanupMode,
         isolation_db: parseFloat(cleanupIsolationDb) || 40,
         output_path: cleanupOutputPath,
@@ -1654,7 +1887,9 @@ ${state.error}` : ''}`)
         signal_nets: signalNets,
         reference_nets: refNets,
         quality_threshold: segmentQuality,
-        hfss_mesh_method: hfssMeshMethod,
+        // 網格方法不在這裡送：`/api/segment/analyze` 只算切點，不寫任何檔，
+        // 後端的 SegmentAnalyzeRequest 也沒有這個欄位（pydantic 安靜丟掉）。
+        // 真正會把它寫進 segments.json 的是 /api/segment/run 與 run-single。
         target_fmax_ghz: targetFmaxGHz,
       })
       setSegAnalysis(data)
@@ -1679,22 +1914,19 @@ ${state.error}` : ''}`)
     if (!outDir) { alert('請指定求解包輸出資料夾（需為新資料夾）'); return }
     setPackBusy(true)
     try {
-      const res = await fetch('/api/remote/pack', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          metadata_path: metadataPath,
-          output_dir: outDir,
-          sweep_type: sweepType,
-          sweeps,
-          error_tolerance_pct: parseFloat(errorTolerance) || 0.1,
-          siwave_num_interp_points: 150,
-          num_cores: parseInt(solverCores, 10) || 4,
-          segment_indices: [],
-        }),
+      // 走 api()：它會先取文字再解析，非 JSON 的回應（舊後端讓 POST 撞上
+      // StaticFiles 得到 405 的那種）才不會變成「Unexpected token '<'」，
+      // 422 的 detail 陣列也才不會印成 [object Object]。
+      const data = await api('/api/remote/pack', {
+        metadata_path: metadataPath,
+        output_dir: outDir,
+        sweep_type: sweepType,
+        sweeps,
+        error_tolerance_pct: parseFloat(errorTolerance) || 0.1,
+        siwave_num_interp_points: 150,
+        num_cores: parseInt(solverCores, 10) || 12,
+        segment_indices: [],
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.detail || '求解包建立失敗')
       const packedTxt = (data.packed || [])
         .map((x: any) => `段 ${x.index}（${x.port_count} Port）`).join('、')
       const skippedTxt = (data.skipped || []).length
@@ -1727,13 +1959,8 @@ ${state.error}` : ''}`)
     if (!dir) { alert('請指定求解結果資料夾（求解包資料夾或其中的 results）'); return }
     setIngestBusy(true)
     try {
-      const res = await fetch('/api/remote/ingest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ metadata_path: metadataPath, results_path: dir }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.detail || '收檔失敗')
+      const data = await api('/api/remote/ingest',
+        { metadata_path: metadataPath, results_path: dir })
       const okTxt = (data.ingested || [])
         .map((x: any) => `段 ${x.index}（${x.port_count} Port${x.stale ? '，已過期' : ''}）`)
         .join('、')
@@ -1741,10 +1968,15 @@ ${state.error}` : ''}`)
         ? '\n\n驗證失敗：\n' + (data.failed as any[])
             .map((x: any) => `  段 ${x.index}：${x.reason}`).join('\n')
         : ''
+      // 收回了但不能沿用（例如沒有設定指紋）：不算收回成功，要重新求解。
+      const unusableTxt = (data.unusable || []).length
+        ? '\n\n收回但不能沿用（需要重新求解）：\n' + (data.unusable as any[])
+            .map((x: any) => `  段 ${x.index}：${x.reason}`).join('\n')
+        : ''
       const missTxt = (data.missing || []).length
         ? '\n\n尚缺：段 ' + (data.missing as any[]).join('、')
         : ''
-      alert('已收回：' + okTxt + badTxt + missTxt)
+      alert('已收回：' + (okTxt || '（無）') + badTxt + unusableTxt + missTxt)
       await loadSegmentSolverPlan(metadataPath, false)
     } catch (e: any) {
       alert('收檔失敗: ' + (e?.message || String(e)))
@@ -1754,6 +1986,18 @@ ${state.error}` : ''}`)
   }
 
   // ── 排程模擬：啟動 / 停止 / 輪詢 ──────────────────────
+  // 這次排程「可能」會用到哪些求解器：有分段規劃就照每段的求解器，沒有就是 HFSS。
+  // 只拿來標示；能沿用快取的段不需要授權，哪些段要求解只有後端知道，所以不據此
+  // 停用按鈕，由後端開工前檢查（repo 審查第 11 輪）。
+  const scheduleFunctions: AnsysFunction[] = segmentSolverPlans.length > 0
+    ? Array.from(new Set(segmentSolverPlans.map(plan =>
+        plan.requested_solver === 'siwave' ? 'siwave_solve' as const : 'hfss3dlayout_solve' as const)))
+    : ['hfss3dlayout_solve']
+  const scheduleBlock = licenseBlock(licenseStatus, scheduleFunctions)
+  const hfssExportBlock = licenseBlock(licenseStatus, ['hfss3dlayout_export'])
+  // 載入：ODB++（.tgz）要轉檔，會 checkout al4odb++；.aedb 不占授權（實測）。
+  const loadFunctions: AnsysFunction[] = /\.tgz\s*"?$/i.test(inputPath) ? ['odbpp_import'] : []
+  const loadBlock = licenseBlock(licenseStatus, loadFunctions)
   const handleScheduleStart = async () => {
     const metadataPath = normalizeUserPath(schedMetaPath)
     if (!metadataPath) { alert('請先執行 N 段分割，或輸入 segments.json 路徑'); return }
@@ -1776,7 +2020,7 @@ ${state.error}` : ''}`)
         error_tolerance_pct: parseFloat(errorTolerance) || 0.1,
         siwave_num_interp_points: 150,
         hfss_mesh_method: hfssMeshMethod,
-        num_cores: parseInt(solverCores, 10) || 4,
+        num_cores: parseInt(solverCores, 10) || 12,
         memory_percent: parseInt(solverMemoryPercent, 10) || 90,
         solution_freq: parseFloat(solutionFreq) || 25,
         max_passes: parseInt(maxPasses, 10) || 20,
@@ -1800,15 +2044,27 @@ ${state.error}` : ''}`)
     }
   }
 
+  /** 上一次成功讀進來的 segments.json。換了一份就要把「使用者選過網格方法」
+   *  的旗標清掉：那個選擇屬於上一份分段，留著會讓新檔的網格方法永遠回寫不
+   *  進來（下拉顯示 PhiPlus，實際用的是新檔裡寫的另一個值）。 */
+  const loadedPlanPath = useRef('')
+
   const loadSegmentSolverPlan = async (metadataPath = schedMetaPath, showError = true) => {
     const path = normalizeUserPath(metadataPath)
     if (!path) return null
     try {
       const data = await api(`/api/schedule/plan?metadata_path=${encodeURIComponent(path)}`)
+      // 讀成功了才算「換過檔」——讀失敗時清掉旗標只是白白丟掉使用者的選擇。
+      if (path !== loadedPlanPath.current) hfssMeshMethodTouched.current = false
+      loadedPlanPath.current = path
       setSegmentSolverPlans(data.segments || [])
       setShowSolverRegionOverlay(true)
-      // 回寫分段當時使用的網格方法，避免重新載入後靜默改用預設值
-      if (data.hfss_mesh_method) setHfssMeshMethod(data.hfss_mesh_method)
+      // 回寫分段當時使用的網格方法，避免重新載入後靜默改用預設值。
+      // 反過來，使用者這一輪已經自己選過的話就不能蓋掉他——這個端點對舊檔
+      // 一律回預設值，無條件採用等於把手選悄悄改回 PhiPlus。
+      if (data.hfss_mesh_method && !hfssMeshMethodTouched.current) {
+        setHfssMeshMethod(data.hfss_mesh_method)
+      }
       return data
     } catch (error) {
       if (showError) alert('載入混合求解規劃失敗：' + String(error))
@@ -1816,17 +2072,32 @@ ${state.error}` : ''}`)
     }
   }
 
-  const saveSegmentSolverPlans = async (plans: SegmentSolverPlan[]) => {
+  // 只送「使用者這次真的動過的那幾段」。
+  //
+  // 後端的 overridden 語意是「曾經明確指派」（不是「指派 != 建議」），而
+  // 明確指派過的段之後就不再跟著自動重評走（例如改了頻寬）。所以每次儲存
+  // 都把全部分段送出去，等於使用者只改一段、其餘各段的自動重評全被凍結。
+  const saveSegmentSolverPlans = async (
+    plans: SegmentSolverPlan[],
+    changedIndices: number[],
+    // false＝「這幾段交還給自動評估」（後端會清掉指派並回到建議值）。
+    overridden = true,
+  ) => {
     const metadataPath = normalizeUserPath(schedMetaPath)
     if (!metadataPath) return
     setSegmentSolverPlans(plans)
+    if (changedIndices.length === 0) return
+    const changed = new Set(changedIndices)
     try {
       const data = await api('/api/schedule/plan', {
         metadata_path: metadataPath,
-        assignments: plans.map(plan => ({
-          index: plan.index,
-          solver: plan.requested_solver,
-        })),
+        assignments: plans
+          .filter(plan => changed.has(plan.index))
+          .map(plan => ({
+            index: plan.index,
+            solver: plan.requested_solver,
+            overridden,
+          })),
       })
       setSegmentSolverPlans(data.segments || plans)
     } catch (error) {
@@ -1850,11 +2121,12 @@ ${state.error}` : ''}`)
       ? {
           ...plan,
           requested_solver: requestedSolver,
-          overridden: requestedSolver !== plan.recommended_solver,
+          // 按下去就是明確指派，即使剛好等於建議；語意與後端一致。
+          overridden: true,
           result_stale: Boolean(plan.touchstone),
         }
       : plan)
-    await saveSegmentSolverPlans(next)
+    await saveSegmentSolverPlans(next, [index])
   }
 
   const applySegmentSolverPreset = async (
@@ -1865,16 +2137,25 @@ ${state.error}` : ''}`)
       && segmentSolverPlans.some(plan => plan.recommended_solver === 'hfss')
       && !confirm('部分段落因 3D 結構複雜而建議 HFSS。確定全部改用 SIwave 嗎？')
     ) return
+    // 「全部改 HFSS／SIwave」是對每一段都下指令，整批都算明確指派。
+    //
+    // 「套用自動建議」不是——它的意思是「全部交還給自動評估」。以前整批送出
+    // `overridden: true`，於是按了這顆「回到自動」的按鈕之後，自動評估反而
+    // 從此凍結（overridden 的段不跟著頻寬重評走）。後端現在收得下
+    // `overridden: false`，會清掉指派、把 requested 同步回 recommended，
+    // 所以這裡整批送出、明講「這不是手動指派」。
+    const auto = preset === 'recommended'
     const next = segmentSolverPlans.map(plan => {
-      const requested = preset === 'recommended' ? plan.recommended_solver : preset
+      const requested = auto ? plan.recommended_solver : preset
+      const changed = plan.requested_solver !== requested
       return {
         ...plan,
         requested_solver: requested,
-        overridden: requested !== plan.recommended_solver,
-        result_stale: plan.requested_solver !== requested && Boolean(plan.touchstone),
+        overridden: !auto,
+        result_stale: changed && Boolean(plan.touchstone),
       }
     })
-    await saveSegmentSolverPlans(next)
+    await saveSegmentSolverPlans(next, next.map(plan => plan.index), !auto)
   }
 
   const handlePreciseBoundaryPreview = async () => {
@@ -1945,6 +2226,9 @@ ${state.error}` : ''}`)
     try {
       const data = await api('/api/cascade/run', { metadata_path: metadataPath, output_path: '' })
       setCascadeResult(data)
+      // 右側已經掛著的 IBIS／AMI／多道精靈要重讀「本階段的完整通道」，
+      // 否則剛串好的這一份要等重新整理才會出現在捷徑裡。
+      notifyCascadedChannelChanged()
     } catch (e) {
       alert('電路串接失敗: ' + String(e))
     } finally {
@@ -1962,6 +2246,7 @@ ${state.error}` : ''}`)
     try {
       const data = await api('/api/cascade/load_external', { path })
       setCascadeResult(data)
+      notifyCascadedChannelChanged()
       setActiveView('sparam')
       if (!data.auto.ok) {
         alert('已載入，但無法自動判定 Port 角色：' + data.auto.reason
@@ -2018,6 +2303,7 @@ ${data.output_path}`)
         output_path: selected.path,
       })
       setCascadeResult(data)
+      notifyCascadedChannelChanged()
       alert(`完整 Touchstone 已輸出：\n${data.output_path}\n\n串接摘要：\n${data.summary_path}`)
     } catch (e) {
       alert('Touchstone 輸出失敗: ' + String(e))
@@ -2118,7 +2404,7 @@ ${data.output_path}`)
         output_p: eyeOutputP,
         output_n: eyeOutputN,
         confirmed: true,
-        num_cores: Number(solverCores) || 4,
+        num_cores: Number(solverCores) || 12,
       })
       setActiveView('eye')
     } catch (e) {
@@ -2220,24 +2506,40 @@ ${data.output_path}`)
   }
 
   // S 參數分頁：向後端要自動曲線（近端／遠端與差動配對由 Port 名稱推斷）
-  const loadSparamCurves = async (mode: 'single' | 'diff') => {
+  // `isCurrent` 讓已經被取代的那一次請求安靜退場。差動／單端連按兩下時，
+  // 先發出的那一次可能後回來，圖上就變成與目前模式不符的曲線。
+  const loadSparamCurves = async (
+    mode: 'single' | 'diff',
+    isCurrent: () => boolean = () => true,
+  ) => {
     setSpBusy(true); setSpError('')
     try {
       const data = await api('/api/cascade/auto_curves',
         { mode, include_xtalk: true })
+      if (!isCurrent()) return
       setSpData(data)
     } catch (e) {
+      if (!isCurrent()) return
+      if (mode === 'diff' && !spModePicked.current
+          && /差動對/.test(String(e))) {
+        setSpMode('single')          // 觸發 useEffect 以單端重載
+        return
+      }
       setSpData(null)
       setSpError(String(e))
     } finally {
-      setSpBusy(false)
+      if (isCurrent()) setSpBusy(false)
     }
   }
 
   // 切到 S 參數分頁或改變模式時自動載入
+  useEffect(() => { spModePicked.current = false }, [cascadeResult])
   useEffect(() => {
     if (activeView !== 'sparam' || !cascadeResult) return
-    loadSparamCurves(spMode)
+    let cancelled = false
+    void loadSparamCurves(spMode, () => !cancelled)
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, spMode, cascadeResult])
 
   // 一鍵眼圖：啟動後輪詢背景工作，完成或失敗時解除忙碌旗標並更新圖片
@@ -2433,8 +2735,13 @@ ${data.output_path}`)
         const state = await api('/api/tdr/status')
         if (cancelled) return
         // 同上：內容一樣就沿用舊物件，免得下游（例如與 Q2D 的對照）白算一次。
-        setTdrJob((previous: any) =>
-          JSON.stringify(previous) === JSON.stringify(state) ? previous : state)
+        setTdrJob((previous: any) => {
+          // 匯入的量測波形借用同一個結果槽，而它不是後端的工作——被
+          // 後端的閒置快照蓋掉，分頁就會整個變灰，看起來像匯入沒成功。
+          // （在入口把「TDR 阻抗定位」關掉再開就會重跑這個 effect。）
+          if (previous?.result?.source === 'measured_waveform') return previous
+          return JSON.stringify(previous) === JSON.stringify(state) ? previous : state
+        })
       } catch { /* 後端暫時忙碌時保留上次狀態 */ }
     }
     poll()
@@ -2548,7 +2855,7 @@ ${data.output_path}`)
     setTmBusy(true)
     try {
       const preview = await api('/api/tdr/measured/load',
-        { csv_path: tmCsvPath.trim() })
+        { csv_path: tmCsvPath.trim(), time_unit: tmTimeUnit })
       setTmPreview(preview)
     } catch (e) {
       setTmError(String(e))
@@ -2574,6 +2881,7 @@ ${data.output_path}`)
         path_length_mm: tdrPath?.length_mm || null,
         dk_hint: tdrDkHint.trim() ? Number(tdrDkHint) : null,
         rise_time_ps: tmRise.trim() ? Number(tmRise) : null,
+        time_unit: tmTimeUnit,
       })
       // 塞進與模擬路同一個結果槽：曲線、劇變表、Layout 標記與
       // 「取此處截面」全部重用。輪詢只在 running 時覆寫，不會蓋掉它。
@@ -2610,6 +2918,7 @@ ${data.output_path}`)
     setXsError('')
     setXsSavedCuts([])
     setXsCutsSource('')
+    setXsCutsLoaded(false)
     if (!show.crosssection || !inputPath || !fullScene) return
     let cancelled = false
     api('/api/cross-section/cuts')
@@ -2617,8 +2926,15 @@ ${data.output_path}`)
         if (cancelled) return
         setXsSavedCuts(data.cuts || [])
         setXsCutsSource(data.source || '')
+        setXsCutsLoaded(true)
       })
-      .catch(() => { /* 讀不到就是還沒標註過，不是錯誤 */ })
+      .catch(error => {
+        // 「還沒標註過」後端回的是空清單，走的是上面那條。掉到這裡的是真的
+        // 讀失敗（sidecar 壞了、後端 500、舊後端回 405）——此時畫面上的空
+        // 清單並不代表這片板子沒有切線，存檔會把既有的整份蓋掉。
+        if (cancelled) return
+        setXsError('讀不到這片板子的切線集，暫時不能存檔：' + String(error))
+      })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputPath, fullScene, show.crosssection])
@@ -2682,18 +2998,15 @@ ${data.output_path}`)
 
   const handleXsSaveCut = async () => {
     if (!xsRegion || !xsCut) return
-    const entry = {
-      name: xsScan?.cut?.name
-        || `XS_${xsCut.axis.toUpperCase()}_${xsCut.coordinateMm.toFixed(3)}`,
-      axis: xsCut.axis,
-      coordinate_mm: xsCut.coordinateMm,
-      region: {
-        x0_mm: xsRegion.x0Mm, y0_mm: xsRegion.y0Mm,
-        x1_mm: xsRegion.x1Mm, y1_mm: xsRegion.y1Mm,
-      },
-      resolution_um: Number(xsResolutionUm) || 2,
-      role_overrides: xsRoleOverrides,
+    if (!xsCutsLoaded) {
+      setXsError('切線集還沒成功讀回來，現在存會蓋掉既有的切線。請重讀後再存。')
+      return
     }
+    // 與「求解這條」送出的規格用同一個來源，包含導體到參考面的高度——
+    // 少了它，批次求解（解全部已存）就跳過側向截斷判定，而那正是整條
+    // Z₀(x) 剖面最需要它的場合。
+    const entry = xsCutSpec()
+    if (!entry) return
     // 同名就覆蓋——同一條切線重標一次是修正，不是新增一條。
     const cuts = [...xsSavedCuts.filter(c => c.name !== entry.name), entry]
     try {
@@ -2927,6 +3240,11 @@ ${data.output_path}`)
         return
       }
       // 存進切線集，之後「解全部已存」就能整批送出。
+      // 同樣先確認切線集讀回來過：合併是拿畫面上的清單去覆寫整個 sidecar。
+      if (!xsCutsLoaded) {
+        alert('切線集還沒成功讀回來，現在存會蓋掉既有的切線。請重讀後再取樣。')
+        return
+      }
       const merged = [...xsSavedCuts.filter(
         (c: any) => !cuts.some((n: any) => n.name === c.name)), ...cuts]
       const written = await api('/api/cross-section/cuts', { cuts: merged })
@@ -2960,6 +3278,13 @@ ${data.output_path}`)
     setXsCut({ axis: entry.axis === 'x' ? 'x' : 'y', coordinateMm: entry.coordinate_mm })
     setXsRoleOverrides(entry.role_overrides || {})
     if (entry.resolution_um) setXsResolutionUm(String(entry.resolution_um))
+    // 導體到參考面也要跟著回來，否則叫回一條存過的切線再按「求解這條」，
+    // 側向截斷判定會因為高度是 0 而整個略過（欄位看起來也像沒填過）。
+    // `!= null` 而不是真值判斷：存下來的 0 是「量到貼著參考面」，用真值判斷
+    // 會把它跟「沒存過」混為一談。沒有這個欄位就清成空字串，別留著上一條
+    // 切線的高度冒充這一條的。
+    setXsHeightUm(entry.conductor_to_reference_um != null
+      ? String(entry.conductor_to_reference_um) : '')
     setXsScan(null)
     setXsMode('none')
   }
@@ -3031,7 +3356,7 @@ ${data.output_path}`)
       `執行 ${complexityAnalysis.segments.length} 段分割中，每段需要重新裁切…`)
     setIsLoading(true)
     try {
-      const data = await api('/api/segment/run', {
+      const data = await runSegmentJob('/api/segment/run', {
         signal_nets: signalNets,
         reference_nets: refNets,
         cuts: complexityAnalysis.cuts.map(cut => ({
@@ -3039,7 +3364,9 @@ ${data.output_path}`)
         })),
         output_dir: segOutputDir,
         quality_threshold: segmentQuality,
+        hfss_mesh_method: hfssMeshMethod,
       })
+      if (!data) return               // 使用者不想覆寫舊結果
       setSegRun(data)
       setActiveSegIdx(-1)
       setActiveView('segments')
@@ -3124,12 +3451,16 @@ ${data.output_path}`)
     setLoadingMsg('建立不分割求解設定中…')
     setIsLoading(true)
     try {
-      const data = await api('/api/segment/run-single', {
+      // 不分割寫出的也是 segment_1.aedb，撞到舊結果的方式與分段完全一樣，
+      // 所以走同一條「先問過再覆寫」的路，不要各問各的。
+      const data = await runSegmentJob('/api/segment/run-single', {
         signal_nets: signalNets,
         reference_nets: refNets,
         output_dir: segOutputDir,
+        hfss_mesh_method: hfssMeshMethod,
         target_fmax_ghz: effectiveFmaxGHz,
       })
+      if (!data) return               // 使用者不想覆寫舊結果
       setSegRun(data)
       setActiveSegIdx(-1)
       setActiveView('segments')
@@ -3173,14 +3504,16 @@ ${data.output_path}`)
     setLoadingMsg(`執行 ${segAnalysis.cuts.length + 1} 段分割中，每段需要重新裁切，可能需要數分鐘…`)
     setIsLoading(true)
     try {
-      const data = await api('/api/segment/run', {
+      const data = await runSegmentJob('/api/segment/run', {
         signal_nets: signalNets,
         reference_nets: refNets,
         direction: segAnalysis.direction,
         positions_mm: segAnalysis.cuts.map(c => c.position_mm),
         output_dir: segOutputDir,
         quality_threshold: segmentQuality,
+        hfss_mesh_method: hfssMeshMethod,
       })
+      if (!data) return               // 使用者不想覆寫舊結果
       setSegRun(data)
       setActiveSegIdx(-1)   // 執行完先顯示整體視圖（完整板 + 切割線），方便確認每段位置
       setActiveView('segments')
@@ -3216,6 +3549,8 @@ ${data.output_path}`)
 
   // ── 設定檔（HANDOFF 乙6）──────────────────────────────────────────
   const [profileNames, setProfileNames] = useState<string[]>([])
+  /** 內建規格（DDR、PCIe…，後端 settings_profiles.BUILTIN_PROFILES）：唯讀、不能刪。 */
+  const [builtinProfileNames, setBuiltinProfileNames] = useState<string[]>([])
   const [selectedProfile, setSelectedProfile] = useState('')
   const [profileMsg, setProfileMsg] = useState('')
   /** 存進設定檔的欄位。語意欄位對（getter, setter）——套用是**合併**：
@@ -3223,13 +3558,14 @@ ${data.output_path}`)
   const profileFields: Record<string, [() => any, (v: any) => void]> = {
     sweepType: [() => sweepType, setSweepType],
     sweeps: [() => sweeps, setSweeps],
-    solutionFreq: [() => solutionFreq, setSolutionFreq],
+    // 套設定檔算是使用者定過這個值：套完之後掃頻表一變不可以把它算掉。
+    solutionFreq: [() => solutionFreq, pickSolutionFreq],
     errorTolerance: [() => errorTolerance, setErrorTolerance],
     maxPasses: [() => maxPasses, setMaxPasses],
     maxDeltaS: [() => maxDeltaS, setMaxDeltaS],
     maxRefinementPerPass: [() => maxRefinementPerPass, setMaxRefinementPerPass],
     minConvergedPasses: [() => minConvergedPasses, setMinConvergedPasses],
-    hfssMeshMethod: [() => hfssMeshMethod, setHfssMeshMethod],
+    hfssMeshMethod: [() => hfssMeshMethod, pickHfssMeshMethod],
     expansionMm: [() => expansionMm, setExpansionMm],
     extentType: [() => extentType, setExtentType],
     portType: [() => portType, setPortType],
@@ -3239,7 +3575,9 @@ ${data.output_path}`)
   const refreshProfiles = async () => {
     try {
       const data = await api('/api/settings-profiles')
-      setProfileNames((data.profiles || []).map((p: any) => p.name))
+      const all = data.profiles || []
+      setBuiltinProfileNames(all.filter((p: any) => p.builtin).map((p: any) => p.name))
+      setProfileNames(all.filter((p: any) => !p.builtin).map((p: any) => p.name))
     } catch { /* 清單失敗不打斷畫面 */ }
   }
   useEffect(() => { void refreshProfiles() }, [])
@@ -3266,7 +3604,8 @@ ${data.output_path}`)
       }
       const skipped = Object.keys(profileFields).filter(k => !(k in settings))
       setProfileMsg(`已套用「${name}」的 ${applied.length} 個欄位`
-        + (skipped.length ? `；${skipped.length} 個欄位設定檔裡沒有，保持現值。` : '。'))
+        + (skipped.length ? `；${skipped.length} 個欄位設定檔裡沒有，保持現值。` : '。')
+        + (data.note ? `　${data.note}` : ''))
     } catch (e) { alert('套用失敗: ' + String(e)) }
   }
   const deleteProfile = async (name: string) => {
@@ -3297,13 +3636,7 @@ ${data.output_path}`)
     if (allNets.length === 0) { alert('請先載入電路板'); return }
     setDdrBusy(true)
     try {
-      const res = await fetch('/api/nets/classify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nets: allNets }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.detail || '分類失敗')
+      const data = await api('/api/nets/classify', { nets: allNets })
       setDdrResult(data)
       // 預設只勾資料、選通與遮罩：那是一個位元組通道實際要一起分析的東西。
       // 時脈與位址不預設勾選——它們是命令匯流排，跟資料的分析方式不同。
@@ -3436,7 +3769,10 @@ ${data.output_path}`)
       { label: '一鍵 HTML 報告中心', action: () => setActiveView('report') },
     ],
     '說明': [
-      { label: '關於本工具', action: () => alert('PCB SI 3D 模擬分析工具\n\n電路板裁切與 Port 自動建立\n疊構更換、背鑽與 Layout 清理\nN 段分割與 HFSS／SIwave 混合求解\n遠端求解包（求解機不需安裝 Python）\nS 參數串接與眼圖') },
+      { label: '關於本工具', action: showAbout },
+      { label: 'Ansys 授權對照與可用數量', action: () => setLicensePanelOpen(true) },
+      { label: '產生支援包（日誌與診斷）', action: () => void makeSupportBundle() },
+      { label: '開啟日誌資料夾', action: () => void openLogFolder() },
     ],
   }
 
@@ -3538,12 +3874,10 @@ ${data.output_path}`)
   )
   const fullEstimatedBoundary = preciseBoundaryPreviewKey === currentBoundaryKey
     ? preciseBoundaryPreview : null
-  const visibleEstimatedBoundary = activeView === 'cut'
-    ? completedBoundary?.estimated || null
-    : activeView === 'full' ? fullEstimatedBoundary : null
-  const visibleActualBoundary = activeView === 'cut'
-    ? completedBoundary?.actual || null
-    : null
+  // 預估外框只在「完整 Layout」裁切前預覽用。裁切後分頁只畫裁切後的板子
+  // （#0062：預估與實際外框的比對填色實務上用不到，已移除）。
+  const visibleEstimatedBoundary = activeView === 'full'
+    ? fullEstimatedBoundary : null
   // 報告工作區的「預設位置」——只在還沒有工作區時用得到。
   //
   // 要跟著使用者現在在看的東西放，不要落到 C 槽的家目錄。依序取：分段輸出
@@ -3632,11 +3966,15 @@ ${data.output_path}`)
   // 被隱藏但仍在執行的工作：不提示的話，長時間求解會變成黑箱。
   const hiddenRunning: string[] = []
   if (!show.schedule && schedStatus?.running) hiddenRunning.push('排程求解')
-  if (!show.eye && eyeJob?.running) hiddenRunning.push('眼圖')
+  // 眼圖已經整合進「IBIS 模型與眼圖分析」，入口沒有獨立的 eye 項目——
+  // 看 show.eye 永遠是 undefined，於是眼圖一跑就冒出「項目已隱藏」，
+  // 而點開的選單裡根本沒有可以勾的眼圖。要看的是它現在住的那一項。
+  if (!show.models && eyeJob?.running) hiddenRunning.push('眼圖')
   if (!show.tdr && tdrJob?.running) hiddenRunning.push('TDR')
 
   return (
     <div className="app-shell" onClick={() => setOpenMenu(null)}>
+      {licensePanelOpen && <AnsysLicensePanel onClose={() => setLicensePanelOpen(false)} />}
       {pickerOpen && (
         <TaskPicker
           flags={show}
@@ -3702,7 +4040,12 @@ ${data.output_path}`)
       )}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h1 className="app-title">PCB SI 3D 模擬分析工具</h1>
+          <h1 className="app-title">
+            PCB SI 3D 模擬分析工具
+            <span className="app-version" title={backendVersion?.build?.commit ? `建置 ${backendVersion.build.commit}` : '版本'}>
+              v{__APP_VERSION__}
+            </span>
+          </h1>
           <p className="app-sub">
             通道裁切、分段與眼圖分析。
           </p>
@@ -3807,8 +4150,10 @@ ${data.output_path}`)
                         </select>
                       </div>
                       <div className="panel-hint" style={{ marginTop: 3, fontSize: 11 }}>
+                        {/* 「重新載入原始檔」不會解鎖：它自己就會把 EDB 重新
+                            開起來，而後端只在沒有 EDB 時才允許換版本。 */}
                         {aedtLocked
-                          ? '已載入電路板，要換版本請先「重新載入原始檔」。'
+                          ? '已載入電路板，要換版本請重新啟動工具。'
                           : '整條流程都用這個版本。'}
                       </div>
                     </>
@@ -3837,9 +4182,11 @@ ${data.output_path}`)
                       ? '入口未勾「局部裁切」，此檔案將直接作為通道進入後續步驟，不再裁切。'
                       : '入口已勾「局部裁切」，載入後可設定裁切範圍。'}
                   </div>
-                  <button className="btn--primary" onClick={handleLoadFile} style={{ marginTop: 6 }}>
+                  <button className="btn--primary" onClick={handleLoadFile} style={{ marginTop: 6 }}
+                    disabled={Boolean(loadBlock)} title={loadBlock || undefined}>
                     {directSegmentMode ? '載入檔案（不裁切）' : '載入電路板'}
                   </button>
+                  {loadFunctions.length > 0 && <LicenseTag functions={loadFunctions} />}
                   {/* 拿去給客戶用的時候，第一個被問的就是「我的板子檔會不會被傳走」。
                       這一段回答它，而且路徑是跟後端要的實際值，不是寫死的字串——
                       模型庫與設定檔的位置可由環境變數覆寫，寫死就會開始說謊。
@@ -4276,7 +4623,7 @@ ${data.output_path}`)
                       try {
                         const data = await api('/api/browse_output')
                         if (data.path) setStackupOutputPath(data.path)
-                      } catch (e) { console.error(e) }
+                      } catch (e) { reportBrowseFailure('輸出路徑', e) }
                     }}>瀏覽…</button>
                   </div>
                   <button className="btn--primary" style={{ width: '100%', marginTop: 6 }}
@@ -4299,12 +4646,25 @@ ${data.output_path}`)
                     <input aria-label="保留殘樁" type="number" className="input" style={{ width: 70 }} min="0" step="0.5"
                       value={bdTargetStubMil} onChange={e => setBdTargetStubMil(e.target.value)} />
                     <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>mil</span>
-                    <div className="field-label" style={{ minWidth: 66, marginLeft: 8 }}>鑽頭加大</div>
-                    <input aria-label="鑽頭加大" type="number" className="input" style={{ width: 70 }} min="0" step="1"
+                    <label className="field-label" style={{ marginLeft: 8, display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}
+                      title="不勾選：鑽頭直徑＝Via Hole。勾選後鑽頭＝Via Hole＋增量；實際板廠的背鑽鑽頭通常比原孔大 6～10 mil。">
+                      <input aria-label="鑽頭加大" type="checkbox" checked={bdDrillOversize}
+                        onChange={e => setBdDrillOversize(e.target.checked)} />
+                      鑽頭加大
+                    </label>
+                    <input aria-label="鑽頭加大量" type="number" className="input" style={{ width: 70 }} min="0" step="1"
                       value={bdDiameterIncMil} onChange={e => setBdDiameterIncMil(e.target.value)}
-                      title="鑽頭直徑 = 原孔徑 + 此增量。回鑽鑽頭與原孔同徑會鑽不乾淨孔壁鍍銅，實際值請依板廠規格。" />
+                      disabled={!bdDrillOversize} />
                     <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>mil</span>
                   </div>
+                  <p className="panel-hint" style={{ marginTop: 2 }}>
+                    鑽頭直徑：{bdDrillOversize ? `Via Hole＋${bdDiameterIncMil || 0} mil` : '與 Via Hole 相同'}
+                  </p>
+                  {backdrillStubWarning(bdTargetStubMil) && (
+                    <div className="status status--warn" style={{ marginTop: 6, fontSize: 11.5 }}>
+                      ⚠ {backdrillStubWarning(bdTargetStubMil)}
+                    </div>
+                  )}
 
                   <button className="btn" style={{ width: '100%', marginTop: 6 }}
                     onClick={handleBackdrillAnalyze} disabled={signalNets.length === 0}>
@@ -4396,14 +4756,14 @@ ${data.output_path}`)
                         setCleanupAnalysis(null)
                       }}
                       disabled={!canSegment}>
-                      <option value="conservative">第一級：固定距離保守清理</option>
-                      <option value="em_field">第二級：依電磁影響範圍判斷</option>
+                      <option value="em_field">第一級：依電磁影響範圍判斷（預設）</option>
+                      <option value="conservative">第二級：固定距離保守清理</option>
                     </select>
                     <button className="btn cleanup-recommended-btn"
                       onClick={applyCleanupRecommendedSettings}
                       disabled={!canSegment}
-                      title="切換至第二級並帶入建議值：最小距離 0.2 mm、隔離度 40 dB">
-                      帶入建議設定
+                      title="回到預設：第一級、最小保護距離 0.2 mm、隔離度 40 dB">
+                      恢復預設
                     </button>
                   </div>
                   {cleanupMode === 'em_field' && (
@@ -4449,7 +4809,7 @@ ${data.output_path}`)
                   )}
                   {cleanupAnalysis?.mode === 'conservative_fallback' && (
                     <div className="status status--warn" style={{ marginTop: 6, fontSize: 11.5 }}>
-                      Stackup／參考層資料不足，本次分析已自動退回第一級固定距離模式。
+                      Stackup／參考層資料不足，本次分析已自動改用第二級固定距離模式。
                     </div>
                   )}
                   {cleanupAnalysis?.deleted && (
@@ -4467,7 +4827,7 @@ ${data.output_path}`)
                   <button className="btn--primary" style={{ marginTop: 6 }}
                     onClick={handleCleanupRun}
                     disabled={!cleanupAnalysis || cleanupAnalysis.remove_count === 0 || !!cleanupAnalysis.deleted}>
-                    另存並執行{cleanupMode === 'em_field' ? '第二級清理' : '保守清理'}
+                    另存並執行{cleanupMode === 'em_field' ? '第一級清理' : '第二級清理'}
                   </button>
                 </div>
 
@@ -4547,14 +4907,26 @@ ${data.output_path}`)
                     <select aria-label="設定檔" className="input" style={{ flex: 1 }}
                       value={selectedProfile} onChange={e => setSelectedProfile(e.target.value)}>
                       <option value="">（未選擇）</option>
-                      {profileNames.map(name => <option key={name} value={name}>{name}</option>)}
+                      {builtinProfileNames.length > 0 && (
+                        <optgroup label="內建規格（唯讀）">
+                          {builtinProfileNames.map(name => (
+                            <option key={name} value={name}>{name.replace(/^內建｜/, '')}</option>))}
+                        </optgroup>
+                      )}
+                      {profileNames.length > 0 && (
+                        <optgroup label="我的設定檔">
+                          {profileNames.map(name => <option key={name} value={name}>{name}</option>)}
+                        </optgroup>
+                      )}
                     </select>
                     <button className="btn" disabled={!selectedProfile}
                       onClick={() => void applyProfile(selectedProfile)}
                       title="把選定設定檔的欄位套進目前畫面（合併，不清空未存的欄位）">套用</button>
                     <button className="btn" onClick={() => void saveProfile()}
                       title="把目前的掃頻、收斂、裁切與 Port 設定存成有名字的一組">儲存為…</button>
-                    <button className="btn" disabled={!selectedProfile}
+                    <button className="btn"
+                      disabled={!selectedProfile || builtinProfileNames.includes(selectedProfile)}
+                      title={builtinProfileNames.includes(selectedProfile) ? '內建規格不能刪除' : undefined}
                       onClick={() => void deleteProfile(selectedProfile)}>刪除</button>
                   </div>
                   {profileMsg && <p className="panel-hint" style={{ marginTop: 2 }}>{profileMsg}</p>}
@@ -4568,7 +4940,7 @@ ${data.output_path}`)
                       <option value="Fast">Fast</option>
                     </select>
                     <div className="field-label" style={{ minWidth: 80, marginLeft: 12 }}>工作頻率 (GHz)</div>
-                    <input aria-label="工作頻率 (GHz)" type="number" className="input" style={{ width: 100 }} min="0" step="0.1" value={solutionFreq} onChange={e => setSolutionFreq(e.target.value)} title="預設為掃頻頻寬的一半" />
+                    <input aria-label="工作頻率 (GHz)" type="number" className="input" style={{ width: 100 }} min="0" step="0.1" value={solutionFreq} onChange={e => pickSolutionFreq(e.target.value)} title="預設為掃頻頻寬的一半；自己填過就不再自動重算" />
                     <div className="field-label" style={{ minWidth: 100, marginLeft: 12 }}>Error Tolerance (%)</div>
                     <input aria-label="Error Tolerance (%)" type="number" className="input" style={{ width: 80 }} min="0.001" step="0.05" value={errorTolerance} onChange={e => setErrorTolerance(e.target.value)} title="Interpolating Sweep 收斂容差（AEDT 預設 0.5%，本工具預設 0.1%）" />
                   </div>
@@ -4615,8 +4987,10 @@ ${data.output_path}`)
                                   style={{ padding: '2px 4px', height: 24, fontSize: 12 }} 
                                   value={sw.distribution} 
                                   onChange={e => {
+                                    // 連同那一列一起複製：只複製陣列的話，改的
+                                    // 是上一份 state 也還指著的同一個物件。
                                     const newSweeps = [...sweeps];
-                                    newSweeps[idx].distribution = e.target.value;
+                                    newSweeps[idx] = { ...newSweeps[idx], distribution: e.target.value };
                                     setSweeps(newSweeps);
                                   }}
                                 >
@@ -4626,16 +5000,16 @@ ${data.output_path}`)
                                 </select>
                               </td>
                               <td style={{ padding: 4 }}>
-                                <input aria-label={`第 ${idx + 1} 段掃頻的起始頻率`} className="input" style={{ padding: '2px 4px', height: 24, fontSize: 12 }} value={sw.start} onChange={e => { const ns = [...sweeps]; ns[idx].start = e.target.value; setSweeps(ns); }} />
+                                <input aria-label={`第 ${idx + 1} 段掃頻的起始頻率`} className="input" style={{ padding: '2px 4px', height: 24, fontSize: 12 }} value={sw.start} onChange={e => { const ns = [...sweeps]; ns[idx] = { ...ns[idx], start: e.target.value }; setSweeps(ns); }} />
                               </td>
                               <td style={{ padding: 4 }}>
-                                <input aria-label={`第 ${idx + 1} 段掃頻的結束頻率`} className="input" style={{ padding: '2px 4px', height: 24, fontSize: 12 }} value={sw.end} onChange={e => { const ns = [...sweeps]; ns[idx].end = e.target.value; setSweeps(ns); }} />
+                                <input aria-label={`第 ${idx + 1} 段掃頻的結束頻率`} className="input" style={{ padding: '2px 4px', height: 24, fontSize: 12 }} value={sw.end} onChange={e => { const ns = [...sweeps]; ns[idx] = { ...ns[idx], end: e.target.value }; setSweeps(ns); }} />
                               </td>
                               <td style={{ padding: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
                                 <span style={{ fontSize: 11, color: 'var(--faint)', width: 50, flexShrink: 0 }}>
                                   {sw.distribution === 'Linear Count' ? 'Points' : sw.distribution === 'Log Scale' ? 'Samples' : 'Step size'}
                                </span>
-                                <input aria-label={`第 ${idx + 1} 段掃頻的點數或步進`} className="input" style={{ flex: 1, padding: '2px 4px', height: 24, fontSize: 12, minWidth: 0 }} value={sw.value} onChange={e => { const ns = [...sweeps]; ns[idx].value = e.target.value; setSweeps(ns); }} />
+                                <input aria-label={`第 ${idx + 1} 段掃頻的點數或步進`} className="input" style={{ flex: 1, padding: '2px 4px', height: 24, fontSize: 12, minWidth: 0 }} value={sw.value} onChange={e => { const ns = [...sweeps]; ns[idx] = { ...ns[idx], value: e.target.value }; setSweeps(ns); }} />
                               </td>
                               <td style={{ padding: 4, textAlign: 'center' }}>
                                 <button className="btn--mini" style={{ padding: '2px 6px' }} onClick={() => setSweeps(sweeps.filter((_, i) => i !== idx))}>✕</button>
@@ -4655,7 +5029,7 @@ ${data.output_path}`)
                     <div className="field-label" style={{ minWidth: 74 }}>自適應方式</div>
                     <select aria-label="自適應方式" className="input" style={{ width: 190 }} value={adaptiveMode}
                       onChange={e => setAdaptiveMode(e.target.value as 'broadband' | 'multi' | 'single')}
-                      title="Ansys BKM 建議寬頻自適應：範圍 1 GHz ~ 掃頻上限/2。單點自適應若低於掃頻上限，高頻網格會相對過粗而產生數值反射。">
+                      title="Ansys BKM 建議寬頻自適應：範圍 1 GHz ~ 掃頻上限。單點自適應若低於掃頻上限，高頻網格會相對過粗而產生數值反射。">
                       <option value="broadband">寬頻（Ansys BKM 建議）</option>
                       <option value="multi">多頻（3 點）</option>
                       <option value="single">單一頻率</option>
@@ -4670,7 +5044,7 @@ ${data.output_path}`)
                   </div>
                   {adaptiveMode !== 'single' && (
                     <div className="panel-hint" style={{ marginTop: 4, fontSize: 11 }}>
-                      自適應頻率範圍由掃頻上限自動推導為 1 GHz ~ 上限/2，不需手填；
+                      自適應頻率範圍由掃頻上限自動推導為 1 GHz ~ 掃頻上限，不需手填；
                       「工作頻率」僅在選單一頻率時生效。
                     </div>
                   )}
@@ -4682,10 +5056,10 @@ ${data.output_path}`)
                   <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
                     <div className="field-label" style={{ minWidth: 74 }}>網格方法</div>
                     <select aria-label="網格方法" className="input" style={{ width: 150 }} value={hfssMeshMethod}
-                      onChange={e => setHfssMeshMethod(e.target.value as 'Phi' | 'PhiPlus' | 'Classic')}
-                      title="HFSS 3D Layout 的網格產生方法。PhiPlus 對多層複雜結構較不易失敗；Classic 為舊版方法，可在前兩者卡住時嘗試。">
-                      <option value="PhiPlus">Phi Plus（建議）</option>
-                      <option value="Phi">Phi</option>
+                      onChange={e => pickHfssMeshMethod(e.target.value as 'Phi' | 'PhiPlus' | 'Classic')}
+                      title="HFSS 3D Layout 的網格產生方法。Phi 為預設；PhiPlus 在 AEDT 2026.1 非圖形化求解實測會讓 AEDT 崩潰（2026-09-05），只在 Phi 不收斂時嘗試；Classic 為舊版方法，可在前兩者卡住時嘗試。">
+                      <option value="Phi">Phi（預設）</option>
+                      <option value="PhiPlus">Phi Plus（2026.1 實測可能崩潰）</option>
                       <option value="Classic">Classic</option>
                     </select>
                     <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>
@@ -5143,7 +5517,7 @@ ${data.output_path}`)
                           </tr></thead>
                           <tbody>
                             {segmentSolverPlans.map(plan => (
-                              <tr key={plan.index} className={plan.overridden ? 'is-overridden' : ''}>
+                              <tr key={plan.index} className={plan.requested_solver !== plan.recommended_solver ? 'is-overridden' : ''}>
                                 <td>S{plan.index}</td>
                                 <td><span className={`solver-badge solver-badge--${plan.recommended_solver}`}>
                                   {plan.recommended_solver.toUpperCase()}
@@ -5160,7 +5534,12 @@ ${data.output_path}`)
                                     <option value="hfss">HFSS</option>
                                     <option value="siwave">SIwave</option>
                                   </select>
-                                  {plan.overridden && <span className="segment-solver-plan__warning" title="使用者已覆寫工具建議">⚠</span>}
+                                  {/* ⚠ 問的是「現在選的和建議不一樣嗎」，自己比就好。
+                                      後端的 overridden 是「曾經明確指派過」，
+                                      拿它當警告依據會讓「手動選了和建議相同的求解器」
+                                      也掛上一個沒有意義的警告。 */}
+                                  {plan.requested_solver !== plan.recommended_solver
+                                    && <span className="segment-solver-plan__warning" title="使用者已覆寫工具建議">⚠</span>}
                                 </td>
                                 <td>{plan.complexity_score}</td>
                                 <td>{Math.round(plan.confidence * 100)}%</td>
@@ -5177,7 +5556,7 @@ ${data.output_path}`)
                   <div className="field-row" style={{ marginTop: 6 }}>
                     <div style={{ flex: 1 }}>
                       <div className="field-label">求解核心數</div>
-                      <input aria-label="求解核心數" type="number" className="input" min="1" step="1"
+                      <input aria-label="求解核心數" type="number" className="input" min="4" step="1"
                         value={solverCores}
                         onChange={event => setSolverCores(event.target.value)}
                         disabled={schedStatus?.running} />
@@ -5228,6 +5607,9 @@ ${data.output_path}`)
                       style={{ flex: 2 }}
                       onClick={handleScheduleStart}
                       disabled={!schedMetaPath || schedStatus?.running}
+                      title={scheduleBlock
+                        ? `${scheduleBlock}能沿用快取的段不需要授權，開始時由後端確認。`
+                        : undefined}
                     >
                       {schedStatus?.running
                         ? `${schedStatus.solver === 'mixed' ? '混合求解器' : schedStatus.solver === 'siwave' ? 'SIwave' : 'HFSS'} 排程執行中…`
@@ -5242,14 +5624,20 @@ ${data.output_path}`)
                       disabled={!schedStatus?.running}
                     >停止</button>
                   </div>
+                  <LicenseTag functions={scheduleFunctions} />
                   {schedMetaPath && !schedStatus?.running && (
                     <button
                       className="btn"
                       style={{ width: '100%', marginTop: 6 }}
                       onClick={() => handleRetryTouchstoneExports()}
+                      disabled={Boolean(hfssExportBlock)}
+                      title={hfssExportBlock || undefined}
                     >
                       檢查並重試待匯出的 Touchstone（不重新求解）
                     </button>
+                  )}
+                  {schedMetaPath && !schedStatus?.running && (
+                    <LicenseTag functions={['hfss3dlayout_export']} />
                   )}
                   {show.remotepack && schedMetaPath && !schedStatus?.running && (
                     <div style={{ marginTop: 8, paddingTop: 8,
@@ -5337,7 +5725,8 @@ ${data.output_path}`)
                                 className="btn"
                                 style={{ padding: '2px 7px', fontSize: 10.5 }}
                                 onClick={() => handleRetryTouchstoneExports(j.index)}
-                                title="只開啟既有 AEDT 結果並匯出，不會重新求解"
+                                disabled={Boolean(hfssExportBlock)}
+                                title={hfssExportBlock || '只開啟既有 AEDT 結果並匯出，不會重新求解（需要 HFSS 3D Layout 授權）'}
                               >
                                 重新匯出
                               </button>
@@ -5580,10 +5969,14 @@ ${data.output_path}`)
                               </select>
                             </div>
                             <button className="btn" onClick={handleCircuitExport}
-                              disabled={circuitBusy || cascadeBusy} style={{ flex: 1 }}>
+                              disabled={circuitBusy || cascadeBusy
+                                || Boolean(licenseBlock(licenseStatus, ['circuit_export']))}
+                              title={licenseBlock(licenseStatus, ['circuit_export']) || undefined}
+                              style={{ flex: 1 }}>
                               {circuitBusy ? 'Circuit 處理中…' : '輸出 Circuit（不求解）'}
                             </button>
                           </div>
+                          <LicenseTag functions={['circuit_export']} />
                         </details>
                         {eyeSuggestion && (
                           <>
@@ -5658,10 +6051,13 @@ ${data.output_path}`)
                               )}
                             </div>
                             <button className="btn btn--primary" style={{ width: '100%', marginTop: 6 }}
-                              disabled={circuitBusy || cascadeBusy || !eyeSuggestion.quick_eye_supported}
+                              disabled={circuitBusy || cascadeBusy || !eyeSuggestion.quick_eye_supported
+                                || Boolean(licenseBlock(licenseStatus, ['circuit_quickeye']))}
+                              title={licenseBlock(licenseStatus, ['circuit_quickeye']) || undefined}
                               onClick={handleQuickEye}>
                               {circuitBusy ? '眼圖求解中…（背景執行）' : '執行眼圖'}
                             </button>
+                            <LicenseTag functions={['circuit_quickeye']} />
                           </>
                         )}
                         {eyeSuggestionError && (
@@ -5812,10 +6208,13 @@ ${data.output_path}`)
                               </div>
                             )}
                             <button className="btn btn--primary" style={{ width: '100%', marginTop: 6 }}
-                              disabled={tdrJob?.running || cascadeBusy || !tdrSuggestion.supported}
+                              disabled={tdrJob?.running || cascadeBusy || !tdrSuggestion.supported
+                                || Boolean(licenseBlock(licenseStatus, ['circuit_tdr']))}
+                              title={licenseBlock(licenseStatus, ['circuit_tdr']) || undefined}
                               onClick={handleTdrRun}>
                               {tdrJob?.running ? 'TDR 求解中…（背景執行）' : '執行 TDR'}
                             </button>
+                            <LicenseTag functions={['circuit_tdr']} />
                           </>
                         )}
                         {tdrJob?.status === 'error' && (
@@ -5851,6 +6250,20 @@ ${data.output_path}`)
                               onClick={() => void browseCsvInto(setTmCsvPath, '選擇示波器 TDR 波形 CSV')}>
                               瀏覽…
                             </button>
+                            <div>
+                              <div className="field-label">時間單位</div>
+                              <select aria-label="波形時間單位" className="input" style={{ width: 92 }}
+                                value={tmTimeUnit}
+                                onChange={event => setTmTimeUnit(event.target.value as typeof tmTimeUnit)}
+                                title="留「自動」由表頭與取樣間隔判定；判不出來（例如步長 0.1 在 ps 與 ns 下數字一樣）時後端會拒絕，這時在這裡明選。">
+                                <option value="auto">自動</option>
+                                <option value="s">s</option>
+                                <option value="ms">ms</option>
+                                <option value="us">µs</option>
+                                <option value="ns">ns</option>
+                                <option value="ps">ps</option>
+                              </select>
+                            </div>
                             <button className="btn" style={{ marginTop: 14, whiteSpace: 'nowrap' }}
                               disabled={tmBusy || !tmCsvPath.trim()} onClick={handleTmLoad}>
                               {tmBusy && !tmPreview ? '載入中…' : '載入'}
@@ -5866,7 +6279,7 @@ ${data.output_path}`)
                           {tmPreview && (
                             <>
                               <div className="panel-hint" style={{ marginTop: 4 }}>
-                                {tmPreview.point_count} 點｜單位 {tmPreview.time_unit}（自動判定）｜
+                                {tmPreview.point_count} 點｜單位 {tmPreview.time_unit}（{tmTimeUnit === 'auto' ? '自動判定' : '使用者指定'}）｜
                                 {tmPreview.value_kind === 'volts' ? '電壓'
                                   : tmPreview.value_kind === 'ohms' ? '阻抗' : '反射係數'}
                                 {tmPreview.edge_time_ns != null
@@ -6013,9 +6426,11 @@ ${data.output_path}`)
                       {xsBusy ? '掃描中…' : '掃描截面'}
                     </button>
                     <button className="btn" style={{ flex: 1 }}
-                      disabled={!xsRegion || !xsCut}
+                      disabled={!xsRegion || !xsCut || !xsCutsLoaded}
                       onClick={handleXsSaveCut}
-                      title="切線是你對這片板子的標註，存在 .aedb 旁邊，複製給同事時一起過去。">
+                      title={xsCutsLoaded
+                        ? '切線是你對這片板子的標註，存在 .aedb 旁邊，複製給同事時一起過去。'
+                        : '切線集還沒讀回來；現在存會覆蓋掉這片板子既有的切線。'}>
                       存下這條切線
                     </button>
                   </div>
@@ -6050,18 +6465,20 @@ ${data.output_path}`)
                   </label>
                   <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                     <button className="btn btn--primary" style={{ flex: 1.4 }}
-                      disabled={!xsScan?.plan?.solvable || xsJob?.running}
+                      disabled={!xsScan?.plan?.solvable || xsJob?.running
+                        || Boolean(licenseBlock(licenseStatus, ['q2d_solve']))}
                       onClick={() => {
                         const spec = xsCutSpec()
                         if (spec) handleXsSolve([spec])
                       }}
-                      title={xsScan?.plan?.solvable
+                      title={licenseBlock(licenseStatus, ['q2d_solve']) || (xsScan?.plan?.solvable
                         ? '只解目前這一條切線'
-                        : '先掃描一條可以求解的截面'}>
+                        : '先掃描一條可以求解的截面')}>
                       {xsJob?.running ? '求解中…（背景執行）' : '求解這條'}
                     </button>
                     <button className="btn" style={{ flex: 1 }}
-                      disabled={xsSavedCuts.length === 0 || xsJob?.running}
+                      disabled={xsSavedCuts.length === 0 || xsJob?.running
+                        || Boolean(licenseBlock(licenseStatus, ['q2d_solve']))}
                       onClick={() => handleXsSolve(xsSavedCuts)}
                       title="把已存的切線整批送去求解，沿線的 Z₀ 剖面就是這樣做出來的">
                       解全部已存（{xsSavedCuts.length}）
@@ -6071,6 +6488,7 @@ ${data.output_path}`)
                         onClick={handleXsStop}>終止</button>
                     )}
                   </div>
+                  <LicenseTag functions={['q2d_solve']} />
                   {xsJob && xsJob.status !== 'idle' && (
                     <div className={`status ${xsJob.status === 'error' ? 'status--warn' : ''}`}
                       style={{ marginTop: 6, fontSize: 11 }}>
@@ -6242,9 +6660,6 @@ ${data.output_path}`)
                           {sceneLabel}
                           {scene?.preview_mode === 'coarse' ? ' · 大板快速預覽（實際 EDB 未簡化）' : ''}
                           {activeView !== 'schematic' ? ' · 左鍵平移、滾輪縮放 · 右側 ◀▶ 展開圖層面板' : ''}
-                          {activeView === 'cut' && completedBoundary?.comparison?.available
-                            ? ` · 外框最大差異 ${completedBoundary.comparison.max_boundary_error_mm?.toFixed(3)} mm`
-                            : ''}
                         </div>}
                         {activeView === 'models' ? (
                           <ModelLibrary />
@@ -6378,7 +6793,8 @@ ${data.output_path}`)
                                 {tdrJob?.result?.source !== 'measured_waveform'
                                   && cascadeResult?.output_path && (
                                   <EvidenceBadges path={cascadeResult.output_path}
-                                    expectedPorts={cascadeResult.n_ports} dark />
+                                    expectedPorts={cascadeResult.n_ports}
+                                    throughPaths={tdrThroughPaths} dark />
                                 )}
                               </div>
                               {tdrJob?.result && (
@@ -6645,7 +7061,8 @@ ${data.output_path}`)
                               </div>
                             </div>
                             <EvidenceBadges path={cascadeResult.output_path}
-                              expectedPorts={cascadeResult.n_ports} dark />
+                              expectedPorts={cascadeResult.n_ports}
+                              throughPaths={tdrThroughPaths} dark />
 
                             <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
                               <div style={{ display: 'flex', gap: 4 }}>
@@ -6653,7 +7070,7 @@ ${data.output_path}`)
                                   <button key={m}
                                     className={'btn' + (spMode === m ? ' btn--primary' : '')}
                                     style={{ padding: '3px 12px', fontSize: 11.5 }}
-                                    onClick={() => setSpMode(m as 'single' | 'diff')}>{label}</button>
+                                    onClick={() => { spModePicked.current = true; setSpMode(m as 'single' | 'diff') }}>{label}</button>
                                 ))}
                               </div>
                               <div style={{ display: 'flex', gap: 12, fontSize: 11.5, color: '#b8c6d8' }}>
@@ -6850,11 +7267,17 @@ ${data.output_path}`)
                                   marginBottom: 12, paddingBottom: 12,
                                   borderBottom: '1px solid #27313d',
                                 }}>
+                                  {/* 橫軸的裁切要與 TDR 分頁那張圖用同一組
+                                      值：少了它，這裡畫的是反射拖尾一路到
+                                      線尾之後，Q2D 的點全擠在左邊一小段。 */}
                                   <CrossSectionComparison
                                     result={xsCompare}
                                     tdrDistanceMm={
                                       tdrJob?.result?.analyses?.[tdrAnalysisIdx]?.distance_mm || []}
-                                    tdrImpedanceOhm={tdrJob?.result?.impedance_ohm || []} />
+                                    tdrImpedanceOhm={tdrJob?.result?.impedance_ohm || []}
+                                    pathLengthMm={tdrJob?.result?.path_length_mm ?? null}
+                                    xMaxMm={(tdrJob?.result?.analyses?.[tdrAnalysisIdx]
+                                      ?? tdrJob?.result?.analyses?.[0])?.display_cap_mm ?? null} />
                                 </div>
                               )}
                               {xsScan ? (
@@ -6898,10 +7321,6 @@ ${data.output_path}`)
                           expansionMm={activeView === 'full' && signalNets.length > 0 ? parseFloat(expansionMm) || 0 : undefined}
                           extentType={extentType}
                           estimatedCutoutBoundary={visibleEstimatedBoundary}
-                          actualCutoutBoundary={visibleActualBoundary}
-                          showBoundaryDifferenceFill={showCutoutDifferenceFill}
-                          onBoundaryDifferenceFillChange={activeView === 'cut' ? setShowCutoutDifferenceFill : undefined}
-                          boundaryComparison={activeView === 'cut' ? completedBoundary?.comparison || null : null}
                           segmentCuts={segCutsOverlay}
                           showSegmentSafetyOverlay={showSegmentSafetyOverlay}
                           onSegmentSafetyOverlayChange={activeView === 'segments' ? setShowSegmentSafetyOverlay : undefined}

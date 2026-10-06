@@ -4,8 +4,9 @@
 // 工具箱（重正規化／換埠序／重取樣／DC 外插／去嵌入）走 skrf 原生實作，
 // 免授權、立即可用；COM 簽核走 AEDT 內建的 SPISim 批次引擎，授權實測
 // 尚未打通，介面誠實顯示探測結果，不讓使用者按下去等七分鐘。
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { setModelsReportMetadata } from './reportMetadataStore'
+import { LicenseTag, useLicenseBlock } from './LicenseTag'
 import { revealPath, commonFolderOf } from '../revealPath'
 
 interface ToolboxOperation { name: string; description: string }
@@ -16,6 +17,10 @@ interface ComJobState {
   status?: string
   message?: string
   standard?: string
+  /** 這件工作算的是哪一條通道。面板重掛時要靠它認回來——沒有它就無法確定
+   *  結果屬於現在選的檔案。後端已經在 `start_com_job` 把它寫進工作狀態裡
+   *  （spisim_batch.py），這裡是必然拿得到的，不是待補的欄位。 */
+  touchstone_path?: string
   elapsed_seconds?: number
   error?: string
   result?: {
@@ -77,12 +82,21 @@ export default function SpisimToolboxPanel() {
   const [comStandards, setComStandards] = useState<ComStandard[]>([])
   const [comStandard, setComStandard] = useState('')
   const [comJob, setComJob] = useState<ComJobState | null>(null)
+  // COM 會占 SIwave 求解授權（ADR-0062）：沒有空位就變灰並寫原因。
+  const comBlock = useLicenseBlock(['spisim_com'])
   const [comResult, setComResult] = useState('')
   const [comOvernight, setComOvernight] = useState(false)
   /** 「開啟結果資料夾」要開哪裡。工具箱與 COM 各自記一份：
    *  兩者的輸出落在不同地方（sparam_processed 對 com_reports）。 */
   const [outputFolder, setOutputFolder] = useState('')
   const [comFolder, setComFolder] = useState('')
+  /** 這一輪 COM 算的是哪一條通道（啟動時記下來，或從後端狀態認回來）。
+   *  用 ref 不用 state：`renderComOutcome` 是從輪詢的 interval 裡呼叫的，
+   *  那個閉包停在啟動當下那一次 render，讀 state 會讀到舊值——而這兩個值
+   *  存在的意義正是「拿現在選的來源去比對」。 */
+  const comSourceRef = useRef('')
+  const sourceRef = useRef(source)
+  sourceRef.current = source
 
   // COM 是背景工作（時域計算分鐘級起跳）：跑著就每 5 秒問一次狀態。
   useEffect(() => {
@@ -98,28 +112,96 @@ export default function SpisimToolboxPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comJob?.running])
 
-  function renderComOutcome(state: ComJobState) {
-    if (state.status === 'failed') { setError(state.error || 'COM 計算失敗'); return }
-    if (state.status === 'cancelled') { setComResult('已取消。'); return }
+  /**
+   * 掛載時把還在跑（或已經跑完）的 COM 認回來。
+   *
+   * 這個面板是條件渲染的：切去模型庫／多道／AMI 再切回來就是一次
+   * unmount＋mount，`comJob` 回到 null。而後端的訊息寫的是「可離開此頁，
+   * 回來看狀態即可」，第二次按「計算 COM」還會被 422 擋掉——等於使用者
+   * 照著提示做，結果既看不到進度也看不到結果，而且什麼都不能按。
+   */
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const state = await api<ComJobState>('/api/spisim/com/status')
+        if (cancelled) return
+        if (!state || state.status === 'idle') return
+        setComJob(state)
+        if (state.standard) setComStandard(state.standard)
+        if (state.touchstone_path) {
+          comSourceRef.current = state.touchstone_path
+          // 重掛之後 `source` 是空的，而 `renderComOutcome` 比的正是它——
+          // 不先把來源認回來，一件跑完的 COM 一被撿回來就當成「這份結果算
+          // 的不是你現在選的檔案」，中繼資料被清掉、畫面上還多一句對不上的
+          // 警告。`setSource` 是非同步的，所以 ref 要同步寫，下面那一行才
+          // 比得到。
+          if (!sourceRef.current) {
+            sourceRef.current = state.touchstone_path
+            setSource(state.touchstone_path)
+          }
+        }
+        if (!state.running) renderComOutcome(state, state.touchstone_path)
+      } catch { /* 後端沒起來就當作沒有工作 */ }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /** 把報告中繼資料裡的 COM 欄位清成空字串（產生器看到空值會整筆略過）。
+   *  `reportMetadataStore` 只有 `Object.assign`，沒有刪除的入口。 */
+  function clearComMetadata() {
+    setModelsReportMetadata({
+      'COM_標準': '', 'COM_通道': '', 'COM_產出檔數': '',
+      'COM_最差值_dB': '', 'COM_最差case': '', 'COM_門檻_dB': '',
+      'COM_判定': '', 'COM_引擎訊息': '',
+    })
+  }
+
+  function renderComOutcome(state: ComJobState, jobSource?: string) {
+    if (state.status === 'failed') {
+      // 失敗也要把舊值清掉：不清的話上一次成功的 COM 值會留在報告中繼資料裡，
+      // 跟著這一次的快照被寫進報告。
+      clearComMetadata()
+      setError(state.error || 'COM 計算失敗')
+      return
+    }
+    if (state.status === 'cancelled') { clearComMetadata(); setComResult('已取消。'); return }
     const out = state.result
     if (!out) return
     const com = out.com
     const worst = typeof com?.worst_com_db === 'number' ? com.worst_com_db : null
-    setModelsReportMetadata({
-      'COM_標準': state.standard || comStandard,
-      'COM_通道': source.split(/[\\/]/).pop() || source,
-      'COM_產出檔數': out.artifacts?.length ?? 0,
-      // 數字要進報告快照——圖上的字縮小後未必讀得出來。
-      'COM_最差值_dB': worst ?? '',
-      'COM_最差case': com?.worst_case || '',
-      'COM_門檻_dB': com?.pass_threshold_db ?? '',
-      'COM_判定': com?.passed === undefined ? '' : (com.passed ? '通過' : '不通過'),
-      'COM_引擎訊息': (out.messages || []).slice(-1)[0] || '',
-    })
+    // 這份結果是哪一條通道算的。`reportMetadataStore` 是模組層級的全域，
+    // 沒有人會替它把舊值清掉——算完 A、把來源換成 B、再拍 B 的快照，報告的
+    // 中繼資料表上就會掛著 A 的 COM 值與判定。對不上就不寫，並且把舊值清掉。
+    const channel = jobSource || comSourceRef.current || state.touchstone_path || ''
+    const nameOf = (path: string) => path.split(/[\\/]/).pop() || path
+    let mismatch = ''
+    if (!channel || channel !== sourceRef.current) {
+      clearComMetadata()
+      mismatch = `這份結果算的是 ${channel ? nameOf(channel) : '（來源不明）'}，`
+        + '與目前選的來源不同，數字沒有寫進報告中繼資料。'
+    } else {
+      setModelsReportMetadata({
+        'COM_標準': state.standard || comStandard,
+        'COM_通道': nameOf(channel),
+        'COM_產出檔數': out.artifacts?.length ?? 0,
+        // 數字要進報告快照——圖上的字縮小後未必讀得出來。
+        // 沒有值時寫「無法取得」而不是空字串：空字串會被報告產生器整筆丟掉，
+        // 於是「量不到」看起來就跟「沒做這件事」一樣（ADR-0039）。
+        'COM_最差值_dB': worst ?? '無法取得（引擎未給 COM 值）',
+        'COM_最差case': com?.worst_case || '無法取得',
+        'COM_門檻_dB': com?.pass_threshold_db ?? '無法取得',
+        'COM_判定': com?.passed === undefined
+          ? '無法判定（沒有 COM 值）' : (com.passed ? '通過' : '不通過'),
+        'COM_引擎訊息': (out.messages || []).slice(-1)[0] || '',
+      })
+    }
     // 產物全部落在同一個時間戳資料夾；記下來給「開啟結果資料夾」用。
     setComFolder(commonFolderOf(out.artifacts || []))
     const names = Object.keys(out.reports || {})
     const parts: string[] = []
+    if (mismatch) parts.push(mismatch)
 
     // 結論放最前面。先前只印引擎訊息，COM 值埋在一長串 [MESG] 裡。
     if (worst !== null) {
@@ -169,7 +251,11 @@ export default function SpisimToolboxPanel() {
         const catalogue = await api<{ standards: ComStandard[] }>(
           '/api/spisim/com/standards')
         setComStandards(catalogue.standards)
-        if (catalogue.standards.length) setComStandard(catalogue.standards[0].name)
+        // 用函式式更新：上面那個「認回背景工作」的 effect 可能已經把標準設成
+        // 那件工作的標準了，直接覆寫會把它換掉（兩個 effect 讀到的都是舊值）。
+        if (catalogue.standards.length) {
+          setComStandard(prev => prev || catalogue.standards[0].name)
+        }
       } catch { /* COM 素材不在就不顯示 */ }
       try {
         setBatchStatus(await api<BatchStatus>('/api/spisim/batch-status'))
@@ -230,6 +316,11 @@ export default function SpisimToolboxPanel() {
 
   const startCom = async () => {
     setError(''); setComResult('')
+    // 上一輪的 COM 值先清掉：新的一輪還沒有結果，這段期間拍的快照不該掛著
+    // 舊通道的數字與判定。
+    clearComMetadata()
+    comSourceRef.current = source
+    setComFolder('')
     try {
       const state = await api<ComJobState>('/api/spisim/com/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -354,11 +445,12 @@ export default function SpisimToolboxPanel() {
               {probing ? '探測中…' : '重新探測引擎'}
             </button>
             <button className="btn btn--primary"
-              disabled={Boolean(comJob?.running) || !source || !batchStatus?.available}
-              title={batchStatus?.available ? '' : '引擎探測未通過，先按「重新探測引擎」'}
+              disabled={Boolean(comJob?.running) || !source || !batchStatus?.available || Boolean(comBlock)}
+              title={comBlock || (batchStatus?.available ? '' : '引擎探測未通過，先按「重新探測引擎」')}
               onClick={() => void startCom()}>
               {comJob?.running ? '計算中…' : '計算 COM（背景）'}
             </button>
+            <LicenseTag functions={['spisim_com']} style={{ alignSelf: 'center' }} />
             {comJob?.running && (
               <button className="btn" onClick={() => void cancelCom()}>取消</button>
             )}
@@ -388,9 +480,19 @@ export default function SpisimToolboxPanel() {
             </div>
           )}
           {comResult && (
-            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, maxHeight: 320, overflow: 'auto' }}>
-              {comResult}
-            </pre>
+            // 捲軸放在外層 div，`<pre>` 本身維持自然高度：報告快照是以帶著
+            // `data-report-separate-snapshot` 的節點為根去截的，根節點自己被
+            // maxHeight 夾住的話，截出來一樣只有看得見的那幾行——而且圖上
+            // 沒有任何記號說後面還有。
+            <div style={{ maxHeight: 320, overflow: 'auto' }}>
+              <pre
+                data-report-separate-snapshot="true"
+                data-report-kind="com-verdict"
+                data-report-title="COM 判定輸出"
+                style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0 }}>
+                {comResult}
+              </pre>
+            </div>
           )}
         </section>
       )}

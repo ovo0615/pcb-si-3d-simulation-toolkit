@@ -10,6 +10,7 @@ import type { ModelPackage } from './ModelLibrary'
 import { useCascadedChannel } from './useCascadedChannel'
 import { QuickProbeResult, QuickProbeView } from './AmiQuickProbe'
 import { setModelsReportMetadata } from './reportMetadataStore'
+import { LicenseTag, useLicenseBlock } from './LicenseTag'
 
 interface AmiEditableParameter {
   name: string
@@ -105,6 +106,9 @@ export default function AmiChannelPanel(
   const [quickCheck, setQuickCheck] = useState<
     { jobId: string; txModel: string; rxModel: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  // 會用到 Ansys 的兩顆按鈕（ADR-0062）：沒有空位就變灰並寫原因。
+  const quickCheckBlock = useLicenseBlock(['model_check'])
+  const amiBlock = useLicenseBlock(['ami_channel'])
   const [error, setError] = useState('')
   const [started, setStarted] = useState('')
   // 秒級預覽（SPISimAMI 引擎，2026-08-29）
@@ -123,6 +127,20 @@ export default function AmiChannelPanel(
 
   const amiPackages = useMemo(
     () => packages.filter(item => item.kind === 'ibis_ami'), [packages])
+
+  /** 會改變「這次要送出去分析什麼」的每一個值。
+   *
+   *  勾選確認之後才改模型、拓撲、Port、路由、調變、速率或 AMI 參數，送出的
+   *  就不是使用者核對過的那一組——而畫面上的勾還在，看起來完全正常。原本只
+   *  有「重新預檢」會清掉確認，其餘全部漏掉。列在這裡的任一個值一變，確認
+   *  就失效，使用者必須重新核對一次。 */
+  const settingsSignature = useMemo(() => JSON.stringify([
+    touchstone, txPackageId, rxPackageId, txModel, rxModel, topology,
+    route, modulation, dataRate, bitCount, ports, txParams, rxParams,
+  ]), [touchstone, txPackageId, rxPackageId, txModel, rxModel, topology,
+    route, modulation, dataRate, bitCount, ports, txParams, rxParams])
+
+  useEffect(() => { setConfirmed(false) }, [settingsSignature])
 
   useEffect(() => {
     let alive = true
@@ -275,8 +293,10 @@ export default function AmiChannelPanel(
     if (row.rx_param) setRxParams(prev => ({ ...prev, [row.rx_param]: row.rx_value }))
     setStarted(`已把 ${row.tx_param ? `${row.tx_param}=${row.tx_value}` : ''}`
       + `${row.rx_param ? `、${row.rx_param}=${row.rx_value}` : ''}`
-      + ' 填進進階 AMI 參數；下一次正式分析與秒級預覽不受影響'
-      + '（預覽用 .ami 預設）。')
+      // 這句話原本寫「正式分析不受影響」，跟 `start()` 實際送出的
+      // tx_parameters／rx_parameters 正好相反——受影響的就是正式分析。
+      + ' 填進進階 AMI 參數；下一次正式分析會用它，'
+      + '秒級預覽仍用 .ami 預設。')
   }
 
   async function runSuggest() {
@@ -464,10 +484,13 @@ export default function AmiChannelPanel(
             onChange={event => setLossyReference(event.target.checked)} />
           用有損參考通道（Nyquist −10 dB 趨膚模型；預設是無損直連）
         </label>
-        <button className="btn" disabled={!txPackageId || busy || Boolean(job?.running)}
+        <button className="btn" disabled={!txPackageId || busy || Boolean(job?.running)
+          || Boolean(quickCheckBlock)}
+          title={quickCheckBlock || undefined}
           onClick={() => void runQuickCheck()}>
           {busy ? '處理中…' : '快速檢驗（不需 Touchstone）'}
         </button>
+        <LicenseTag functions={['model_check']} />
         {quickCheck && <p className="hint">
           已排入背景：{quickCheck.txModel} → {quickCheck.rxModel}，結果顯示在下方。
         </p>}
@@ -710,10 +733,12 @@ export default function AmiChannelPanel(
             我已核對模型、拓撲、Port 對應、路由與調變（預檢的警告已看過）
           </label>
           <button className="btn" disabled={busy || suggestion.blockers.length > 0
-            || !txModel || !rxModel || !confirmed || Boolean(job?.running)}
+            || !txModel || !rxModel || !confirmed || Boolean(job?.running) || Boolean(amiBlock)}
+            title={amiBlock || undefined}
             onClick={() => void start()}>
             {busy ? '處理中…' : '開始 AMI 分析'}
           </button>
+          <LicenseTag functions={['ami_channel']} />
           {started && <p>{started}</p>}
         </section>
       </>}

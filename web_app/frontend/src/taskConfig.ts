@@ -222,9 +222,23 @@ export const DEFAULT_TASKS: TaskKey[] = [
 
 export type TaskFlags = Record<TaskKey, boolean>
 
+/** 型別上存在的每一個任務鍵。
+ *
+ *  `TASK_GROUPS` 少了 `eye`（那個鍵只留給 localStorage 遷移），於是
+ *  `makeFlags` 產出的旗標裡沒有 `eye` 這個屬性——但型別是
+ *  `Record<TaskKey, boolean>`，TypeScript 不會抱怨，讀到的是 `undefined`，
+ *  而 `!undefined` 恆真。實際後果：`!show.eye && eyeJob?.running` 讓眼圖一跑
+ *  就顯示「項目已隱藏」。旗標一律先補成 false，讓型別說的是實話。 */
+const ALL_TASK_KEYS: TaskKey[] = [
+  'load', 'cutout', 'ports', 'stackup', 'backdrill', 'cleanup',
+  'segment', 'schedule', 'remotepack', 'cascade', 'sparam',
+  'eye', 'models', 'tdr', 'crosssection', 'report',
+]
+
 export function makeFlags(keys: Iterable<TaskKey>): TaskFlags {
   const set = new Set(keys)
   const flags = {} as TaskFlags
+  for (const key of ALL_TASK_KEYS) flags[key] = false
   for (const task of ALL_TASKS) flags[task.key] = set.has(task.key)
   return flags
 }
