@@ -11,6 +11,7 @@ import {
 } from './splitLayout'
 import { logColor } from './logLevel'
 import { revealPath } from './revealPath'
+import { copyText, useDesktopShell } from './desktopBridge'
 import { describeJobFailure, fatalJobError, isFatalJobError } from './jobError'
 import RunHistory from './components/RunHistory'
 import 'allotment/dist/style.css'
@@ -1024,7 +1025,7 @@ export default function App() {
     // 後端啟用本機 token 而這個分頁沒有 cookie（自己打網址、或 cookie 被清掉）。
     // 訊息要說出下一步，不能只有「HTTP 401」。
     if (res.status === 401) {
-      throw new Error(String(data?.detail || '') || '後端拒絕存取（401）：請從 start.bat 開的瀏覽器視窗操作。')
+      throw new Error(String(data?.detail || '') || '後端拒絕存取（401）：請從 start.bat 開的工具視窗或瀏覽器操作。')
     }
     if (!res.ok) throw new Error(describeApiError(data, res))
     return data
@@ -1244,6 +1245,17 @@ export default function App() {
       )
     } catch (e) {
       alert('產生支援包失敗：' + String(e))
+    }
+  }
+
+  // 工具視窗只有一個視窗；要多開分頁對照時，由後端帶著 token 開系統預設瀏覽器
+  // （卡片 #0073）。純瀏覽器模式本來就能自己開分頁，選單不顯示這一項。
+  const desktopShell = useDesktopShell()
+  const openInBrowser = async () => {
+    try {
+      await api('/api/open_in_browser', {})
+    } catch (e) {
+      alert('在瀏覽器開啟失敗：' + String(e))
     }
   }
 
@@ -2038,7 +2050,10 @@ ${data.output_path}`)
 
   const handleScheduleStop = async () => {
     try {
-      setSchedStatus(await api('/api/schedule/stop', {}))
+      const s = await api('/api/schedule/stop', {})
+      setSchedStatus(s)
+      // SIwave 段沒有中途停止的方法，要等它解完（#0074）：照實告訴使用者在等什麼。
+      if (s?.stop_message) alert('已要求停止：' + s.stop_message)
     } catch (e) {
       alert('停止失敗: ' + String(e))
     }
@@ -3773,6 +3788,7 @@ ${data.output_path}`)
       { label: 'Ansys 授權對照與可用數量', action: () => setLicensePanelOpen(true) },
       { label: '產生支援包（日誌與診斷）', action: () => void makeSupportBundle() },
       { label: '開啟日誌資料夾', action: () => void openLogFolder() },
+      ...(desktopShell ? [{ label: '在瀏覽器開啟', action: () => void openInBrowser() }] : []),
     ],
   }
 
@@ -5621,8 +5637,8 @@ ${data.output_path}`)
                       className="btn"
                       style={{ flex: 1 }}
                       onClick={handleScheduleStop}
-                      disabled={!schedStatus?.running}
-                    >停止</button>
+                      disabled={!schedStatus?.running || schedStatus?.stop_requested}
+                    >{schedStatus?.running && schedStatus?.stop_requested ? '停止中…' : '停止'}</button>
                   </div>
                   <LicenseTag functions={scheduleFunctions} />
                   {schedMetaPath && !schedStatus?.running && (
@@ -5688,7 +5704,8 @@ ${data.output_path}`)
                         const [txt, color] = labels[j.status] || [j.status, 'var(--muted)']
                         const elapsed = jobElapsedSec(j, nowTick)
                         return (
-                          <div key={j.index} className="netlist__row" title={j.error || j.touchstone || ''}>
+                          <div key={j.index} className="netlist__row" title={j.error || j.touchstone
+                            || (j.status === 'running' ? [j.phase, j.progress_detail].filter(Boolean).join('：') : '')}>
                             <span style={{ fontWeight: 700, minWidth: 42 }}>段 {j.index}</span>
                             <span className={`solver-badge solver-badge--${j.solver || 'hfss'}`}>
                               {(j.solver || 'hfss').toUpperCase()}
@@ -5697,7 +5714,10 @@ ${data.output_path}`)
                             <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 68 }}>
                               {elapsed !== null ? formatElapsed(elapsed) : ''}
                             </span>
-                            <span className="netlist__name" style={{ fontSize: 11, color: 'var(--muted)' }}>
+                            {/* 執行中的說明要整句看得到：停止中那句很長，截斷就看不到後面的
+                                「SIwave 進度 NN%」（#0074 實機，工具視窗預設寬度）。 */}
+                            <span className={j.status === 'running' ? 'netlist__name netlist__name--wrap' : 'netlist__name'}
+                              style={{ fontSize: 11, color: 'var(--muted)' }}>
                               {j.status === 'done' && j.touchstone ? j.touchstone.split(/[\\/]/).pop()
                                 : j.status === 'failed' ? (j.error || '')
                                   : j.status === 'solved_pending_export'
@@ -7395,7 +7415,7 @@ ${data.output_path}`)
                             <h3 className="panel-title" style={{ margin: 0 }}>系統日誌</h3>
                             <div style={{ display: 'flex', gap: 6 }}>
                               <button className="btn" style={{ fontSize: 12, padding: '2px 10px' }}
-                                onClick={() => navigator.clipboard.writeText(logs.join('\n'))}>複製</button>
+                                onClick={() => void copyText(logs.join('\n')).catch(e => alert('複製日誌失敗：' + String(e)))}>複製</button>
                               <button className="btn" style={{ fontSize: 12, padding: '2px 10px' }}
                                 onClick={() => setLogs([])}>清除</button>
                             </div>

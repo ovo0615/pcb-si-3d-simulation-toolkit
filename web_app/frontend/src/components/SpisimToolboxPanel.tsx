@@ -10,7 +10,11 @@ import { LicenseTag, useLicenseBlock } from './LicenseTag'
 import { revealPath, commonFolderOf } from '../revealPath'
 
 interface ToolboxOperation { name: string; description: string }
-interface BatchStatus { available: boolean; checked_at: string; detail: string }
+interface BatchStatus {
+  available: boolean; checked_at: string; detail: string
+  /** 原生引擎待收尾紀錄還在（#0083）：後端自動對帳查不到時，讓使用者確認清除。 */
+  cleanup_pending?: boolean; claim_id?: string | null; pid?: number | null; work_dir?: string
+}
 interface ComStandard { name: string; description: string }
 interface ComJobState {
   running?: boolean
@@ -79,9 +83,13 @@ export default function SpisimToolboxPanel() {
 
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null)
   const [probing, setProbing] = useState(false)
+  const [clearError, setClearError] = useState('')
   const [comStandards, setComStandards] = useState<ComStandard[]>([])
   const [comStandard, setComStandard] = useState('')
   const [comJob, setComJob] = useState<ComJobState | null>(null)
+  // 引擎留有待收尾紀錄時後端回 running:true（探測逾時留下的也是），但沒有 COM 在算：
+  // 按鈕不能寫「計算中…」，取消也沒有東西可取消。輪詢照舊，紀錄清掉就恢復（#0083）。
+  const comPending = comJob?.status === 'cleanup_pending'
   // COM 會占 SIwave 求解授權（ADR-0062）：沒有空位就變灰並寫原因。
   const comBlock = useLicenseBlock(['spisim_com'])
   const [comResult, setComResult] = useState('')
@@ -314,6 +322,26 @@ export default function SpisimToolboxPanel() {
     } catch (reason) { setError(String(reason)) } finally { setProbing(false) }
   }
 
+  // 後端確定引擎、子程序都不在時會自己清（ADR-0064）；這裡是查不到時的後備。
+  const clearPending = async () => {
+    if (!batchStatus?.cleanup_pending) return
+    const ok = window.confirm(
+      `請先到工作管理員確認引擎（PID ${batchStatus.pid ?? '未知'}）與它開的程序都已結束。`
+      + '\n\n清除後工具不再擋原生引擎工作；工作目錄保留不刪。確定清除嗎？')
+    if (!ok) return
+    setClearError('')
+    try {
+      await api('/api/engine/clear_pending', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claim_id: batchStatus.claim_id ?? null }),
+      })
+      setBatchStatus(await api<BatchStatus>('/api/spisim/batch-status'))
+    } catch (reason) {
+      // 顯示在按鈕旁：面板底部的共用錯誤列在畫面外，按了像沒反應（#0083 實機驗證）。
+      setClearError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
   const startCom = async () => {
     setError(''); setComResult('')
     // 上一輪的 COM 值先清掉：新的一輪還沒有結果，這段期間拍的快照不該掛著
@@ -427,6 +455,17 @@ export default function SpisimToolboxPanel() {
           {batchStatus && !batchStatus.available && (
             <div className="model-library__notice model-library__notice--error">
               引擎探測未通過：{batchStatus.detail}
+              {batchStatus.cleanup_pending && (
+                <div>
+                  PID：{batchStatus.pid ?? '未知'}；工作目錄：{batchStatus.work_dir || '未知'}。
+                  引擎結束後工具會自動解除，關掉再打開本工具箱就會更新。
+                  <button className="btn" style={{ marginLeft: 8 }}
+                    onClick={() => void clearPending()}>
+                    確認引擎已結束，清除紀錄
+                  </button>
+                  {clearError && <div><strong>沒有清除：</strong>{clearError}</div>}
+                </div>
+              )}
             </div>
           )}
           <div className="field-row">
@@ -446,12 +485,13 @@ export default function SpisimToolboxPanel() {
             </button>
             <button className="btn btn--primary"
               disabled={Boolean(comJob?.running) || !source || !batchStatus?.available || Boolean(comBlock)}
-              title={comBlock || (batchStatus?.available ? '' : '引擎探測未通過，先按「重新探測引擎」')}
+              title={comPending ? '原生引擎尚未確認收尾；引擎結束後會自動解除'
+                : comBlock || (batchStatus?.available ? '' : '引擎探測未通過，先按「重新探測引擎」')}
               onClick={() => void startCom()}>
-              {comJob?.running ? '計算中…' : '計算 COM（背景）'}
+              {comPending ? '引擎待收尾' : comJob?.running ? '計算中…' : '計算 COM（背景）'}
             </button>
             <LicenseTag functions={['spisim_com']} style={{ alignSelf: 'center' }} />
-            {comJob?.running && (
+            {comJob?.running && !comPending && (
               <button className="btn" onClick={() => void cancelCom()}>取消</button>
             )}
           </div>
@@ -465,7 +505,10 @@ export default function SpisimToolboxPanel() {
           <p className="hint">
             一般通道約 8 秒就出結果，上面那個選項是留給特別大的輸入，不是常態。
           </p>
-          {comJob?.running && (
+          {comPending && (
+            <p className="hint">{comJob?.message || '原生引擎尚未確認收尾，禁止派工。'}</p>
+          )}
+          {comJob?.running && !comPending && (
             <p className="hint">
               {comJob.standard}　·　已跑 {comJob.elapsed_seconds ?? 0} 秒　·
               {comJob.message || ''}

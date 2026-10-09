@@ -823,6 +823,13 @@ select.input {
   white-space: nowrap;
 }
 
+/* 排程列「執行中」的說明（停止中＋SIwave 進度）要整句看得到，改成換行。 */
+.netlist__name--wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
 /* ── 狀態訊息 ───────────────────────────────────────── */
 .status {
   font-size: 12px;
