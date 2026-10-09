@@ -398,10 +398,15 @@ export default function AmiChannelPanel(
         })
         return
       }
-      ;(res?.image_paths || []).forEach((_p: string, imageIndex: number) => {
+      ;(res?.image_paths || []).forEach((p: string, imageIndex: number) => {
+        // 第一張通常是 impulse 響應、不是眼圖（#0083：縱軸 2E+13 的那張被標成
+        // 「基準眼圖」）；依檔名分辨。
+        const kind = /_impulse\.jpg$/i.test(String(p)) ? 'Impulse 響應'
+          : /_eye\.jpg$/i.test(String(p)) ? '統計眼圖' : ''
+        const base = isQuickCheck ? '無損直連基準' : analysisName || 'AMI'
         cards.push({
           key: `${analysisIndex}-${imageIndex}`,
-          title: isQuickCheck ? '基準眼圖（無損直連）' : analysisName || 'AMI',
+          title: kind ? `${kind}（${base}）` : base,
           sub: isQuickCheck && quickCheck
             ? `${quickCheck.txModel} → ${quickCheck.rxModel}` : analysisName,
           imageUrl: `/api/ami-channel/image?analysis_index=${analysisIndex}`
@@ -419,7 +424,9 @@ export default function AmiChannelPanel(
         index, analysis: String(res?.analysis || ''),
         measurements: res?.measurements,
         waveformEye: res?.waveform_eye,
-        notes: res?.notes || [],
+        validity: res?.validity,
+        // 「結果無效」另以紅框顯示，註記裡不再重複一次。
+        notes: (res?.notes || []).filter((note: string) => !note.startsWith('結果無效：')),
       }))
       .filter((item: any) => item.measurements)
   }, [jobResult])
@@ -766,6 +773,10 @@ export default function AmiChannelPanel(
           <div key={block.index}>
             <h4>眼圖量測{block.analysis ? `（${block.analysis}）` : ''}
               {isQuickCheck ? '　—　無損直連基準' : ''}</h4>
+            {block.validity?.valid === false && (
+              <div className="model-library__issue is-error">
+                結果無效，以下數值不可採用：{block.validity.reason}</div>
+            )}
             {block.measurements.available === false && (
               <p className="hint">取不到眼圖量測：{block.measurements.unavailable_reason}</p>
             )}
@@ -816,10 +827,10 @@ export default function AmiChannelPanel(
               <article key={card.key}
                 data-report-separate-snapshot="true"
                 data-report-kind={`ami-${card.key}`}
-                data-report-title={`AMI 眼圖：${card.title}`}>
+                data-report-title={`AMI：${card.title}`}>
                 <header><div><strong>{card.title}</strong>
                   <span>{card.sub}</span></div></header>
-                <img src={card.imageUrl} alt={`${card.title} 眼圖`} />
+                <img src={card.imageUrl} alt={card.title} />
               </article>
             ))}
           </div>

@@ -50,6 +50,8 @@ import ModelLibrary from './components/ModelLibrary'
 import { modelsReportMetadata } from './components/reportMetadataStore'
 import { notifyCascadedChannelChanged } from './components/useCascadedChannel'
 import { markReportSnapshotsStale } from './reportApi'
+import { displayFileName } from './reportPrivacy'
+import { reportSegmentCount } from './reportSegmentCount'
 import { AnsysLicensePanel } from './components/AnsysLicensePanel'
 import { LicenseTag } from './components/LicenseTag'
 import { licenseBlock, useAnsysLicense, type AnsysFunction } from './ansysLicense'
@@ -6652,7 +6654,15 @@ ${data.output_path}`)
                       sourceMetadata={{
                         signal_net_count: signalNets.length,
                         reference_net_count: refNets.length,
-                        segment_count: segRun?.segments?.length || segAnalysis?.n_segments || 0,
+                        // 卡 0083 R5：原本只看本次跑過的分段，重新開啟專案、直接
+                        // 載入串接結果時寫成 0。查不到就不寫（undefined 不進報告）。
+                        segment_count: reportSegmentCount({
+                          view: activeView,
+                          cascadeSegmentCount: cascadeResult?.segment_count,
+                          schematicBlockCount: schematicGraph?.blocks?.length,
+                          segRunCount: segRun?.segments?.length,
+                          segAnalysisCount: segAnalysis?.n_segments,
+                        }),
                         // 截面阻抗分頁另外帶上實際數字。快照是一張圖，
                         // 圖上的字在報告裡縮小之後未必讀得出來；數字進中繼資料
                         // 表格才會以文字保留下來。
@@ -6782,8 +6792,9 @@ ${data.output_path}`)
                                 <div style={{
                                   color: '#718096', fontSize: 10.5, marginTop: 6,
                                   wordBreak: 'break-all', flexShrink: 0,
-                                }}>
-                                  {eyeJob.result?.image_path}
+                                }} title={eyeJob.result?.image_path || ''}>
+                                  {/* 這一區會被拍進客戶報告，只顯示檔名；完整路徑在提示裡（卡 0083 R5）。 */}
+                                  {displayFileName(eyeJob.result?.image_path)}
                                 </div>
                               </div>
                             )}
@@ -7051,9 +7062,12 @@ ${data.output_path}`)
                                       height={230} />
                                   </div>
                                   <div className="result-paths result-paths--center">
-                                    <span>{tdrJob.result.source === 'measured_waveform'
-                                      ? `量測波形：${tdrJob.result.csv_path}`
-                                      : `Circuit 專案：${tdrJob.result.project_path}`}</span>
+                                    {/* 會被拍進客戶報告：只顯示檔名，完整路徑放提示（卡 0083 R5）。 */}
+                                    <span title={String((tdrJob.result.source === 'measured_waveform'
+                                      ? tdrJob.result.csv_path : tdrJob.result.project_path) || '')}>
+                                      {tdrJob.result.source === 'measured_waveform'
+                                        ? `量測波形：${displayFileName(tdrJob.result.csv_path)}`
+                                        : `Circuit 專案：${displayFileName(tdrJob.result.project_path)}`}</span>
                                   </div>
                                 </>
                               )
@@ -7140,7 +7154,10 @@ ${data.output_path}`)
                             {/* 兩段說明置中：靠左靠右各一段時，中間那段大空白
                                 看起來像少了什麼東西。 */}
                             <div className="result-paths result-paths--center">
-                              <span>來源：{cascadeResult.output_path}</span>
+                              {/* 這一行會被拍進 S 參數快照、交給客戶：只顯示檔名，
+                                  完整路徑放提示（卡 0083 R5）。 */}
+                              <span title={String(cascadeResult.output_path || '')}>
+                                來源：{displayFileName(cascadeResult.output_path)}</span>
                               <span>
                                 {spMode === 'diff'
                                   ? '差動模式：以 scikit-rf 混合模式轉換，Sdd21＝差模插入損耗、Sdd11＝差模回波損耗'
