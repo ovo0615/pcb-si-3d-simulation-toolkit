@@ -50,6 +50,6 @@
 | 報告／支援包 | 送出前檢查路徑、模型、日誌與識別資料；浮水印不是 DRM |
 | 二維 Q2D | 不涵蓋 Via、轉角與參考層破口的完整三維效應 |
 
-文件草稿適用 `1.0.0-rc.1`／功能基準 `a19eda7`。35 張主圖狀態已盤點，仍有 3 項缺圖；新增 SerDes 面板圖、5 張條件圖與工具包驗收尚未完成。[版本說明](CHANGELOG.md)｜[圖片帳冊](docs/visual-assets.md)｜[驗證資料](validation/README.md)｜[疑難排解](docs/manual/11-疑難排解.md)。歷史驗證只支持其記錄的版本、資料與條件。
+文件草稿適用 `1.0.0-rc.1`／功能基準 `a19eda7`。35 張主圖狀態已盤點，仍有 3 項缺圖；5 張條件圖與工具包驗收尚未完成。[版本說明](CHANGELOG.md)｜[圖片帳冊](docs/visual-assets.md)｜[驗證資料](validation/README.md)｜[疑難排解](docs/manual/11-疑難排解.md)。歷史驗證只支持其記錄的版本、資料與條件。
 
 商用授權與技術支援由虎門科技股份有限公司（Taiwan Auto-Design Co., Ltd.，TADC）提供。此為獨立公開展示，與 Ansys, Inc. 無隸屬或背書關係；相關商標屬原權利人，工具不含、不提供亦不繞過 Ansys 授權。

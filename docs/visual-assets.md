@@ -55,6 +55,7 @@
 | `gui-38-com-result.png` | 10 | 條件圖 | 合法公開通道、COM 標準與空閒授權俱備；記錄實際簽核摘要 | 依真實資料與狀態 | 待拍 |
 | `gui-39-measured-model.png` | 06 | 條件圖 | 合法 I/V／V/T 量測資料可用，模型生成成功與確認狀態 | 依真實資料與狀態 | 待拍 |
 | `gui-40-equalization-scan.png` | 06 | 條件圖 | 合法 AMI 模型、掃描真的完成；標明快速排名的範圍與對應驗證 | 依真實資料與狀態 | 待拍 |
+| `gui-41-serdes-compliance.png` | 06 | 新增圖 | SerDes 合規判定結果表，判定底色可辨識；不拍上方路徑欄位 | Ansys 範例 PCIe 通道、虛構示範設定檔 | 區域圖：`a19eda7`；未勾 ERL |
 
 ## 實拍記錄（2026-10-09 第三輪）
 
@@ -72,6 +73,6 @@
 
 ## 舊圖處理
 
-依核准清單移除 58 張無引用的舊截圖。原有 35 張主圖統計不變；新增 SerDes 面板圖 `gui-41-serdes-compliance.png` 尚待 Claude 或 Jeff 實拍，未計入完成。
+依核准清單移除 58 張無引用的舊截圖。原有 35 張主圖統計不變；新增 SerDes 面板圖 `gui-41-serdes-compliance.png` 已實拍（`a19eda7`，只截判定結果區塊；ERL 未勾，ERL 實算見工具驗證紀錄），不計入 35 張主圖統計。
 
 [操作說明](../操作說明.md)｜[版本說明](../CHANGELOG.md)。
