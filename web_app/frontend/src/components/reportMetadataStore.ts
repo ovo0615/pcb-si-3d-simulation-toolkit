@@ -6,11 +6,14 @@
 // 報告裡就以文字表格保留。內容只活在前端記憶體——它描述「畫面上現在
 // 這批結果」，重整後畫面沒了、數字也該跟著歸零。
 
+import { sanitizeReportMetadata } from '../reportPrivacy'
+
 const store: Record<string, unknown> = {}
 
-/** 覆寫同類結果的數字（例如新一輪統計眼蓋掉上一輪）。 */
+/** 覆寫同類結果的數字（例如新一輪統計眼蓋掉上一輪）。
+ *  報告會交給客戶：模型檔、引擎訊息裡的本機路徑只留檔名（卡 0083 R5）。 */
 export function setModelsReportMetadata(patch: Record<string, unknown>): void {
-  Object.assign(store, patch)
+  Object.assign(store, sanitizeReportMetadata(patch))
 }
 
 export function modelsReportMetadata(): Record<string, unknown> {

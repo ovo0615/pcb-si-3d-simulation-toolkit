@@ -11,6 +11,7 @@ import {
 } from './splitLayout'
 import { logColor } from './logLevel'
 import { revealPath } from './revealPath'
+import { copyText, useDesktopShell } from './desktopBridge'
 import { describeJobFailure, fatalJobError, isFatalJobError } from './jobError'
 import RunHistory from './components/RunHistory'
 import 'allotment/dist/style.css'
@@ -49,6 +50,8 @@ import ModelLibrary from './components/ModelLibrary'
 import { modelsReportMetadata } from './components/reportMetadataStore'
 import { notifyCascadedChannelChanged } from './components/useCascadedChannel'
 import { markReportSnapshotsStale } from './reportApi'
+import { displayFileName } from './reportPrivacy'
+import { reportSegmentCount } from './reportSegmentCount'
 import { AnsysLicensePanel } from './components/AnsysLicensePanel'
 import { LicenseTag } from './components/LicenseTag'
 import { licenseBlock, useAnsysLicense, type AnsysFunction } from './ansysLicense'
@@ -1024,7 +1027,7 @@ export default function App() {
     // 後端啟用本機 token 而這個分頁沒有 cookie（自己打網址、或 cookie 被清掉）。
     // 訊息要說出下一步，不能只有「HTTP 401」。
     if (res.status === 401) {
-      throw new Error(String(data?.detail || '') || '後端拒絕存取（401）：請從 start.bat 開的瀏覽器視窗操作。')
+      throw new Error(String(data?.detail || '') || '後端拒絕存取（401）：請從 start.bat 開的工具視窗或瀏覽器操作。')
     }
     if (!res.ok) throw new Error(describeApiError(data, res))
     return data
@@ -1244,6 +1247,17 @@ export default function App() {
       )
     } catch (e) {
       alert('產生支援包失敗：' + String(e))
+    }
+  }
+
+  // 工具視窗只有一個視窗；要多開分頁對照時，由後端帶著 token 開系統預設瀏覽器
+  // （卡片 #0073）。純瀏覽器模式本來就能自己開分頁，選單不顯示這一項。
+  const desktopShell = useDesktopShell()
+  const openInBrowser = async () => {
+    try {
+      await api('/api/open_in_browser', {})
+    } catch (e) {
+      alert('在瀏覽器開啟失敗：' + String(e))
     }
   }
 
@@ -2038,7 +2052,10 @@ ${data.output_path}`)
 
   const handleScheduleStop = async () => {
     try {
-      setSchedStatus(await api('/api/schedule/stop', {}))
+      const s = await api('/api/schedule/stop', {})
+      setSchedStatus(s)
+      // SIwave 段沒有中途停止的方法，要等它解完（#0074）：照實告訴使用者在等什麼。
+      if (s?.stop_message) alert('已要求停止：' + s.stop_message)
     } catch (e) {
       alert('停止失敗: ' + String(e))
     }
@@ -3773,6 +3790,7 @@ ${data.output_path}`)
       { label: 'Ansys 授權對照與可用數量', action: () => setLicensePanelOpen(true) },
       { label: '產生支援包（日誌與診斷）', action: () => void makeSupportBundle() },
       { label: '開啟日誌資料夾', action: () => void openLogFolder() },
+      ...(desktopShell ? [{ label: '在瀏覽器開啟', action: () => void openInBrowser() }] : []),
     ],
   }
 
@@ -5621,8 +5639,8 @@ ${data.output_path}`)
                       className="btn"
                       style={{ flex: 1 }}
                       onClick={handleScheduleStop}
-                      disabled={!schedStatus?.running}
-                    >停止</button>
+                      disabled={!schedStatus?.running || schedStatus?.stop_requested}
+                    >{schedStatus?.running && schedStatus?.stop_requested ? '停止中…' : '停止'}</button>
                   </div>
                   <LicenseTag functions={scheduleFunctions} />
                   {schedMetaPath && !schedStatus?.running && (
@@ -5688,7 +5706,8 @@ ${data.output_path}`)
                         const [txt, color] = labels[j.status] || [j.status, 'var(--muted)']
                         const elapsed = jobElapsedSec(j, nowTick)
                         return (
-                          <div key={j.index} className="netlist__row" title={j.error || j.touchstone || ''}>
+                          <div key={j.index} className="netlist__row" title={j.error || j.touchstone
+                            || (j.status === 'running' ? [j.phase, j.progress_detail].filter(Boolean).join('：') : '')}>
                             <span style={{ fontWeight: 700, minWidth: 42 }}>段 {j.index}</span>
                             <span className={`solver-badge solver-badge--${j.solver || 'hfss'}`}>
                               {(j.solver || 'hfss').toUpperCase()}
@@ -5697,7 +5716,10 @@ ${data.output_path}`)
                             <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 68 }}>
                               {elapsed !== null ? formatElapsed(elapsed) : ''}
                             </span>
-                            <span className="netlist__name" style={{ fontSize: 11, color: 'var(--muted)' }}>
+                            {/* 執行中的說明要整句看得到：停止中那句很長，截斷就看不到後面的
+                                「SIwave 進度 NN%」（#0074 實機，工具視窗預設寬度）。 */}
+                            <span className={j.status === 'running' ? 'netlist__name netlist__name--wrap' : 'netlist__name'}
+                              style={{ fontSize: 11, color: 'var(--muted)' }}>
                               {j.status === 'done' && j.touchstone ? j.touchstone.split(/[\\/]/).pop()
                                 : j.status === 'failed' ? (j.error || '')
                                   : j.status === 'solved_pending_export'
@@ -6632,7 +6654,15 @@ ${data.output_path}`)
                       sourceMetadata={{
                         signal_net_count: signalNets.length,
                         reference_net_count: refNets.length,
-                        segment_count: segRun?.segments?.length || segAnalysis?.n_segments || 0,
+                        // 卡 0083 R5：原本只看本次跑過的分段，重新開啟專案、直接
+                        // 載入串接結果時寫成 0。查不到就不寫（undefined 不進報告）。
+                        segment_count: reportSegmentCount({
+                          view: activeView,
+                          cascadeSegmentCount: cascadeResult?.segment_count,
+                          schematicBlockCount: schematicGraph?.blocks?.length,
+                          segRunCount: segRun?.segments?.length,
+                          segAnalysisCount: segAnalysis?.n_segments,
+                        }),
                         // 截面阻抗分頁另外帶上實際數字。快照是一張圖，
                         // 圖上的字在報告裡縮小之後未必讀得出來；數字進中繼資料
                         // 表格才會以文字保留下來。
@@ -6762,8 +6792,9 @@ ${data.output_path}`)
                                 <div style={{
                                   color: '#718096', fontSize: 10.5, marginTop: 6,
                                   wordBreak: 'break-all', flexShrink: 0,
-                                }}>
-                                  {eyeJob.result?.image_path}
+                                }} title={eyeJob.result?.image_path || ''}>
+                                  {/* 這一區會被拍進客戶報告，只顯示檔名；完整路徑在提示裡（卡 0083 R5）。 */}
+                                  {displayFileName(eyeJob.result?.image_path)}
                                 </div>
                               </div>
                             )}
@@ -7031,9 +7062,12 @@ ${data.output_path}`)
                                       height={230} />
                                   </div>
                                   <div className="result-paths result-paths--center">
-                                    <span>{tdrJob.result.source === 'measured_waveform'
-                                      ? `量測波形：${tdrJob.result.csv_path}`
-                                      : `Circuit 專案：${tdrJob.result.project_path}`}</span>
+                                    {/* 會被拍進客戶報告：只顯示檔名，完整路徑放提示（卡 0083 R5）。 */}
+                                    <span title={String((tdrJob.result.source === 'measured_waveform'
+                                      ? tdrJob.result.csv_path : tdrJob.result.project_path) || '')}>
+                                      {tdrJob.result.source === 'measured_waveform'
+                                        ? `量測波形：${displayFileName(tdrJob.result.csv_path)}`
+                                        : `Circuit 專案：${displayFileName(tdrJob.result.project_path)}`}</span>
                                   </div>
                                 </>
                               )
@@ -7120,7 +7154,10 @@ ${data.output_path}`)
                             {/* 兩段說明置中：靠左靠右各一段時，中間那段大空白
                                 看起來像少了什麼東西。 */}
                             <div className="result-paths result-paths--center">
-                              <span>來源：{cascadeResult.output_path}</span>
+                              {/* 這一行會被拍進 S 參數快照、交給客戶：只顯示檔名，
+                                  完整路徑放提示（卡 0083 R5）。 */}
+                              <span title={String(cascadeResult.output_path || '')}>
+                                來源：{displayFileName(cascadeResult.output_path)}</span>
                               <span>
                                 {spMode === 'diff'
                                   ? '差動模式：以 scikit-rf 混合模式轉換，Sdd21＝差模插入損耗、Sdd11＝差模回波損耗'
@@ -7395,7 +7432,7 @@ ${data.output_path}`)
                             <h3 className="panel-title" style={{ margin: 0 }}>系統日誌</h3>
                             <div style={{ display: 'flex', gap: 6 }}>
                               <button className="btn" style={{ fontSize: 12, padding: '2px 10px' }}
-                                onClick={() => navigator.clipboard.writeText(logs.join('\n'))}>複製</button>
+                                onClick={() => void copyText(logs.join('\n')).catch(e => alert('複製日誌失敗：' + String(e)))}>複製</button>
                               <button className="btn" style={{ fontSize: 12, padding: '2px 10px' }}
                                 onClick={() => setLogs([])}>清除</button>
                             </div>

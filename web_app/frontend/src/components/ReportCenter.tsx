@@ -7,6 +7,7 @@ import {
   fileToDataUrl,
   generateHtmlReport,
   loadReportWorkspace,
+  openLatestReport,
   openReportWorkspace,
   saveReportBrand,
   saveReportSettings,
@@ -186,6 +187,16 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
       await refresh()
     } catch (error) {
       setMessage(`更新快照失敗：${String((error as Error)?.message || error)}`)
+    }
+  }
+
+  const openLatest = async () => {
+    if (!workspace) return
+    try {
+      const result = await openLatestReport(workspace)
+      setMessage(`已開啟報告：${result.opened}`)
+    } catch (error) {
+      setMessage(`開啟最近報告失敗：${String((error as Error)?.message || error)}`)
     }
   }
 
@@ -536,7 +547,7 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
                 {busy ? '產生中…' : '一鍵產生 HTML 報告'}
               </button>
               {(lastOutput || (manifest?.exports?.length || 0) > 0) && (
-                <button className="btn" onClick={() => window.open(`/api/report/export/latest?workspace=${encodeURIComponent(workspace)}`, '_blank')}>開啟最近報告</button>
+                <button className="btn" onClick={() => void openLatest()}>開啟最近報告</button>
               )}
               {lastOutput && <div className="report-output-path">{lastOutput}</div>}
             </div>

@@ -294,7 +294,7 @@ export default function MultiLaneWizard(
   const [addrResult, setAddrResult] = useState<any | null>(null)
   const [addrBusy, setAddrBusy] = useState(false)
   const [addrError, setAddrError] = useState('')
-  /** 快速檢驗（無損直連）這一輪的 job 與實際用到的兩顆模型。
+  /** 快速檢驗（近無損直連）這一輪的 job 與實際用到的兩顆模型。
    *  結果沿用同一個 /api/ibis-channel/status，靠 job_id 認出它是基準眼圖。 */
   const [quickCheck, setQuickCheck] = useState<
     { jobId: string; txModel: string; rxModel: string } | null>(null)
@@ -550,7 +550,7 @@ export default function MultiLaneWizard(
     } finally { setBusy(false) }
   }
 
-  /** 快速檢驗：TX 與 RX 背對背接無損參考通道，先看基準眼圖。
+  /** 快速檢驗：TX 與 RX 背對背接近無損參考通道，先看基準眼圖。
    *
    *  不需要 Touchstone——它回答的是「這對模型本來給多大的眼」。之後接上
    *  真實通道，看到的劣化才有歸因：基準眼就不好＝模型或資料率的問題；
@@ -811,7 +811,7 @@ export default function MultiLaneWizard(
     : (jobResult?.timing?.why || '')
   const fmtPs = (value: unknown) =>
     typeof value === 'number' ? value.toFixed(1) : '—'
-  /** 目前顯示的結果是不是快速檢驗那一輪（無損直連基準）。 */
+  /** 目前顯示的結果是不是快速檢驗那一輪（近無損直連基準）。 */
   const isQuickCheck = Boolean(quickCheck && job?.job_id === quickCheck.jobId)
   /** 快速檢驗的眼圖量測（眼高、眼寬…）；點對點結果的第一條 Lane。 */
   const quickMeasurements = isQuickCheck
@@ -837,7 +837,7 @@ export default function MultiLaneWizard(
         const imageIndex = (lane.image_paths || []).length > 1 ? 1 : 0
         cards.push({
           key: `${analysisIndex}-${laneIndex}`,
-          title: isQuickCheck ? '基準眼圖（無損直連）'
+          title: isQuickCheck ? '基準眼圖（近無損直連）'
             : lane.label || `Lane ${laneIndex + 1}`,
           corner: isQuickCheck && quickCheck
             ? `${quickCheck.txModel} → ${quickCheck.rxModel}` : group.corner,
@@ -983,7 +983,7 @@ export default function MultiLaneWizard(
 
       <section>
         <h3>快速檢驗：參考通道基準眼圖</h3>
-        {/* 不接使用者通道：TX 與 RX 之間放的是工具自產的參考線——無損
+        {/* 不接使用者通道：TX 與 RX 之間放的是工具自產的參考線——近無損
             直連看模型本來的眼，有損檔位看典型中等損耗下還剩多少。
             模型由套件角色自動挑，不需要 Touchstone。 */}
         <p className="hint">把上面選的兩側模型背對背接上工具自產參考線。</p>
@@ -994,7 +994,7 @@ export default function MultiLaneWizard(
           <input type="checkbox" checked={lossyReference}
             style={{ width: 'auto' }}
             onChange={event => setLossyReference(event.target.checked)} />
-          用有損參考通道（Nyquist −10 dB 趨膚模型；預設是無損直連）
+          用有損參考通道（Nyquist −10 dB 趨膚模型；預設是近無損直連，Nyquist 約 −0.5 dB）
         </label>
         <button className="btn" disabled={!packageId || busy || Boolean(job?.running)
           || Boolean(quickCheckBlock)}
@@ -1798,7 +1798,7 @@ export default function MultiLaneWizard(
           )}
           {quickMeasurements
             && Object.keys(quickMeasurements.metrics || {}).length > 0 && <>
-            <h4>基準眼圖量測（無損直連）</h4>
+            <h4>基準眼圖量測（近無損直連）</h4>
             <table className="model-library__table">
               <thead><tr><th>量測</th><th>數值</th></tr></thead>
               <tbody>{Object.entries(quickMeasurements.metrics)

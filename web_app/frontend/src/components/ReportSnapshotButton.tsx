@@ -1,5 +1,5 @@
 // 結果畫面共用的「更新報告快照」按鈕。
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toPng } from 'html-to-image'
 
 import {
@@ -8,6 +8,7 @@ import {
   type CreateSnapshotPayload,
 } from '../reportApi'
 import type { ReportQuality, SnapshotStatus } from '../reportTypes'
+import { isSnapshotSafeNode, sanitizeReportMetadata, sanitizeReportText } from '../reportPrivacy'
 
 interface Props {
   basePath: string
@@ -30,7 +31,10 @@ const PIXEL_RATIO: Record<ReportQuality, number> = {
 // 快照一律用最高品質，不開放選。報告裡的圖是拿來看細節的，沒有人會刻意要
 // 低解析度的版本；多一個選項只是多一個選錯、事後才發現要重拍的機會。
 const SNAPSHOT_QUALITY: ReportQuality = 'high'
-const snapshotFilter = (node: HTMLElement) => node.dataset.reportIgnore !== 'true'
+// 報告會交給客戶：除了 data-report-ignore，任何仍帶本機絕對路徑的文字節點與
+// 輸入框也不拍（卡 0083 R5：S 參數頁底部的「來源：<完整路徑>」曾被拍進縮圖）。
+const snapshotFilter = (node: Node) =>
+  isSnapshotSafeNode(node as unknown as Parameters<typeof isSnapshotSafeNode>[0])
 
 function detailKind(parentKind: string, element: HTMLElement, index: number): string {
   const token = (element.dataset.reportKind || `detail-${index + 1}`)
@@ -49,6 +53,8 @@ export default function ReportSnapshotButton({
   const [status, setStatus] = useState<SnapshotStatus>('display')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  // App 裡只有一個實例，切換分頁只換 kind：不清的話上一頁的圖說會接到這一頁（#0083）。
+  useEffect(() => { setCaption('') }, [kind])
 
   const capture = async () => {
     // 不再要求 basePath：只載入一個外部 .sNp 來看曲線時，分段輸出、裁切輸出、
@@ -77,20 +83,21 @@ export default function ReportSnapshotButton({
         cacheBust: true,
         pixelRatio: PIXEL_RATIO[SNAPSHOT_QUALITY],
         backgroundColor: '#0c0e12',
-        filter: node => !(node instanceof HTMLElement) || snapshotFilter(node),
+        filter: node => snapshotFilter(node),
       })
 
       const dataUrl = await render(target)
+      const safeCaption = sanitizeReportText(caption)
       const payload: CreateSnapshotPayload = {
         workspace: workspaceResult.workspace,
         kind,
         title,
         image_data_url: dataUrl,
-        caption,
+        caption: safeCaption,
         engineering_status: status,
         section,
         source_revision: sourceRevision,
-        source_metadata: { ...sourceMetadata, quality: SNAPSHOT_QUALITY },
+        source_metadata: sanitizeReportMetadata({ ...sourceMetadata, quality: SNAPSHOT_QUALITY }),
       }
 
       await save(payload)
@@ -110,8 +117,8 @@ export default function ReportSnapshotButton({
           kind: detailKind(kind, element, index),
           title: detailTitle,
           image_data_url: detailDataUrl,
-          caption: caption
-            ? `${caption}\n獨立結果：${detailTitle}`
+          caption: safeCaption
+            ? `${safeCaption}\n獨立結果：${detailTitle}`
             : `獨立結果：${detailTitle}`,
           source_metadata: {
             ...payload.source_metadata,
@@ -122,6 +129,7 @@ export default function ReportSnapshotButton({
         })
       }
       setMessage(`快照已保存，共 ${details.length + 1} 張；捲動的結果已各自完整輸出。`)
+      setCaption('')
       window.dispatchEvent(new CustomEvent('pcbsi-report-snapshot-saved', {
         detail: { workspace: workspaceResult.workspace, kind },
       }))

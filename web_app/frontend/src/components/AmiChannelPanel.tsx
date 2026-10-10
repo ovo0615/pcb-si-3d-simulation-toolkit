@@ -1,7 +1,7 @@
 // AMI 通道（點對點）：IBIS-AMI 模型的完整分析路徑（2026-08-28 重建）。
 //
 // ADR-0055 收掉舊 AMI 面板的理由是「沒有人走得到」；這一版把它接回
-// 標準流程：選兩側 AMI 套件 → 快速檢驗（無損直連基準）→ 接真實通道 →
+// 標準流程：選兩側 AMI 套件 → 快速檢驗（近無損直連基準）→ 接真實通道 →
 // 眼圖。設定面刻意極簡（零新設定原則）：路由與調變由模型宣告自動解析，
 // AMI 參數採 .ami 預設（親手設定的參數寫不進 AEDT 時後端會擋，預設的
 // 略過並記錄——那套預檢已經在後端）。
@@ -191,7 +191,7 @@ export default function AmiChannelPanel(
     } finally { setBusy(false) }
   }
 
-  /** 快速檢驗：兩顆 AMI 模型背對背接無損參考通道，先看基準眼。 */
+  /** 快速檢驗：兩顆 AMI 模型背對背接近無損參考通道，先看基準眼。 */
   async function runQuickCheck() {
     setBusy(true); setError(''); setStarted('')
     try {
@@ -398,10 +398,15 @@ export default function AmiChannelPanel(
         })
         return
       }
-      ;(res?.image_paths || []).forEach((_p: string, imageIndex: number) => {
+      ;(res?.image_paths || []).forEach((p: string, imageIndex: number) => {
+        // 第一張通常是 impulse 響應、不是眼圖（#0083：縱軸 2E+13 的那張被標成
+        // 「基準眼圖」）；依檔名分辨。
+        const kind = /_impulse\.jpg$/i.test(String(p)) ? 'Impulse 響應'
+          : /_eye\.jpg$/i.test(String(p)) ? '統計眼圖' : ''
+        const base = isQuickCheck ? '近無損直連基準' : analysisName || 'AMI'
         cards.push({
           key: `${analysisIndex}-${imageIndex}`,
-          title: isQuickCheck ? '基準眼圖（無損直連）' : analysisName || 'AMI',
+          title: kind ? `${kind}（${base}）` : base,
           sub: isQuickCheck && quickCheck
             ? `${quickCheck.txModel} → ${quickCheck.rxModel}` : analysisName,
           imageUrl: `/api/ami-channel/image?analysis_index=${analysisIndex}`
@@ -419,7 +424,9 @@ export default function AmiChannelPanel(
         index, analysis: String(res?.analysis || ''),
         measurements: res?.measurements,
         waveformEye: res?.waveform_eye,
-        notes: res?.notes || [],
+        validity: res?.validity,
+        // 「結果無效」另以紅框顯示，註記裡不再重複一次。
+        notes: (res?.notes || []).filter((note: string) => !note.startsWith('結果無效：')),
       }))
       .filter((item: any) => item.measurements)
   }, [jobResult])
@@ -482,7 +489,7 @@ export default function AmiChannelPanel(
           <input type="checkbox" checked={lossyReference}
             style={{ width: 'auto' }}
             onChange={event => setLossyReference(event.target.checked)} />
-          用有損參考通道（Nyquist −10 dB 趨膚模型；預設是無損直連）
+          用有損參考通道（Nyquist −10 dB 趨膚模型；預設是近無損直連，Nyquist 約 −0.5 dB）
         </label>
         <button className="btn" disabled={!txPackageId || busy || Boolean(job?.running)
           || Boolean(quickCheckBlock)}
@@ -765,7 +772,11 @@ export default function AmiChannelPanel(
         {measurementBlocks.map((block: any) => (
           <div key={block.index}>
             <h4>眼圖量測{block.analysis ? `（${block.analysis}）` : ''}
-              {isQuickCheck ? '　—　無損直連基準' : ''}</h4>
+              {isQuickCheck ? '　—　近無損直連基準' : ''}</h4>
+            {block.validity?.valid === false && (
+              <div className="model-library__issue is-error">
+                結果無效，以下數值不可採用：{block.validity.reason}</div>
+            )}
             {block.measurements.available === false && (
               <p className="hint">取不到眼圖量測：{block.measurements.unavailable_reason}</p>
             )}
@@ -816,10 +827,10 @@ export default function AmiChannelPanel(
               <article key={card.key}
                 data-report-separate-snapshot="true"
                 data-report-kind={`ami-${card.key}`}
-                data-report-title={`AMI 眼圖：${card.title}`}>
+                data-report-title={`AMI：${card.title}`}>
                 <header><div><strong>{card.title}</strong>
                   <span>{card.sub}</span></div></header>
-                <img src={card.imageUrl} alt={`${card.title} 眼圖`} />
+                <img src={card.imageUrl} alt={card.title} />
               </article>
             ))}
           </div>

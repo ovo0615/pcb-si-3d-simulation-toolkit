@@ -52,6 +52,13 @@ export function openReportWorkspace(basePath: string, projectName: string) {
   })
 }
 
+/** 用系統預設程式開啟最近一份報告。由後端 `os.startfile` 開，不用
+ *  `window.open`：工具視窗會把新視窗交給外部瀏覽器，那邊沒有 token cookie，
+ *  只會拿到 401（卡片 #0073）。 */
+export function openLatestReport(workspace: string) {
+  return jsonPost<{ opened: string }>('/api/report/open_latest', { workspace })
+}
+
 export function loadReportWorkspace(workspace: string) {
   return reportApi<ReportWorkspaceResponse>(
     `/api/report/workspace?workspace=${encodeURIComponent(workspace)}`,
