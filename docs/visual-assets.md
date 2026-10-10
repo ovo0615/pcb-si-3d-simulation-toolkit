@@ -1,47 +1,77 @@
-# Visual asset plan
+# 圖片帳冊
 
-This document tracks the public visual assets used by the project README.
+第三輪（2026-10-09）以工具視窗最大化實拍到分段、模型庫與截面預覽。需要求解的圖仍待拍。下表區分完成、區域圖、部分完成、缺項與待拍，不把空資料介面當作求解成功。
 
-## Currently approved for public display
+| 項目 | 基準 |
+|---|---|
+| 工具版本／功能 commit | `1.0.0-rc.1`／`63db38b`；實拍前重核對 |
+| 主線資料 | `Example_SYZ.aedb` 示範複本；先核對可公開權限 |
+| 畫面尺寸 | 工具視窗最大化，1920×1020（含標題列）；區域圖另記實際尺寸 |
+| 圖片目錄 | `graph/`，ASCII 檔名 |
+| 本次完成數 | 35 主圖：完成 21、區域圖 7、部分完成 3、併入 1、缺項 3、待拍 0；補圖 5；條件圖 0／5 |
+| 區域圖 | 該段畫面上下必有路徑欄，只截中間不含路徑的區塊；不修圖 |
 
-- `graph/N段分割示意_20260730.png` — channel segmentation overview
-- `graph/自動串接電路_20260730.png` — automated cascade schematic
-- `graph/可信度驗證_20260730.png` — SIwave fidelity verification controls
-- `graph/裁切後比對_20260730.png` — cutout before/after comparison
-- `graph/指定裁切區_20260730-public.png` — local filesystem path redacted from the cutout-region screenshot
-- `graph/眼圖結果_20260730-public.png` — local filesystem path redacted from the Eye Diagram result
-- `graph/可信度驗證結果_20260730-public.png` — local filesystem path redacted from the fidelity report
-- `graph/SIwave排程模擬過程_20260730-public.png` — local filesystem path redacted from the scheduled-solve progress screenshot
-- `graph/混合排程模擬過程_20260805.png` — mixed-solver schedule progress on the three-segment demo (current UI)
-- `graph/10段分割正在裁切中_20260803.png` — blurred ten-segment cutout progress overlay
-- `graph/N段分割示意_20260805.png` — three-segment split preview with safety overlay (current UI)
-- `graph/混合求解設定_20260803.png` — per-segment HFSS／SIwave selection controls
-- `graph/N段分割後推薦求解器示意_20260805.png` — preferred README hero; N-way split with safety overlay and per-segment solver regions (green = SIwave, purple = HFSS)
-- `graph/混合求解設定_20260805.png` — preferred mixed-solver table (three-segment demo, current UI)
-- `graph/入口畫面_20260810.png` — current task picker with enlarged title and complete task icon set
+逐張完成後填工具 commit、示範資料來源、實拍日期、尺寸、成功狀態、去識別檢查與取代的舊圖。未拍或未回看不得標完成。不能注入假結果、改 DOM、拼貼成功畫面；不露本機路徑、使用者／客戶名稱與 token。
 
-For current documentation, prefer the 20260803 multi-layer, ten-segment, mixed-solver,
-and S-parameter comparison images over the retired score-based fidelity screenshots.
+| 圖檔 | 章 | 類別 | 驗收畫面 | 前置 | 狀態 |
+|---|---|---|---|---|---|
+| `gui-01-task-picker.png` | 00、01、README | 主圖 | 任務入口：載入與子任務、預設勾選、前置提示看得清楚 | 無 | 完成 |
+| `gui-02-desktop-shell.png` | 01、README | 主圖 | 現行工具視窗框、版本、選單與工作區；無任何載入路徑 | 無 | 完成 |
+| `gui-03-help-menu.png` | 01、11 | 主圖 | 展開說明選單，包含支援包、授權、在瀏覽器開啟 | 無 | 完成 |
+| `gui-04-loaded-layout.png` | 00、02 | 主圖 | 示範板已載入、訊號與參考已選；隱藏輸入路徑，保留 Layout | 資料 | 完成 |
+| `gui-05-net-selection.png` | 02 | 主圖 | 已選訊號、參考與端點關係；截網路清單與圖，不含輸入檔面板 | 資料 | 併入 gui-04（同一畫面） |
+| `gui-06-cutout-settings.png` | 02 | 主圖 | 裁切範圍設定與預覽，拍到使用者該核對的邊界 | 資料 | 完成 |
+| `gui-07-cutout-result.png` | 00、02 | 主圖 | 「裁切後 Layout」真實結果，沒有舊差異填色 | 資料 | 完成 |
+| `gui-08-stackup-diff.png` | 02 | 主圖 | 套用前的疊構差異表，新增／變更／移除可辨識，不拍來源路徑 | 資料 | 區域圖 |
+| `gui-09-backdrill-options.png` | 02 | 主圖 | 殘樁表、保留殘樁與鑽頭加大選項；排除另存路徑 | 資料 | 區域圖 |
+| `gui-10-backdrill-warning.png` | 02、11 | 主圖 | 低於 4 mil 的真實開路警告；僅展示確認前狀態，不必套用破壞設定 | 資料 | 區域圖 |
+| `gui-11-cleanup-settings.png` | 02 | 主圖 | 建議電磁範圍、0.2 mm、40 dB 與清理預覽 | 資料 | 區域圖：`30c8ff8` 只裁切即可分析；本板候選 0 |
+| `gui-12-cleanup-comparison.png` | 02 | 主圖 | 清理前後結果與差異密集區，不只截設定面板 | 資料 | 缺項：裁切只保留選定網路，候選 0 時「另存並執行」停用，沒有對比可拍 |
+| `gui-13-port-endpoints.png` | 03 | 主圖 | 建議端點、Port 自動／Coax／Pin Group 與建立完成摘要 | 資料 | 完成 |
+| `gui-14-solve-profile.png` | 03 | 主圖 | 內建唯讀規格／個人設定檔、Phi、三段式掃頻與核心 12 的實際欄位 | 資料 | 完成 |
+| `gui-15-segment-analysis.png` | 04、README | 主圖 | 3D 複雜度分析後切線、評級與安全疊圖；README 主圖候選 | 資料 | 完成 |
+| `gui-16-segment-solvers.png` | 04 | 主圖 | 每段建議／指定求解器表與整體區域，顯示手動改派的效果 | 資料 | 區域圖 |
+| `gui-17-segment-result.png` | 04 | 主圖 | 實際分段完成後整體／各段選擇列與一段 Layout | 資料 | 完成 |
+| `gui-18-schedule-progress.png` | 05 | 主圖 | 現行混合排程進度，求解器、狀態、經過時間與完整進度文字 | 求解 | 完成：`ada739a`，HFSS 段 Adaptive Pass 5、Delta S；求解後停止，結果不採用 |
+| `gui-19-siwave-stopping.png` | 05、11 | 主圖 | 關掉原生提示後的「停止中…」與「等待本段解完，結果不採用」 | 求解 | 完成：`ada739a`，SIwave 段按停止，等這段解完（結果不採用） |
+| `gui-20-window-stopping.png` | 01、05 | 主圖 | 真實關窗確認後的停止遮罩、工作列表與經過時間；不選「不等了」 | 求解 | 完成：`ada739a`，HFSS 段求解中關窗，乾淨停止遮罩（等 12 秒）；另有確認框補圖 20b |
+| `gui-21-cascade-schematic.png` | 00、05 | 主圖 | 成功段結果的串接接線，埠對映可辨識且沒有失敗段冒充完成 | 既有結果／無 | 完成 |
+| `gui-22-sparameter-result.png` | 00、05、README | 主圖 | 本示範通道單端曲線、圖例與來源證據；若示範板無差動對不拍假差動 | 既有結果／無 | 完成 |
+| `gui-23-model-library.png` | 06 | 主圖 | 模型已匯入，掃描／修正結果與相容性狀態，不露模型庫實體路徑 | 無 | 完成 |
+| `gui-24-multilane-binding.png` | 06 | 主圖 | 多埠通道中通道、Tx／Rx、埠模型綁定與前置檢查 | 既有公開模型與通道 | 部分完成 |
+| `gui-25-multilane-eye.png` | 06 | 主圖 | 真實眼圖與量測摘要，理想電源等限制要可見 | 求解 | 缺項：示範板不是 DDR，綁定無法判定方向 |
+| `gui-26-ami-channel.png` | 06 | 主圖 | AMI 路徑、掃描與信任完成、通道綁定／參數設定 | 合法 AMI 模型 | 完成 |
+| `gui-27-ami-result.png` | 06 | 主圖 | 真實 AMI 基準／通道結果，標示分析種類，不混淆快速估算與完整分析 | 求解／引擎 | 完成：`a19eda7`，Ansys 範例 PCIe G4 16 GT/s 近無損基準；GetWave 187.2 mV／0.531 UI，結果有效；眼圖補圖 27b |
+| `gui-28-tdr-location.png` | 07 | 主圖 | 模擬 TDR 曲線與同一點的 Layout 標記、距離數字 | 求解 | 完成 |
+| `gui-29-measured-tdr.png` | 07 | 主圖 | 合法示範 CSV 的欄位設定與定位結果；只拍可讀區域，不拍 CSV 路徑 | 資料＋既有量測 | 缺項：沒有可公開的量測 CSV |
+| `gui-30-crosssection-preview.png` | 08 | 主圖 | 框範圍、切線與掃描後截面，訊號／參考角色可核對 | 資料 | 完成 |
+| `gui-31-crosssection-result.png` | 08 | 主圖 | Q2D 阻抗結果、側向收斂／TDR 對照的數字與單位 | 求解 | 完成：`ada739a`，Z0 48.42／48.62 Ω、側向收斂 0.46%、與 TDR 對照 |
+| `gui-32-report-snapshots.png` | 09 | 主圖 | 報告中心作用中快照與可能過期的提示；不露工作區路徑 | 既有結果／無 | 區域圖：`8acb42e` 重拍，作用中快照全是新版；頁首與底部狀態列的路徑已裁掉 |
+| `gui-33-report-watermark.png` | 09 | 主圖 | 浮水印啟用設定及生成後實際報告；只用中性品牌與文字 | 既有結果／無 | 區域圖：`8acb42e`；頁首路徑已裁掉 |
+| `gui-34-remote-pack.png` | 10 | 主圖 | 真實打包完成或結果回收摘要，排除輸入／輸出絕對路徑 | 資料；回收用既有結果 | 部分完成 |
+| `gui-35-sparameter-toolbox.png` | 10 | 主圖 | 工具箱操作與品質檢查結果；埠序／參考阻抗來源可辨識 | 既有公開 `.sNp`／無 | 部分完成 |
+| `gui-36-ddr-classification.png` | 02、06 | 條件圖 | 有獲准公開的 DDR 板／網路清單；拍自動分類與加入選取清單，不用客戶板 | 依真實資料與狀態 | 待拍 |
+| `gui-37-pending-export.png` | 05、11 | 條件圖 | 既有合法實例出現「待匯出」與重試動作；沒有此狀態就只寫文字 | 依真實資料與狀態 | 待拍 |
+| `gui-38-com-result.png` | 10 | 條件圖 | 合法公開通道、COM 標準與空閒授權俱備；記錄實際簽核摘要 | 依真實資料與狀態 | 待拍 |
+| `gui-39-measured-model.png` | 06 | 條件圖 | 合法 I/V／V/T 量測資料可用，模型生成成功與確認狀態 | 依真實資料與狀態 | 待拍 |
+| `gui-40-equalization-scan.png` | 06 | 條件圖 | 合法 AMI 模型、掃描真的完成；標明快速排名的範圍與對應驗證 | 依真實資料與狀態 | 待拍 |
 
-None of the images referenced by the README show local filesystem paths or customer identifiers.
-Review Ansys/CADMEN branding separately before using any image that contains a vendor or company logo.
+## 實拍記錄（2026-10-09 第三輪）
 
-## History note
+第三、四輪取自同一套資料（第四輪 15:49～17:46 求解後拍 21、22、26、28、32、33）：`start.bat` 開工具視窗，`1.0.0-rc.1`／`63db38b`，`Example_SYZ.aedb` 複本，訊號 `ST_CTL`、`ST_ERROR`，參考 `GND`，Conforming 5 mm 裁切，3 段分段。逐張回看：無本機路徑、使用者／客戶名、token 或授權伺服器位址。
 
-The original (unredacted) versions of the four `-public` images above briefly contained this
-machine's local Windows absolute path and were removed from the entire git history of this
-repository via `git filter-repo` + a force-push. Do not re-add the non-suffixed original files
-for those four screenshots.
+| 狀態 | 圖 |
+|---|---|
+| 完成 | 01、02、03、04、06、07、13、14、15、17、18、19、20、21、22、23、26、27、28、30、31 |
+| 區域圖 | 08、09、10、11（`30c8ff8` 重拍）、16、32、33 |
+| 部分完成 | 24（示範板非 DDR，綁定被擋）、34（完成對話框裁掉路徑行）、35（只有設定區） |
+| 補圖 | 01b、16b（高複雜度段改 SIwave 的確認框）、33b（`8acb42e` 產生的 HTML 報告：全文無本機路徑、6 張圖段數都是 3、浮水印跟著內容捲動）、20b（求解中按 X 的確認框）、27b（AMI 統計眼圖） |
+| 缺項 | 12：清理候選 0；25：示範板不是 DDR；29：無可公開量測 CSV |
 
-The obsolete `10段可信度驗證結果_20260803.png` and the unredacted
-`分段對照結果_20260803.png` are retained only in the private repository. Do not add them
-to this public repository: the former shows the retired score-based UI, and both contain
-local workspace paths.
+模型庫用 Ansys 範例 IBIS（`ansys_ddr4_*`、`usb4_*`，檔內 Copyright ANSYS）。58 張核准的舊截圖已移除；品牌 LOGO 與 7 張 validation 證據圖保留。
 
-## Recommended future captures
+## 舊圖處理
 
-1. Clean hero screenshot of the main PCB SI interface.
-2. Clean 3D PCB layout screenshot.
-3. End-to-end workflow diagram: Import → Select Nets → Cutout → Port → Segment → Solve → Analyze.
+依核准清單移除 58 張無引用的舊截圖。原有 35 張主圖統計不變；新增 SerDes 面板圖 `gui-41-serdes-compliance.png` 尚待 Claude 或 Jeff 實拍，未計入完成。
 
-Use Demo or anonymized data only. Store future README images under `graph/` or `docs/images/` and reference them with repository-relative paths.
+[操作說明](../操作說明.md)｜[版本說明](../CHANGELOG.md)。

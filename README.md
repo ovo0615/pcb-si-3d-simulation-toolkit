@@ -1,30 +1,20 @@
 # PCB SI 3D Simulation Toolkit
 
-Choose your language / 選擇語言：
+![現行任務入口（工具視窗，未載入板子）](graph/gui-01-task-picker.png)
 
-- [繁體中文](README.zh-TW.md)
-- [English](README.en.md)
+PCB 通道裁切、分段、HFSS／SIwave 混合求解、Touchstone 串接、IBIS／AMI 眼圖、TDR 定位與 Q2D 截面阻抗。
 
-![N 段分割與逐段求解器指定（綠色 SIwave、紫色 HFSS）](./graph/N段分割後推薦求解器示意_20260815.png)
+**本 Repo 是公開展示版，沒有後端與啟動器。下載 Source ZIP 無法執行完整模擬。** 完整工具與商用支援請洽 [TADC](https://www.cadmen.com/)／[jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com)。
 
-把一片 PCB 上的一條訊號路徑，從板子檔案一路算到眼圖：通道裁切、風險感知分段、
-HFSS／SIwave 混合求解、Touchstone 串接、IBIS 眼圖與 DDR 時序裕度、
-TDR 阻抗定位與截面阻抗（Q2D）。
+| 入口 | 內容 |
+|---|---|
+| [繁體中文](README.zh-TW.md)／[English](README.en.md) | 功能、需求與資料邊界 |
+| [第一次跑](docs/manual/00-第一次跑.md) | 從完整工具包做到通道 S 參數與報告 |
+| [操作說明](操作說明.md) | 12 章功能索引 |
+| [版本說明](CHANGELOG.md) | 本次基準與尚待驗收項目 |
+| [驗證資料](validation/README.md) | 個別功能的歷史驗證條件與結果 |
+| [圖片帳冊](docs/visual-assets.md) | 截圖版本與驗收狀態 |
 
-**別人沒有的**：全板自動分段並逐段自動選求解器，一個框都不用畫；模型有錯不擋路
-（自動修復＋SHA-256 審計鏈）；TDR 劇變直接標回 Layout 走線並原地取截面
-（定位平均誤差 0.66 mm）；等化掃描單組 3 秒對完整模擬 48～212 秒，Top-3 排名一致。
+文件草稿適用工具 `1.0.0-rc.1`，功能基準 `a19eda7`。35 張主圖狀態已盤點，仍有 3 項缺圖；新增 SerDes 面板圖、5 張條件圖與完整工具包驗收尚未完成，詳見版本說明與圖片帳冊。
 
-**第一次用**：[第一次跑——從下載到第一張眼圖](docs/manual/00-第一次跑.md)（30 分鐘）。
-加速手法都經過量化驗證：[全部驗證一覽](validation/README.md)。
-
----
-
-Commercial licensing and technical support are provided by Taiwan Auto-Design Co., Ltd. (TADC).
-This repository is the public showcase edition, maintained by the author.
-This tool is not affiliated with, nor endorsed by, Ansys, Inc. Ansys, HFSS and SIwave are trademarks of Ansys, Inc.
-A valid Ansys AEDT licence of your own is required; this tool neither includes nor provides one.
-
-商用授權與技術支援由虎門科技股份有限公司（Taiwan Auto-Design Co., Ltd.，TADC）提供。本 Repository 為公開展示版本，由作者維護。
-本工具與 Ansys, Inc. 無隸屬、無背書關係；Ansys、HFSS、SIwave 為 Ansys, Inc. 之商標。
-使用本工具需自備有效的 Ansys AEDT 授權，本工具不含、亦不提供授權。
+商用授權與技術支援由虎門科技股份有限公司（Taiwan Auto-Design Co., Ltd.，TADC）提供。本工具與 Ansys, Inc. 無隸屬、無背書關係，Ansys、HFSS、SIwave 等商標屬原權利人。使用完整工具須自備相應的有效 Ansys 授權。
