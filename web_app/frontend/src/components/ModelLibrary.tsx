@@ -3,9 +3,11 @@ import { useEffect, useMemo, useState } from 'react'
 import AmiChannelPanel from './AmiChannelPanel'
 import MultiLaneWizard from './MultiLaneWizard'
 import SpisimToolboxPanel from './SpisimToolboxPanel'
+import SerdesCompliancePanel from './SerdesCompliancePanel'
 import { QuickProbeResult, QuickProbeView } from './AmiQuickProbe'
 import { setModelsReportMetadata } from './reportMetadataStore'
 import { LicenseTag, useLicenseBlock } from './LicenseTag'
+import { healthStatusView } from '../healthcheckStatus'
 
 type CompatibilityState = 'ready' | 'warning' | 'block'
 
@@ -914,20 +916,17 @@ export default function ModelLibrary() {
               <h4>健檢</h4>
               <div className="model-library__health">
                 {healthRunning ? <span>健檢中…（約一分鐘）</span>
-                  : health?.record ? (
-                    health.record.status === 'passed'
-                      ? <span className="is-pass">通過（{health.record.seconds} 秒，{health.record.at}）</span>
-                      : health.record.status === 'not_applicable'
-                        ? <span>{health.record.reason}</span>
-                      : health.record.status === 'license_unavailable'
-                        // 授權不足：健檢沒跑完，不代表模型有問題。
-                        ? <span style={{ color: '#ffd28a' }} title={health.record.reason}>
-                            沒跑完：{(health.record.reason || '').slice(0, 80)}
-                          </span>
-                        : <span className="is-fail" title={health.record.reason}>
-                            失敗：{(health.record.reason || '').slice(0, 80)}
-                          </span>
-                  ) : <span>尚未健檢。</span>}
+                  : health?.record ? (() => {
+                    // 授權不足、結果無效都不是模型的問題：黃字，不用紅字「失敗」。
+                    const view = healthStatusView(health.record)
+                    return (
+                      <span className={view.tone === 'pass' ? 'is-pass' : view.tone === 'fail' ? 'is-fail' : undefined}
+                        style={view.tone === 'warn' ? { color: '#ffd28a' } : undefined}
+                        title={view.title}>
+                        {view.text}
+                      </span>
+                    )
+                  })() : <span>尚未健檢。</span>}
                 <button className="btn" onClick={() => void startHealthcheck()}
                   disabled={healthRunning || Boolean(health && !health.applicable) || Boolean(healthBlock)}
                   title={healthBlock || health?.blocker || '用參考通道實際求解一次'}>
@@ -1081,7 +1080,7 @@ export default function ModelLibrary() {
         : activePanel === 'ami'
           ? <AmiChannelPanel packages={library?.packages || []}
               onLibraryChanged={refresh} />
-          : <SpisimToolboxPanel />}
+          : <><SpisimToolboxPanel /><SerdesCompliancePanel /></>}
     </div>
   )
 }
