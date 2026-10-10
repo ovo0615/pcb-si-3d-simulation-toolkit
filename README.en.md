@@ -1,118 +1,55 @@
 # PCB SI 3D Simulation Toolkit
 
-English ｜ [繁體中文](README.zh-TW.md)
+![Current task picker in the tool window, with no board loaded](graph/gui-01-task-picker.png)
 
-> Commercial licensing and technical support are provided by Taiwan Auto-Design Co., Ltd. (TADC).
-> This tool is not affiliated with, nor endorsed by, Ansys, Inc. Ansys is a trademark of Ansys, Inc.
-> A valid Ansys AEDT licence of your own is required.
+Extract and solve a PCB signal channel, cascade its segments, and inspect eye diagrams, TDR locations and cross-section impedance as needed.
 
-**Jeff Hong**｜Senior Technical Engineer, CAE｜Taiwan Auto-Design Co., Ltd. (TADC)
-[jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com)　[cadmen.com](https://www.cadmen.com/)
+**This public repository contains front-end assets, documentation and demonstration data. It has no back end, launcher or Ansys licence.** Its Source ZIP cannot run the complete workflow. For the complete tool and commercial support, contact [TADC](https://www.cadmen.com/) or [jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com).
 
-Takes one signal path on a PCB from board file all the way to an eye diagram.
-Solving runs on Ansys HFSS 3D Layout and SIwave, driven through PyEDB and PyAEDT.
+## Features and manual
 
-![N-way segmentation with per-segment solver assignment: green = SIwave, purple = HFSS](./graph/N段分割後推薦求解器示意_20260815.png)
+| Task | Chapter |
+|---|---|
+| Net selection, cutout, stackup, backdrill and Layout cleanup | [02](docs/manual/02-載入與裁切.md) |
+| Endpoint ports, profiles and frequency sweeps | [03](docs/manual/03-Port與求解設定.md) |
+| Whole-board or segmented analysis, HFSS/SIwave assignment | [04](docs/manual/04-分段與混合求解.md) |
+| Scheduling, stopping, export retries and Touchstone cascading | [05](docs/manual/05-排程與串接.md) |
+| Model import, multi-port IBIS, AMI and eye diagrams | [06](docs/manual/06-IBIS與眼圖.md) |
+| Simulated or measured TDR mapped to Layout | [07](docs/manual/07-TDR定位.md) |
+| 2D cross-section impedance and lateral convergence | [08](docs/manual/08-截面阻抗.md) |
+| Snapshots, watermarks and a single-file HTML report | [09](docs/manual/09-報告與輸出.md) |
+| External channels, remote solve packages, S-parameter tools and COM | [10](docs/manual/10-其他工作模式.md) |
 
-## What nobody else ships
+## Complete-tool prerequisites
 
-- **Whole-board automatic segmentation with per-segment solver assignment — you
-  never draw a region.** Existing hybrid flows (such as HFSS Regions in SIwave)
-  start with an engineer drawing the 3D regions by hand.
-- **A broken model does not block you**: auto-repair into a managed copy, SHA-256
-  audit trail, and the run goes on. Industry IBIS checkers validate but never fix.
-- **TDR finds the discontinuity; the layout gets the marker** — then take a virtual
-  cross-section right there. Location validation: mean error 0.66 mm.
-- **EQ sweep at 3 seconds per setting** against 48–212 s for a full simulation,
-  with the Top-3 ranking matching the full simulation exactly.
-- **One button proves the model actually solves**, not merely that it parses.
+| Component | Purpose and installation |
+|---|---|
+| Windows 10/11 x64 | Runs the complete tool |
+| Ansys Electronics Desktop 2026 R1 (2026.1) and applicable licences | EDB operations and selected solvers; install and license separately |
+| Python 3.12 x64 | Required by the native distribution; source packages also accept 3.10. Follow launcher installation prompts; install first for offline use |
+| Microsoft Edge WebView2 Runtime | Default desktop window; the launcher falls back to a browser if unavailable |
+| Locked backend dependencies and pywebview supplied with the tool | Installed by `start.bat` into separate environments; do not upgrade independently |
+| IBIS/AMI models or measurement data (optional) | Eye and measurement analysis; verify usage and redistribution rights |
 
-The first three claims rest on an August 2026 survey of public product documentation
-and literature. A survey cannot prove a negative; it proves we looked hard.
+Ordinary use does not require Node.js. Front-end source changes require Node.js/npm and installation according to the supplied `package.json` and lockfile.
 
-## Features and outputs
+## First result
 
-Channel cutout · stackup swap · backdrill · layout cleanup · N-way segmentation with
-hybrid HFSS/SIwave solving · scheduled solve and cascade · remote solve package ·
-IBIS and IBIS-AMI eye analysis with DDR timing margin and EQ sweep · build IBIS from
-bench measurements · TDR impedance location (also accepts scope waveforms) ·
-cross-section impedance (Q2D) · S-parameter toolbox and IEEE COM sign-off ·
-one-click self-contained HTML report.
+Obtain the complete tool → run `web_app/start.bat` → select tasks → load a demo board → select signal/reference nets → cut out and preprocess → create ports → choose whole-board or segmented analysis → solve and validate Touchstone → cascade → update report snapshots.
 
-Outputs: full-channel S-parameters with IL/RL/NEXT/FEXT curves, eye diagrams with 11
-eye measurements, DDR setup/hold margin, ranked equalization settings, discontinuity
-markers on the layout trace, per-conductor impedance with Z₀(x) profile, and a single
-HTML report where every figure carries a SHA-256 and its source data.
+Follow [00 First run](docs/manual/00-第一次跑.md). Eye analysis has a separate [chapter 06](docs/manual/06-IBIS與眼圖.md). There is no fixed completion-time guarantee. The detailed manual is in Traditional Chinese.
 
-![Cascaded S-parameters](./graph/S參數展現_20260815.png)
+## Usage boundaries
 
-![TDR impedance location mapped onto the layout trace](./graph/TDR_20260815.png)
+| Item | Required check |
+|---|---|
+| Ports/results | Solver completion does not prove a valid export; verify port count/order, frequencies and provenance |
+| Stopping SIwave | Wait for the current segment to finish; discard its result. A new schedule cannot start while stopping |
+| Model DLLs | Execute locally. Scanning, SHA-256 and trust records do not guarantee safety. User-supplied managed copies remain subject to vendor licensing |
+| Repairs and assumptions | Read warnings about inferred materials or Model Selectors; assumptions are not measurements |
+| Reports/support bundles | Check paths, models, logs and identifiers before sending. Watermarks are not DRM |
+| 2D Q2D | Does not cover the complete 3D effects of vias, corners or reference-plane gaps |
 
-## Every speed-up is quantitatively validated
+Documentation targets `1.0.0-rc.1`, feature baseline `a19eda7`. The status of all 35 main screenshots has been recorded, with 3 missing items. 5 conditional screenshots and distribution-package acceptance remain pending. [Release notes](CHANGELOG.md) · [Image register](docs/visual-assets.md) · [Validation](validation/README.md) · [Troubleshooting](docs/manual/11-疑難排解.md). Historical validation supports only its recorded versions, data and conditions.
 
-Each speed-up **changes what is actually being solved**, so each has to answer: how
-far does this land from solving the whole board once?
-
-| Technique | Deviation from a full-board solve | Precondition |
-|---|---|---|
-| Channel cutout | Within **0.03 dB** | Stitching vias not cut away (1.644 dB if they are) |
-| Layout cleanup | Within **0.021 dB** | Signal and reference nets kept |
-| Segmented cascade | Within **0.1 dB** | **Ground stitching at the cut** (14.4 dB without it) |
-
-**That precondition is the subject of the sentence, not a footnote.** On a real board
-a microstrip channel cut twice has a usable upper limit of only 1.35 GHz — and there
-the cause is the number of cuts, not stitching: **adding ground vias does not help.**
-
-[All validations at a glance (12 items)](./validation/README.md) — reports are in
-Traditional Chinese; the raw JSON and Touchstone data are language-neutral.
-
-## Requirements
-
-64-bit Windows 10/11, Ansys Electronics Desktop 2026.1 with an available license,
-and Python 3.10 or 3.12. This repository contains only the front-end source and its
-built `dist`, with **no back-end source and no solving environment**. Images use
-demo/anonymized data.
-
-Stack: React/TypeScript/Vite, FastAPI + WebSocket, PyEDB, PyAEDT, scikit-rf.
-
-Step-by-step instructions: [操作說明](./操作說明.md) (Traditional Chinese, 12 chapters).
-
-## Commercial licensing and notices
-
-**Commercial licensing, quotations and technical support are provided by
-Taiwan Auto-Design Co., Ltd. (TADC):**
-[jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com)｜[cadmen.com](https://www.cadmen.com/)
-
-This repository is the public showcase edition, maintained by the author. It is not an
-official Ansys, Inc. account, nor an official Ansys collaboration. This tool is not
-affiliated with, nor endorsed by, Ansys, Inc. Ansys, HFSS, SIwave, Q3D and Q2D are
-trademarks of Ansys, Inc.
-
-**A valid Ansys AEDT (HFSS / SIwave / Q2D) licence of your own is required.** This tool
-neither includes nor provides a licence, and never bypasses Ansys licensing; every solve
-calls the AEDT installation on your own machine.
-
-### Terms for running third-party model libraries
-
-IBIS-AMI models carry native libraries (`.dll` / `.ami`) that AEDT executes on your
-machine. Before the first trust is established in the model library, the tool asks you
-to acknowledge four points:
-
-1. The tool hands **the files you supply** to Ansys AEDT for execution on this machine.
-   Their provenance, correctness and licensing are your responsibility.
-2. The tool scans with Windows Defender, records the SHA-256, and refuses libraries whose
-   format it cannot identify. **This is provenance tracking, not a safety guarantee** —
-   the tool makes no warranty about third-party model behaviour.
-3. Models stay on the local machine and are never uploaded (see ADR-0021).
-4. Managed copies in the model library must not be redistributed beyond the terms you
-   hold with the model vendor.
-
-### Auto-repair is inference, not measurement
-
-Two of the repairs applied on import are inferences. They are listed one by one in the
-report's "Warnings and Limitations" section; confirm them before delivery.
-
-| Inference | Rule | If you disagree |
-|---|---|---|
-| A missing conductor material is treated as copper | Refused when the name looks like aluminium, gold, silver, nickel, tin or a resistive layer | Define the material yourself in the AEDT material library |
-| A missing `[Model Selector]` is generated | Only when every model in the same-prefix family shares one `Model_type`; otherwise nothing is changed and the case is reported as needing your decision | Add the `[Model Selector]` yourself, or reference the correct model name |
+Commercial licensing and support are provided by Taiwan Auto-Design Co., Ltd. (TADC). This independent showcase is not affiliated with or endorsed by Ansys, Inc. Trademarks belong to their respective owners. The tool does not include, provide or bypass Ansys licensing.
