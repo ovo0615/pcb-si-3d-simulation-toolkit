@@ -50,6 +50,6 @@ Follow [00 First run](docs/manual/00-第一次跑.md). Eye analysis has a separa
 | Reports/support bundles | Check paths, models, logs and identifiers before sending. Watermarks are not DRM |
 | 2D Q2D | Does not cover the complete 3D effects of vias, corners or reference-plane gaps |
 
-Draft documentation targets `1.0.0-rc.1`, feature baseline `a19eda7`. The status of all 35 main screenshots has been recorded, with 3 missing items. 5 conditional screenshots and distribution-package acceptance remain pending. [Release notes](CHANGELOG.md) · [Image register](docs/visual-assets.md) · [Validation](validation/README.md) · [Troubleshooting](docs/manual/11-疑難排解.md). Historical validation supports only its recorded versions, data and conditions.
+Documentation targets `1.0.0-rc.1`, feature baseline `a19eda7`. The status of all 35 main screenshots has been recorded, with 3 missing items. 5 conditional screenshots and distribution-package acceptance remain pending. [Release notes](CHANGELOG.md) · [Image register](docs/visual-assets.md) · [Validation](validation/README.md) · [Troubleshooting](docs/manual/11-疑難排解.md). Historical validation supports only its recorded versions, data and conditions.
 
 Commercial licensing and support are provided by Taiwan Auto-Design Co., Ltd. (TADC). This independent showcase is not affiliated with or endorsed by Ansys, Inc. Trademarks belong to their respective owners. The tool does not include, provide or bypass Ansys licensing.
