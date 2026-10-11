@@ -5,10 +5,12 @@
 // 規則（ADR-0006、ADR-0046）：速率與有無 ODT 由工具決定；ODT 阻值與驅動強度
 // 由使用者回答，不給預設值；模型、Corner、Port 與 P／N 要使用者明確確認。
 // 判斷邏輯在 ../eyeWizard.ts（有 Node 測試），這裡只負責畫與呼叫後端。
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { ModelPackage } from './ModelLibrary'
 import MultiPortEyeWizard from './MultiPortEyeWizard'
 import EyeImageGallery from './EyeImageGallery'
+import OpenFolderButton from './OpenFolderButton'
+import ResultDetailsDrawer, { useResultDrawer } from './ResultDetailsDrawer'
 import EyeWizardAmiAdvanced from './EyeWizardAmiAdvanced'
 import type { AmiCandidate } from './EyeWizardAmiAdvanced'
 import { useCascadedChannel } from './useCascadedChannel'
@@ -465,6 +467,7 @@ export default function EyeWizard(
 
   const myJob = job && myJobId && job.job_id === myJobId ? job : null
   const jobResult = myJob?.status === 'done' ? myJob.result : null
+  const details = useResultDrawer(myJobId)
   const reuseOffer = jobResult?.status === 'reuse_available'
   const blocks = useMemo(() => resultBlocks(reuseOffer ? null : jobResult, lang),
     [jobResult, reuseOffer, lang])
@@ -998,18 +1001,32 @@ export default function EyeWizard(
               <ul>{pickList(jobResult, 'warnings', lang).map((w: string) => <li key={w} className="hint">{w}</li>)}</ul>
             </details>
           )}
-          {/* 寬螢幕量測表與眼圖並排，不必往下捲才看到圖（畫面驗收 V5）。 */}
-          <div className="eye-wizard__results">
-          <div className="eye-wizard__results-tables">
+          {/* #0115：結果頁只放眼圖；量測表收進「眼圖參數」抽屜。眼圖無效的警示
+              （黃字沒有眼圖資料、紅框無效）留在頁面上，不能藏進按鈕後面。 */}
+          {blocks.map(block => <Fragment key={block.key}>
+            {block.tone === 'warn' && <div className="model-library__issue is-warning">
+              {t.resultTitle([block.analysis, block.lane].filter(Boolean).join(' · '))}{all.apiError.fieldSep}{t.noEyeData(block.reason)}</div>}
+            {block.tone === 'error' && <div className="model-library__issue is-error">
+              {t.resultTitle([block.analysis, block.lane].filter(Boolean).join(' · '))}{all.apiError.fieldSep}{t.invalid(block.reason)}</div>}
+          </Fragment>)}
+          {(images.length > 0 || blocks.length > 0 || Boolean(jobResult?.run_dir)) && <div className="eye-results__toolbar">
+            {images.length > 0 && <h4>{t.eyeImages(eyeCount, impulseCount)}</h4>}
+            {images.length > 0 && blocks.length > 0 && <button type="button" className="btn"
+              aria-expanded={details.open} onClick={details.toggle}>
+              {all.resultDetails.open}</button>}
+            <OpenFolderButton path={jobResult?.run_dir} />
+          </div>}
+          {images.length > 0 && <EyeImageGallery items={images.map(card => ({
+            key: card.key, title: card.title, sub: card.sub, url: card.url,
+            reportKind: `eye-wizard-${card.key}`, reportTitle: t.snapshotTitle(card.title),
+          }))} />}
+          <ResultDetailsDrawer open={details.open} onClose={details.close} inline={images.length === 0}>
           {blocks.map(block => {
             // GetWave 疊眼與註記屬於整個分析（道的區塊沒有）。
             const extra = block.lane ? undefined : extras[block.key]
             return (
             <div key={block.key}>
               <h4>{t.resultTitle([block.analysis, block.lane].filter(Boolean).join(' · '))}</h4>
-              {/* #0086：沒有眼圖資料用黃字（不是閉合）；其他無效紅框。 */}
-              {block.tone === 'warn' && <div className="model-library__issue is-warning">{t.noEyeData(block.reason)}</div>}
-              {block.tone === 'error' && <div className="model-library__issue is-error">{t.invalid(block.reason)}</div>}
               {block.unitNote && <p className="hint">{block.unitNote}</p>}
               {block.unavailable && <p className="hint">{t.noMeasurements(block.unavailable)}</p>}
               {block.metrics.length > 0 && <table className="model-library__table eye-metrics">
@@ -1036,15 +1053,7 @@ export default function EyeWizard(
             </div>
             )
           })}
-          </div>
-          {images.length > 0 && <div className="eye-wizard__results-images">
-            <h4>{t.eyeImages(eyeCount, impulseCount)}</h4>
-            <EyeImageGallery items={images.map(card => ({
-              key: card.key, title: card.title, sub: card.sub, url: card.url,
-              reportKind: `eye-wizard-${card.key}`, reportTitle: t.snapshotTitle(card.title),
-            }))} />
-          </div>}
-          </div>
+          </ResultDetailsDrawer>
         </div>}
       </section>}
 

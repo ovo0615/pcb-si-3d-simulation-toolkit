@@ -13,12 +13,13 @@ import type { Lang } from './i18n/lang'
  *  回傳錯誤訊息字串，成功時回 null——呼叫端通常已經有一個訊息區可以顯示，
  *  再包一層 throw 只會逼每個呼叫點都寫 try/catch。
  *  `lang` 不傳就是繁中（App.tsx 在批 3 之前都這樣呼叫）；英文介面優先用 detail_en。 */
-export async function revealPath(path: string, lang: Lang = 'zh-TW'): Promise<string | null> {
+export async function revealPath(path: string, lang: Lang = 'zh-TW',
+  endpoint = '/api/open_folder'): Promise<string | null> {
   const t = messagesFor(lang).reveal
   const target = (path || '').trim()
   if (!target) return t.noPath
   try {
-    const res = await fetch('/api/open_folder', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: target }),
@@ -46,4 +47,9 @@ export function commonFolderOf(paths: string[]): string {
   if (!valid.length) return ''
   const dirs = new Set(valid.map(p => p.replace(/[\\/][^\\/]*$/, '')))
   return dirs.size === 1 ? [...dirs][0] : valid[0]
+}
+
+/** 結果頁「開啟模擬資料夾」（#0115）：走受限端點，後端只開工具自己產出的資料夾。 */
+export function revealResultFolder(path: string, lang: Lang = 'zh-TW'): Promise<string | null> {
+  return revealPath(path, lang, '/api/open_result_folder')
 }

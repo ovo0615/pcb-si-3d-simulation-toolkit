@@ -1545,7 +1545,9 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 /* 結果頁共用畫廊（#0104，EyeImageGallery.tsx）：兩欄 16:9 縮圖，點開燈箱。
    原圖 1600×900 照原尺寸放會一張佔滿一個畫面；縮圖約 520px 寬，報告快照匯出倍率 3
    約 1560px，畫質與原圖相當。 */
-.eye-gallery { margin-top: 8px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 1100px; }
+/* #0115：欄數由 galleryColumns 依張數給（--eye-gallery-cols）；一張時依視窗高度限寬，免得一張圖比螢幕還高。 */
+.eye-gallery { margin-top: 8px; display: grid; grid-template-columns: repeat(var(--eye-gallery-cols, 2), minmax(0, 1fr)); gap: 12px; }
+.eye-gallery[data-count="1"] { max-width: min(1200px, calc((100vh - 320px) * 16 / 9)); margin-left: auto; margin-right: auto; }
 .eye-gallery article { min-width: 0; padding: 10px; border: 1px solid #303d4b; border-radius: 9px; background: #0d131a; }
 .eye-gallery article > header { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .eye-gallery article > header > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -1558,11 +1560,27 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .ibis-eye-modal__panel > header .btn { width: auto; }
 /* 眼圖量測表：數字要一眼讀得出來，表不必撐滿整個寬度。 */
 .eye-metrics { max-width: 440px; font-size: 14px; }
-/* 第 5 步：寬螢幕量測表在左、眼圖在右（畫面驗收 V5）；窄螢幕回到上下排。 */
-.eye-wizard__results { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
-@media (min-width: 1280px) {
-  .eye-wizard__results { grid-template-columns: minmax(360px, 440px) minmax(0, 1fr); }
-}
+/* 結果頁（#0115）：只放眼圖，上方一列工具按鈕（眼圖參數、開啟模擬資料夾）。 */
+.eye-results__toolbar { margin: 10px 0 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.eye-results__toolbar h4 { margin: 0 auto 0 0; }
+.eye-results__toolbar .btn { width: auto; }
+/* 參數抽屜：從右邊滑出、沒有遮罩，眼圖仍看得到（ResultDetailsDrawer.tsx）。配色沿用燈箱。 */
+/* Jeff 2026-10-11 回饋：只有內容那麼大——寬度剛好放下量測表、最多視窗寬三分之一；高度跟著內容，
+   超過才捲動。浮在右上角，不從頂端拉到底，陰影只在面板邊緣，頁面不變暗。 */
+.result-drawer { position: fixed; top: 72px; right: 16px; z-index: 4000; width: max-content; min-width: 280px; max-width: min(33vw, 480px); max-height: calc(100vh - 96px); display: flex; flex-direction: column; border: 1px solid #344253; border-radius: 10px; background: #0d131a; box-shadow: 0 10px 28px rgba(0, 0, 0, .35); animation: result-drawer-in .18s ease-out; }
+.result-drawer > header { padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #263240; }
+.result-drawer > header strong { color: #e6f1fb; font-size: 16px; }
+.result-drawer > header .btn { width: auto; }
+.result-drawer__body { flex: 1; min-height: 0; padding: 6px 14px 14px; overflow: auto; }
+.result-drawer__body .eye-metrics { max-width: none; min-width: 248px; }
+.result-drawer__body h4 { margin: 14px 0 6px; color: #8bdcff; font-size: 14px; }
+.result-drawer__body .hint { color: #9fb2c6; }
+/* 「開啟模擬資料夾」（OpenFolderButton.tsx）：跟在結果旁，不撐滿整列。 */
+.open-folder { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.open-folder .btn { width: auto; }
+.open-folder__error { color: #ff8f8f; font-size: 12px; }
+.open-folder--dark .btn { padding: 4px 10px; font-size: 12px; }
+@keyframes result-drawer-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 /* AMI 參數表 Tx、Rx 兩張欄寬一致（畫面驗收 V6）。 */
 .eye-wizard__params { table-layout: fixed; width: 100%; }
 .eye-wizard__params th:nth-child(1) { width: 40%; }
@@ -1573,6 +1591,7 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .eye-metrics th:last-child { text-align: right; }
 @media (max-width: 760px) {
   .eye-gallery { grid-template-columns: 1fr; }
+  .result-drawer { max-width: 92vw; }
 }
 .ibis-wizard__footer { display: grid; grid-template-columns: 130px 1fr 180px; align-items: center; gap: 10px; }
 .ibis-wizard__footer span { color: #8294a8; text-align: center; font-size: 11px; }

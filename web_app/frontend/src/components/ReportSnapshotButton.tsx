@@ -11,6 +11,7 @@ import {
 } from '../reportApi'
 import type { ReportQuality, SnapshotStatus } from '../reportTypes'
 import { isSnapshotSafeNode, sanitizeReportMetadata, sanitizeReportText } from '../reportPrivacy'
+import { collectReportTables } from '../reportTables'
 
 interface Props {
   basePath: string
@@ -105,6 +106,8 @@ export default function ReportSnapshotButton({
         section,
         source_revision: sourceRevision,
         source_metadata: sanitizeReportMetadata({ ...sourceMetadata, quality: SNAPSHOT_QUALITY }),
+        // 截圖拍不到的量測表（眼圖參數抽屜，#0115）以文字一起送，報告印在這張圖下。
+        tables: collectReportTables(target, s.tableColumns),
       }
 
       await save(payload)
@@ -121,6 +124,7 @@ export default function ReportSnapshotButton({
         const detailDataUrl = await render(element)
         await save({
           ...payload,
+          tables: [],
           kind: detailKind(kind, element, index),
           title: detailTitle,
           image_data_url: detailDataUrl,

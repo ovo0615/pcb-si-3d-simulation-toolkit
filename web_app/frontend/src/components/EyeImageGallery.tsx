@@ -1,11 +1,13 @@
 // 結果頁共用的眼圖畫廊（#0104）：精靈第 5 步與多埠分支共用（舊 AMI 面板已隨 ADR-0067 收掉）。
 //
-// 原圖 1600×900，照原尺寸放進結果頁時一張就佔滿一個畫面，量測表被擠到
-// 很遠（Jeff 2026-10-10 截圖）。這裡一律兩欄 16:9 縮圖，窄於 760px 改單欄
-// （index.css），點縮圖開燈箱看原圖。報告快照照舊以每張卡片為根截圖。
+// 原圖 1600×900，照原尺寸放進結果頁時一張就佔滿一個畫面（Jeff 2026-10-10 截圖）。
+// #0115 起結果頁只放眼圖（量測表收進 ResultDetailsDrawer），欄數依張數決定
+// （galleryColumns），16:9 縮圖，窄於 760px 改單欄（index.css），點縮圖開燈箱
+// 看原圖。報告快照照舊以每張卡片為根截圖。
 import { useCallback, useEffect, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import { lightboxKeyAction, stepIndex } from '../eyeGallery'
+import { galleryColumns, lightboxKeyAction, stepIndex } from '../eyeGallery'
 import type { GalleryItem } from '../eyeGallery'
 import { useT } from '../i18n'
 
@@ -23,12 +25,15 @@ export default function EyeImageGallery({ items }: { items: GalleryItem[] }) {
     const onKey = (event: KeyboardEvent) => {
       const action = lightboxKeyAction(event.key)
       if (!action) return
+      // capture 階段先接、吃掉：參數抽屜（ResultDetailsDrawer）也聽 Esc，
+      // 燈箱開著時 Esc 只關燈箱（#0115）。
       event.preventDefault()
+      event.stopImmediatePropagation()
       if (action === 'close') setOpenIndex(null)
       else setOpenIndex(index => stepIndex(index ?? 0, action === 'prev' ? -1 : 1, items.length))
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [openIndex, items.length])
 
   // 結果換了（重跑、換工作）就關掉燈箱，不留著指向舊張數的索引。
@@ -37,7 +42,8 @@ export default function EyeImageGallery({ items }: { items: GalleryItem[] }) {
   if (!items.length) return null
   return (
     <>
-      <div className="eye-gallery">
+      <div className="eye-gallery" data-count={items.length}
+        style={{ '--eye-gallery-cols': galleryColumns(items.length) } as CSSProperties}>
         {items.map((item, index) => (
           <article key={item.key} data-report-separate-snapshot="true"
             data-report-kind={item.reportKind} data-report-title={item.reportTitle}>
