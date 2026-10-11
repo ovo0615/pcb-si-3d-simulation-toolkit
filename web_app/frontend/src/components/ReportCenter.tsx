@@ -1,6 +1,8 @@
 // 一鍵 HTML 報告中心：快照、品牌、章節、規格、浮水印與輸出。
 import { useEffect, useMemo, useState } from 'react'
 
+import { errorText } from '../backendFields'
+import { useT } from '../i18n'
 import {
   activateReportSnapshot,
   createReportSnapshot,
@@ -15,10 +17,16 @@ import {
   updateReportSnapshot,
 } from '../reportApi'
 import {
+  chosenReportLocale,
+  effectiveReportLocale,
+  localeMismatchCount,
+  rememberReportLocale,
+} from '../reportLocale'
+import {
   DEFAULT_REPORT_SETTINGS,
   DEFAULT_WATERMARK,
-  REPORT_SECTION_LABELS,
   REPORT_SECTION_ORDER,
+  reportSectionLabel,
   type ReportBrand,
   type ReportManifest,
   type ReportSettings,
@@ -55,9 +63,8 @@ const EMPTY_BRAND: ReportBrand = {
   report_number: '', logo_file: '',
 }
 
-const STATUS_LABEL: Record<SnapshotStatus, string> = {
-  pass: '通過', attention: '注意', fail: '失敗', display: '僅供展示',
-}
+const STATUS_ORDER: SnapshotStatus[] = ['pass', 'attention', 'fail', 'display']
+const REPORT_TABS: ReportTab[] = ['snapshots', 'brand', 'content', 'watermark', 'export']
 
 function normalizedSettings(value: Partial<ReportSettings> | undefined): ReportSettings {
   return {
@@ -75,20 +82,38 @@ function normalizedSettings(value: Partial<ReportSettings> | undefined): ReportS
 }
 
 export default function ReportCenter({ basePath, projectName, onWorkspaceChange, channelTouchstone }: Props) {
+  const { t, lang } = useT()
+  const r = t.report
+  const why = (error: unknown) => errorText(error, lang)
   const [tab, setTab] = useState<ReportTab>('snapshots')
   const [workspaceInput, setWorkspaceInput] = useState(basePath)
   const [workspace, setWorkspace] = useState('')
   const [manifest, setManifest] = useState<ReportManifest | null>(null)
   const [brand, setBrand] = useState<ReportBrand>({ ...EMPTY_BRAND, project_name: projectName })
-  const [settings, setSettings] = useState<ReportSettings>(DEFAULT_REPORT_SETTINGS)
+  const [settings, setSettings] = useState<ReportSettings>(
+    () => ({ ...DEFAULT_REPORT_SETTINGS, locale: effectiveReportLocale(lang) }))
   const [logoDataUrl, setLogoDataUrl] = useState('')
   const [watermarkDataUrl, setWatermarkDataUrl] = useState('')
   const [outputPath, setOutputPath] = useState('')
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState('')
+  const [message, setMessageState] = useState<{ text: string; error: boolean }>({ text: '', error: false })
+  // 紅字由呼叫端表明（setFailure），不再看訊息裡有沒有「失敗」——切到英文後那個字就不在了。
+  const setMessage = (text: string) => setMessageState({ text, error: false })
+  const setFailure = (text: string) => setMessageState({ text, error: true })
   const [lastOutput, setLastOutput] = useState('')
   const [watermarkTemplates, setWatermarkTemplates] = useState<WatermarkTemplate[]>(loadWatermarkTemplates)
   const [selectedWatermarkTemplate, setSelectedWatermarkTemplate] = useState('')
+  const defaultProject = projectName || r.defaultProject
+
+  /** 工作區存的設定；報告語言不取 manifest 的（分不出是選的還是出廠預設），
+   *  一律「選過就照選的，否則跟介面語言」（卡 0087）。 */
+  const applySettings = (value: Partial<ReportSettings> | undefined) =>
+    setSettings({ ...normalizedSettings(value), locale: effectiveReportLocale(lang) })
+
+  // 沒選過報告語言時，切換介面語言就跟著換。
+  useEffect(() => {
+    if (!chosenReportLocale()) setSettings(current => ({ ...current, locale: lang }))
+  }, [lang])
 
   const refresh = async (target = workspace) => {
     if (!target) return
@@ -99,7 +124,7 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
     if (result.brand_profile.logo_data_url && !result.manifest.brand.logo_file) {
       setLogoDataUrl(result.brand_profile.logo_data_url)
     }
-    setSettings(normalizedSettings(result.manifest.settings))
+    applySettings(result.manifest.settings)
     onWorkspaceChange?.(result.workspace)
   }
 
@@ -107,18 +132,18 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
   const openWorkspace = async () => {
     setBusy(true)
     try {
-      const result = await openReportWorkspace(workspaceInput, projectName || 'PCB SI 分析專案')
+      const result = await openReportWorkspace(workspaceInput, defaultProject)
       setWorkspace(result.workspace)
       setManifest(result.manifest)
       setBrand({ ...EMPTY_BRAND, ...result.brand_profile, ...result.manifest.brand })
       if (result.brand_profile.logo_data_url && !result.manifest.brand.logo_file) {
         setLogoDataUrl(result.brand_profile.logo_data_url)
       }
-      setSettings(normalizedSettings(result.manifest.settings))
-      setMessage(`報告工作區已開啟：${result.workspace}`)
+      applySettings(result.manifest.settings)
+      setMessage(r.workspaceOpened(result.workspace))
       onWorkspaceChange?.(result.workspace)
     } catch (error) {
-      setMessage(`開啟工作區失敗：${String((error as Error)?.message || error)}`)
+      setFailure(r.openWorkspaceFailed(why(error)))
     } finally {
       setBusy(false)
     }
@@ -130,20 +155,20 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
       // 輸出、輸入檔全都是空的，但那時候一樣會想存快照。後端收到空字串會退到
       // 預設目錄（Documents/PCB_SI_報告），使用者不必自己指定。
       if (basePath) setWorkspaceInput(basePath)
-      void openReportWorkspace(basePath, projectName || 'PCB SI 分析專案').then(result => {
+      void openReportWorkspace(basePath, defaultProject).then(result => {
         setWorkspace(result.workspace)
         setManifest(result.manifest)
         setBrand({ ...EMPTY_BRAND, ...result.brand_profile, ...result.manifest.brand })
         if (result.brand_profile.logo_data_url && !result.manifest.brand.logo_file) {
           setLogoDataUrl(result.brand_profile.logo_data_url)
         }
-        setSettings(normalizedSettings(result.manifest.settings))
+        applySettings(result.manifest.settings)
         setWorkspaceInput(result.workspace)
         onWorkspaceChange?.(result.workspace)
       }).catch(error => {
         // 吞掉的話畫面只會寫「工作區：尚未開啟」，一個字都不說為什麼；
         // 而且 `workspace` 一直是空的，App 每次重繪都會再 POST 一次。
-        setMessage(`開啟工作區失敗：${String((error as Error)?.message || error)}`)
+        setFailure(r.openWorkspaceFailed(why(error)))
       })
     }
     // `onWorkspaceChange` 在 App 那邊每次 render 都是新的函式（沒有包
@@ -176,6 +201,8 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
     [manifest],
   )
   const staleCount = activeSnapshots.filter(item => item.stale).length
+  // 截圖拍的是當下介面語言：和報告語言不同時，產生前就先提醒（後端產生時也會再算一次）。
+  const mismatchCount = localeMismatchCount(activeSnapshots, settings.locale)
 
   const patchSnapshot = async (
     snapshot: ReportSnapshot,
@@ -186,7 +213,7 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
       await updateReportSnapshot(workspace, snapshot.id, changes)
       await refresh()
     } catch (error) {
-      setMessage(`更新快照失敗：${String((error as Error)?.message || error)}`)
+      setFailure(r.updateSnapshotFailed(why(error)))
     }
   }
 
@@ -194,9 +221,9 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
     if (!workspace) return
     try {
       const result = await openLatestReport(workspace)
-      setMessage(`已開啟報告：${result.opened}`)
+      setMessage(r.openedReport(result.opened))
     } catch (error) {
-      setMessage(`開啟最近報告失敗：${String((error as Error)?.message || error)}`)
+      setFailure(r.openLatestFailed(why(error)))
     }
   }
 
@@ -210,14 +237,14 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
       await activateReportSnapshot(workspace, snapshot.id)
       await refresh()
     } catch (error) {
-      setMessage(`設為目前版本失敗：${String((error as Error)?.message || error)}`)
+      setFailure(r.activateFailed(why(error)))
     }
   }
 
   const uploadExternal = async (file: File | undefined) => {
     if (!file || !workspace) return
     try {
-      const caption = window.prompt('請輸入這張補充圖片的圖說：', file.name) ?? ''
+      const caption = window.prompt(r.externalCaptionPrompt, file.name) ?? ''
       const dataUrl = await fileToDataUrl(file)
       const payload = {
         workspace, kind: `external-${Date.now()}`, title: file.name,
@@ -230,13 +257,13 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
         // 409＝版本數已滿。與快照按鈕一樣，問過使用者才刪最舊的那一版。
         const typed = error as Error & { status?: number }
         if (typed.status !== 409
-          || !window.confirm(`${typed.message}\n\n是否移除最舊版本並建立新快照？`)) throw error
+          || !window.confirm(r.pruneConfirm(why(error)))) throw error
         await createReportSnapshot({ ...payload, prune_confirmed: true })
       }
       await refresh()
-      setMessage(`補充圖片已加入：${file.name}`)
+      setMessage(r.externalAdded(file.name))
     } catch (error) {
-      setMessage(`加入補充圖片失敗：${String((error as Error)?.message || error)}`)
+      setFailure(r.externalFailed(why(error)))
     }
   }
 
@@ -247,16 +274,16 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
       await saveReportBrand(workspace, brand, logoDataUrl, true)
       await refresh()
       setLogoDataUrl('')
-      setMessage('品牌設定已保存；新專案仍需自行確認是否套用浮水印。')
+      setMessage(r.brandSaved)
     } catch (error) {
-      setMessage(`保存品牌失敗：${String((error as Error)?.message || error)}`)
+      setFailure(r.saveBrandFailed(why(error)))
     } finally {
       setBusy(false)
     }
   }
 
   const saveAllSettings = async (): Promise<ReportSettings> => {
-    if (!workspace) throw new Error('請先開啟報告工作區。')
+    if (!workspace) throw new Error(r.openWorkspaceFirst)
     const next = {
       ...settings,
       watermark: {
@@ -273,26 +300,28 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
 
   const generate = async (overwriteConfirmed = false) => {
     if (!workspace) return
-    if (activeSnapshots.length === 0 && !window.confirm('目前沒有作用中的結果快照，仍要產生只有文字的報告嗎？')) return
-    if (staleCount && !window.confirm(`有 ${staleCount} 張快照可能已過期，仍要產生報告嗎？`)) return
+    if (activeSnapshots.length === 0 && !window.confirm(r.noActiveConfirm)) return
+    if (staleCount && !window.confirm(r.staleConfirm(staleCount))) return
     setBusy(true)
-    setMessage('正在產生自包含 HTML 報告…')
+    setMessage(r.generating)
     try {
       await saveReportBrand(workspace, brand, logoDataUrl, false)
       const savedSettings = await saveAllSettings()
       const result = await generateHtmlReport(
         workspace, savedSettings, outputPath, overwriteConfirmed, channelTouchstone || '')
       setLastOutput(result.output_path)
-      setMessage(`報告完成：${result.output_path}（${result.snapshot_count} 張快照）`)
+      const mismatch = result.locale_mismatch_count || 0
+      setMessage(r.generated(result.output_path, result.snapshot_count)
+        + (mismatch ? `\n${r.localeMismatch(mismatch)}` : ''))
       await refresh()
     } catch (error) {
       const typed = error as Error & { status?: number }
-      if (typed.status === 409 && !overwriteConfirmed && window.confirm(`${typed.message}\n\n確定要覆寫嗎？`)) {
+      if (typed.status === 409 && !overwriteConfirmed && window.confirm(r.overwriteConfirm(why(error)))) {
         setBusy(false)
         await generate(true)
         return
       }
-      setMessage(`產生報告失敗：${typed.message || String(error)}`)
+      setFailure(r.generateFailed(why(error)))
     } finally {
       setBusy(false)
     }
@@ -309,7 +338,7 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
   }))
 
   const saveWatermarkTemplate = () => {
-    const name = window.prompt('請輸入浮水印範本名稱：', '公司機密')?.trim()
+    const name = window.prompt(r.templateNamePrompt, r.templateDefaultName)?.trim()
     if (!name) return
     const template: WatermarkTemplate = {
       name,
@@ -321,9 +350,9 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
       window.localStorage.setItem(WATERMARK_TEMPLATE_KEY, JSON.stringify(next))
       setWatermarkTemplates(next)
       setSelectedWatermarkTemplate(name)
-      setMessage(`已保存浮水印範本「${name}」；新專案套用後仍需自行勾選啟用。`)
+      setMessage(r.templateSaved(name))
     } catch {
-      setMessage('保存浮水印範本失敗：圖片可能過大，請改用較小的 PNG。')
+      setFailure(r.templateSaveFailed)
     }
   }
 
@@ -335,32 +364,37 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
       watermark: { ...template.settings, enabled: current.watermark.enabled },
     }))
     setWatermarkDataUrl(template.imageDataUrl || '')
-    setMessage(`已帶入「${template.name}」；為避免誤用客戶資料，浮水印啟用狀態不會自動開啟。`)
+    setMessage(r.templateApplied(template.name))
   }
+
+  const textFields: [keyof ReportSettings, string][] = [
+    ['purpose', r.purpose], ['summary', r.summary],
+    ['conclusion', r.conclusion], ['recommendations', r.recommendations],
+  ]
+  const vars = r.watermarkVars
+  const watermarkVariables = [vars.company, vars.customer, vars.project,
+    vars.reportNumber, vars.date, vars.confidentiality]
 
   return (
     <div className="report-center">
       <div className="report-center__header">
-        <div><h2>一鍵 HTML 報告中心</h2><div>各結果畫面的最新作用中快照會自動帶入報告。</div></div>
+        <div><h2>{r.title}</h2><div>{r.subtitle}</div></div>
         <div className="report-workspace-open">
-          <input aria-label="報告工作區目錄"
+          <input aria-label={r.workspaceAria}
             value={workspaceInput} onChange={event => setWorkspaceInput(event.target.value)}
-            placeholder="留空＝預設目錄；或指定分析輸出目錄／既有 report_workspace" />
-          <button className="btn" disabled={busy} onClick={openWorkspace}>切換工作區</button>
+            placeholder={r.workspacePlaceholder} />
+          <button className="btn" disabled={busy} onClick={openWorkspace}>{r.switchWorkspace}</button>
         </div>
       </div>
       <div className="report-summary-strip">
-        <span>工作區：{workspace || '尚未開啟'}</span>
-        <span>作用中快照：{activeSnapshots.length}</span>
-        <span className={staleCount ? 'warn' : ''}>可能過期：{staleCount}</span>
-        <span>歷次報告：{manifest?.exports?.length || 0}</span>
+        <span>{r.workspaceIs(workspace || r.notOpened)}</span>
+        <span>{r.activeCount(activeSnapshots.length)}</span>
+        <span className={staleCount ? 'warn' : ''}>{r.staleCount(staleCount)}</span>
+        <span>{r.exportCount(manifest?.exports?.length || 0)}</span>
       </div>
       <div className="report-tabs">
-        {([
-          ['snapshots', '快照總覽'], ['brand', '品牌'], ['content', '內容與規格'],
-          ['watermark', '浮水印'], ['export', '預覽與輸出'],
-        ] as [ReportTab, string][]).map(([key, label]) => (
-          <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>
+        {REPORT_TABS.map(key => (
+          <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{r.tabs[key]}</button>
         ))}
       </div>
 
@@ -368,13 +402,13 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
         {tab === 'snapshots' && (
           <div>
             <div className="report-toolbar-row">
-              <strong>每個畫面最多保留五版；藍框是目前報告使用版本。</strong>
-              <label className="btn report-file-button">＋ 加入補充圖片
+              <strong>{r.snapshotsHint}</strong>
+              <label className="btn report-file-button">{r.addExternal}
                 <input type="file" accept="image/png,image/jpeg,image/svg+xml"
                   onChange={event => { void uploadExternal(event.target.files?.[0]); event.currentTarget.value = '' }} />
               </label>
             </div>
-            {groups.length === 0 && <div className="report-empty">尚無快照。請到結果畫面按「更新報告快照」。</div>}
+            {groups.length === 0 && <div className="report-empty">{r.noSnapshots}</div>}
             {groups.map(([kind, versions]) => (
               <div className="report-snapshot-group" key={kind}>
                 <h3>{versions[0]?.title || kind}<small>{kind}</small></h3>
@@ -384,26 +418,26 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
                       <div className="report-thumb-wrap">
                         <img src={snapshotImageUrl(workspace, snapshot.id)} alt={snapshot.title} />
                         <span>v{snapshot.version}</span>
-                        {snapshot.stale && <b>可能已過期</b>}
+                        {snapshot.stale && <b>{r.staleBadge}</b>}
                       </div>
                       <div className="report-snapshot-fields">
-                        <select aria-label={`${snapshot.title} 的工程狀態`} value={snapshot.engineering_status}
+                        <select aria-label={r.statusAria(snapshot.title)} value={snapshot.engineering_status}
                           onChange={event => void patchSnapshot(snapshot, { engineering_status: event.target.value as SnapshotStatus })}>
-                          {Object.entries(STATUS_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                          {STATUS_ORDER.map(value => <option key={value} value={value}>{r.status[value]}</option>)}
                         </select>
-                        <select aria-label={`${snapshot.title} 要放進報告的哪一節`} value={snapshot.section}
+                        <select aria-label={r.sectionAria(snapshot.title)} value={snapshot.section}
                           onChange={event => void patchSnapshot(snapshot, { section: event.target.value })}>
-                          {REPORT_SECTION_ORDER.map(section => <option key={section} value={section}>{REPORT_SECTION_LABELS[section]}</option>)}
+                          {REPORT_SECTION_ORDER.map(section => <option key={section} value={section}>{reportSectionLabel(t, section)}</option>)}
                         </select>
-                        <textarea aria-label={`${snapshot.title} 的圖說`} value={snapshot.caption} rows={3}
+                        <textarea aria-label={r.captionAria(snapshot.title)} value={snapshot.caption} rows={3}
                           onChange={event => setManifest(current => current ? {
                             ...current,
                             snapshots: current.snapshots.map(item => item.id === snapshot.id ? { ...item, caption: event.target.value } : item),
                           } : current)}
                           onBlur={event => void patchSnapshot(snapshot, { caption: event.target.value })} />
                         <label><input type="checkbox" checked={snapshot.selected}
-                          onChange={event => void patchSnapshot(snapshot, { selected: event.target.checked })} /> 加入報告</label>
-                        {!snapshot.active && <button className="btn" onClick={() => void useVersion(snapshot)}>設為目前版本</button>}
+                          onChange={event => void patchSnapshot(snapshot, { selected: event.target.checked })} /> {r.includeInReport}</label>
+                        {!snapshot.active && <button className="btn" onClick={() => void useVersion(snapshot)}>{r.useThisVersion}</button>}
                       </div>
                     </article>
                   ))}
@@ -415,41 +449,39 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
 
         {tab === 'brand' && (
           <div className="report-form-grid">
-            <label>公司名稱<input value={brand.company_name} onChange={event => setBrand({ ...brand, company_name: event.target.value })} /></label>
-            <label>部門<input value={brand.department} onChange={event => setBrand({ ...brand, department: event.target.value })} /></label>
-            <label>專案名稱<input value={brand.project_name} onChange={event => setBrand({ ...brand, project_name: event.target.value })} /></label>
-            <label>客戶名稱<input value={brand.customer_name} onChange={event => setBrand({ ...brand, customer_name: event.target.value })} /></label>
-            <label>報告編號<input value={brand.report_number} onChange={event => setBrand({ ...brand, report_number: event.target.value })} /></label>
-            <label>公司 Logo（PNG／JPG／SVG）<input type="file" accept="image/png,image/jpeg,image/svg+xml"
+            <label>{r.companyName}<input value={brand.company_name} onChange={event => setBrand({ ...brand, company_name: event.target.value })} /></label>
+            <label>{r.department}<input value={brand.department} onChange={event => setBrand({ ...brand, department: event.target.value })} /></label>
+            <label>{r.projectName}<input value={brand.project_name} onChange={event => setBrand({ ...brand, project_name: event.target.value })} /></label>
+            <label>{r.customerName}<input value={brand.customer_name} onChange={event => setBrand({ ...brand, customer_name: event.target.value })} /></label>
+            <label>{r.reportNumber}<input value={brand.report_number} onChange={event => setBrand({ ...brand, report_number: event.target.value })} /></label>
+            <label>{r.logo}<input type="file" accept="image/png,image/jpeg,image/svg+xml"
               onChange={event => { const file = event.target.files?.[0]; if (file) void fileToDataUrl(file).then(setLogoDataUrl) }} /></label>
             <div className="report-brand-preview">
-              {(logoDataUrl || (workspace && brand.logo_file)) && <img src={logoDataUrl || `/api/report/brand/logo?workspace=${encodeURIComponent(workspace)}`} alt="公司 Logo" />}
-              <div><b>{brand.company_name || '公司名稱'}</b><span>{brand.project_name || '專案名稱'}</span></div>
+              {(logoDataUrl || (workspace && brand.logo_file)) && <img src={logoDataUrl || `/api/report/brand/logo?workspace=${encodeURIComponent(workspace)}`} alt={r.logoAlt} />}
+              <div><b>{brand.company_name || r.companyName}</b><span>{brand.project_name || r.projectName}</span></div>
             </div>
-            <button className="btn btn--primary" disabled={!workspace || busy} onClick={() => void saveBrand()}>保存品牌設定</button>
+            <button className="btn btn--primary" disabled={!workspace || busy} onClick={() => void saveBrand()}>{r.saveBrand}</button>
           </div>
         )}
 
         {tab === 'content' && (
           <div className="report-content-grid">
-            <div className="report-section-card"><h3>報告章節</h3>
+            <div className="report-section-card"><h3>{r.sectionsTitle}</h3>
               {REPORT_SECTION_ORDER.map(section => (
                 <label key={section}><input type="checkbox" checked={settings.sections.includes(section)}
                   onChange={event => setSettings(current => ({ ...current, sections: event.target.checked
                     ? [...current.sections, section]
-                    : current.sections.filter(item => item !== section) }))} /> {REPORT_SECTION_LABELS[section]}</label>
+                    : current.sections.filter(item => item !== section) }))} /> {reportSectionLabel(t, section)}</label>
               ))}
             </div>
-            <div className="report-section-card"><h3>驗收規格</h3>
-              <label>頻率範圍<input value={String(settings.acceptance_criteria.frequency_range || '')} onChange={event => setCriteria('frequency_range', event.target.value)} placeholder="例如 0.1～50 GHz" /></label>
-              <label>插入損耗門檻<input value={String(settings.acceptance_criteria.insertion_loss || '')} onChange={event => setCriteria('insertion_loss', event.target.value)} placeholder="例如 ≥ −12 dB @ 28 GHz" /></label>
-              <label>回波損耗門檻<input value={String(settings.acceptance_criteria.return_loss || '')} onChange={event => setCriteria('return_loss', event.target.value)} placeholder="例如 ≤ −10 dB" /></label>
-              <label>眼高／眼寬門檻<input value={String(settings.acceptance_criteria.eye || '')} onChange={event => setCriteria('eye', event.target.value)} /></label>
-              <div className="report-muted">未填門檻時只呈現數值，不自動宣稱合格。</div>
+            <div className="report-section-card"><h3>{r.criteriaTitle}</h3>
+              <label>{r.freqRange}<input value={String(settings.acceptance_criteria.frequency_range || '')} onChange={event => setCriteria('frequency_range', event.target.value)} placeholder={r.freqRangePlaceholder} /></label>
+              <label>{r.insertionLoss}<input value={String(settings.acceptance_criteria.insertion_loss || '')} onChange={event => setCriteria('insertion_loss', event.target.value)} placeholder={r.insertionLossPlaceholder} /></label>
+              <label>{r.returnLoss}<input value={String(settings.acceptance_criteria.return_loss || '')} onChange={event => setCriteria('return_loss', event.target.value)} placeholder={r.returnLossPlaceholder} /></label>
+              <label>{r.eyeLimit}<input value={String(settings.acceptance_criteria.eye || '')} onChange={event => setCriteria('eye', event.target.value)} /></label>
+              <div className="report-muted">{r.criteriaNote}</div>
             </div>
-            {([
-              ['purpose', '分析目的'], ['summary', '結果摘要'], ['conclusion', '工程結論'], ['recommendations', '改善建議'],
-            ] as [keyof ReportSettings, string][]).map(([key, label]) => (
+            {textFields.map(([key, label]) => (
               <label className="report-wide" key={key}>{label}<textarea rows={4} value={String(settings[key] || '')}
                 onChange={event => setSettings({ ...settings, [key]: event.target.value })} /></label>
             ))}
@@ -460,23 +492,23 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
           <div className="report-watermark-grid">
             <div className="report-section-card">
               <label className="report-switch"><input type="checkbox" checked={settings.watermark.enabled}
-                onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, enabled: event.target.checked } })} /> 啟用浮水印</label>
-              <label>模式<select value={settings.watermark.mode} onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, mode: event.target.value as typeof settings.watermark.mode } })}>
-                <option value="text">文字</option><option value="image">圖片</option><option value="both">圖片＋文字</option>
+                onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, enabled: event.target.checked } })} /> {r.watermarkEnable}</label>
+              <label>{r.watermarkMode}<select value={settings.watermark.mode} onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, mode: event.target.value as typeof settings.watermark.mode } })}>
+                <option value="text">{r.modeText}</option><option value="image">{r.modeImage}</option><option value="both">{r.modeBoth}</option>
               </select></label>
-              <label>範圍<select value={settings.watermark.scope} onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, scope: event.target.value as typeof settings.watermark.scope } })}>
-                <option value="all">整份報告</option><option value="images">僅結果圖片</option><option value="custom">自訂章節</option>
+              <label>{r.watermarkScope}<select value={settings.watermark.scope} onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, scope: event.target.value as typeof settings.watermark.scope } })}>
+                <option value="all">{r.scopeAll}</option><option value="images">{r.scopeImages}</option><option value="custom">{r.scopeCustom}</option>
               </select></label>
-              <label>排列<select value={settings.watermark.layout} onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, layout: event.target.value as 'tile' | 'center' } })}>
-                <option value="tile">重複平鋪</option><option value="center">單一置中</option>
+              <label>{r.watermarkLayout}<select value={settings.watermark.layout} onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, layout: event.target.value as 'tile' | 'center' } })}>
+                <option value="tile">{r.layoutTile}</option><option value="center">{r.layoutCenter}</option>
               </select></label>
-              <label>大小<select value={settings.watermark.size} onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, size: event.target.value as WatermarkSettings['size'] } })}>
-                <option value="small">小</option><option value="medium">中</option><option value="large">大</option>
+              <label>{r.watermarkSize}<select value={settings.watermark.size} onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, size: event.target.value as WatermarkSettings['size'] } })}>
+                <option value="small">{r.sizeSmall}</option><option value="medium">{r.sizeMedium}</option><option value="large">{r.sizeLarge}</option>
               </select></label>
-              <label>圖片<input type="file" accept="image/png,image/jpeg,image/svg+xml"
+              <label>{r.watermarkImage}<input type="file" accept="image/png,image/jpeg,image/svg+xml"
                 onChange={event => { const file = event.target.files?.[0]; if (file) void fileToDataUrl(file).then(setWatermarkDataUrl) }} /></label>
               {settings.watermark.scope === 'custom' && (
-                <div className="report-custom-sections"><b>套用章節</b>
+                <div className="report-custom-sections"><b>{r.customSections}</b>
                   {REPORT_SECTION_ORDER.map(section => <label key={section}><input type="checkbox"
                     checked={settings.watermark.sections.includes(section)}
                     onChange={event => setSettings(current => ({ ...current, watermark: {
@@ -484,40 +516,43 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
                       sections: event.target.checked
                         ? [...current.watermark.sections, section]
                         : current.watermark.sections.filter(item => item !== section),
-                    } }))} /> {REPORT_SECTION_LABELS[section]}</label>)}
+                    } }))} /> {reportSectionLabel(t, section)}</label>)}
                 </div>
               )}
             </div>
             <div className="report-section-card">
-              <label>文字<textarea rows={3} value={settings.watermark.text}
+              <label>{r.watermarkText}<textarea rows={3} value={settings.watermark.text}
                 onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, text: event.target.value } })} /></label>
+              {settings.watermark.text === DEFAULT_WATERMARK.text && (
+                <div className="report-muted">{r.defaultWatermarkHint}</div>
+              )}
               <div className="report-variable-buttons">
-                {['{公司名稱}', '{客戶名稱}', '{專案名稱}', '{報告編號}', '{產生日期}', '{機密等級}'].map(variable => (
-                  <button className="btn" key={variable} onClick={() => insertWatermarkVariable(variable)}>＋{variable}</button>
+                {watermarkVariables.map(variable => (
+                  <button className="btn" key={variable} onClick={() => insertWatermarkVariable(variable)}>+{variable}</button>
                 ))}
               </div>
-              <label>透明度：{Math.round(settings.watermark.opacity * 100)}%<input type="range" min="0.03" max="0.45" step="0.01" value={settings.watermark.opacity}
+              <label>{r.opacity(Math.round(settings.watermark.opacity * 100))}<input type="range" min="0.03" max="0.45" step="0.01" value={settings.watermark.opacity}
                 onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, opacity: Number(event.target.value) } })} /></label>
-              <label>角度：{settings.watermark.angle}°<input type="range" min="-90" max="90" step="1" value={settings.watermark.angle}
+              <label>{r.angle(settings.watermark.angle)}<input type="range" min="-90" max="90" step="1" value={settings.watermark.angle}
                 onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, angle: Number(event.target.value) } })} /></label>
-              <label>顏色<input type="color" value={settings.watermark.color}
+              <label>{r.color}<input type="color" value={settings.watermark.color}
                 onChange={event => setSettings({ ...settings, watermark: { ...settings.watermark, color: event.target.value } })} /></label>
-              <button className="btn" onClick={() => setSettings({ ...settings, watermark: { ...DEFAULT_WATERMARK } })}>帶入建議設定</button>
+              <button className="btn" onClick={() => setSettings({ ...settings, watermark: { ...DEFAULT_WATERMARK } })}>{r.suggested}</button>
               <div className="report-template-row">
-                <select aria-label="浮水印範本" value={selectedWatermarkTemplate} onChange={event => setSelectedWatermarkTemplate(event.target.value)}>
-                  <option value="">選擇浮水印範本…</option>
+                <select aria-label={r.templateAria} value={selectedWatermarkTemplate} onChange={event => setSelectedWatermarkTemplate(event.target.value)}>
+                  <option value="">{r.templatePick}</option>
                   {watermarkTemplates.map(template => <option key={template.name} value={template.name}>{template.name}</option>)}
                 </select>
-                <button className="btn" disabled={!selectedWatermarkTemplate} onClick={applyWatermarkTemplate}>套用範本</button>
-                <button className="btn" onClick={saveWatermarkTemplate}>另存範本</button>
+                <button className="btn" disabled={!selectedWatermarkTemplate} onClick={applyWatermarkTemplate}>{r.applyTemplate}</button>
+                <button className="btn" onClick={saveWatermarkTemplate}>{r.saveTemplate}</button>
               </div>
             </div>
             <div className="report-watermark-preview">
               <div className="report-preview-watermark" style={{ opacity: settings.watermark.enabled ? settings.watermark.opacity : 0, transform: `rotate(${settings.watermark.angle}deg)`, color: settings.watermark.color }}>
-                {(settings.watermark.mode === 'image' || settings.watermark.mode === 'both') && watermarkDataUrl && <img src={watermarkDataUrl} alt="浮水印" />}
-                {(settings.watermark.mode === 'text' || settings.watermark.mode === 'both') && <span>{settings.watermark.text || '機密文件'}</span>}
+                {(settings.watermark.mode === 'image' || settings.watermark.mode === 'both') && watermarkDataUrl && <img src={watermarkDataUrl} alt={r.watermarkAlt} />}
+                {(settings.watermark.mode === 'text' || settings.watermark.mode === 'both') && <span>{settings.watermark.text || r.watermarkPreviewFallback}</span>}
               </div>
-              <strong>S 參數／Layout 報告預覽區</strong><p>產生報告時浮水印會燒進每張快照的像素，報告裡不留無浮水印的原圖；它是識別與嚇阻，不是 DRM。</p>
+              <strong>{r.previewTitle}</strong><p>{r.previewNote}</p>
             </div>
           </div>
         )}
@@ -525,36 +560,43 @@ export default function ReportCenter({ basePath, projectName, onWorkspaceChange,
         {tab === 'export' && (
           <div className="report-export-grid">
             <div className="report-section-card">
-              <label>語言<select value={settings.locale} onChange={event => setSettings({ ...settings, locale: event.target.value as ReportSettings['locale'] })}>
-                <option value="zh-TW">繁體中文</option><option value="en">English</option><option value="bilingual">中英雙語</option>
+              <label>{r.language}<select value={settings.locale} onChange={event => {
+                // 選過就記住（卡 0087）：之後開報告中心、混合求解報告都用這個語言。
+                const locale = event.target.value as ReportSettings['locale']
+                rememberReportLocale(locale)
+                setSettings({ ...settings, locale })
+              }}>
+                <option value="zh-TW">{r.localeZh}</option><option value="en">{r.localeEn}</option><option value="bilingual">{r.localeBilingual}</option>
               </select></label>
-              <label>安全模式<select value={settings.security_mode} onChange={event => setSettings({ ...settings, security_mode: event.target.value as ReportSettings['security_mode'] })}>
-                <option value="external">對外安全模式（隱藏本機路徑）</option><option value="internal">內部工程模式</option>
+              <div className="report-muted">{r.localeHint}</div>
+              <label>{r.securityMode}<select value={settings.security_mode} onChange={event => setSettings({ ...settings, security_mode: event.target.value as ReportSettings['security_mode'] })}>
+                <option value="external">{r.securityExternal}</option><option value="internal">{r.securityInternal}</option>
               </select></label>
-              <label>輸出品質<select value={settings.quality} onChange={event => setSettings({ ...settings, quality: event.target.value as ReportSettings['quality'] })}>
-                <option value="compact">精簡</option><option value="standard">標準</option><option value="high">高品質</option>
+              <label>{r.quality}<select value={settings.quality} onChange={event => setSettings({ ...settings, quality: event.target.value as ReportSettings['quality'] })}>
+                <option value="compact">{r.qualityCompact}</option><option value="standard">{r.qualityStandard}</option><option value="high">{r.qualityHigh}</option>
               </select></label>
-              <label>自訂輸出 HTML（可留白）<input value={outputPath} onChange={event => setOutputPath(event.target.value)} placeholder="留白時自動加上日期時間" /></label>
+              <label>{r.outputPath}<input value={outputPath} onChange={event => setOutputPath(event.target.value)} placeholder={r.outputPathPlaceholder} /></label>
             </div>
             <div className="report-preflight">
-              <h3>輸出前檢查</h3>
-              <div className={activeSnapshots.length ? 'ok' : 'warn'}>作用中快照：{activeSnapshots.length}</div>
-              <div className={staleCount ? 'warn' : 'ok'}>可能過期：{staleCount}</div>
-              <div className={brand.company_name ? 'ok' : 'warn'}>公司名稱：{brand.company_name || '尚未設定'}</div>
-              <div className={settings.watermark.enabled ? 'ok' : ''}>浮水印：{settings.watermark.enabled ? '啟用' : '關閉'}</div>
-              <div>章節：{settings.sections.length}</div>
+              <h3>{r.preflight}</h3>
+              <div className={activeSnapshots.length ? 'ok' : 'warn'}>{r.activeCount(activeSnapshots.length)}</div>
+              <div className={staleCount ? 'warn' : 'ok'}>{r.staleCount(staleCount)}</div>
+              {mismatchCount > 0 && <div className="warn">{r.localeMismatch(mismatchCount)}</div>}
+              <div className={brand.company_name ? 'ok' : 'warn'}>{r.companyIs(brand.company_name || r.notSet)}</div>
+              <div className={settings.watermark.enabled ? 'ok' : ''}>{settings.watermark.enabled ? r.watermarkOn : r.watermarkOff}</div>
+              <div>{r.sectionCount(settings.sections.length)}</div>
               <button className="btn btn--primary report-generate" disabled={!workspace || busy} onClick={() => void generate()}>
-                {busy ? '產生中…' : '一鍵產生 HTML 報告'}
+                {busy ? r.generatingButton : r.generateButton}
               </button>
               {(lastOutput || (manifest?.exports?.length || 0) > 0) && (
-                <button className="btn" onClick={() => void openLatest()}>開啟最近報告</button>
+                <button className="btn" onClick={() => void openLatest()}>{r.openLatest}</button>
               )}
               {lastOutput && <div className="report-output-path">{lastOutput}</div>}
             </div>
           </div>
         )}
       </div>
-      {message && <div className={message.includes('失敗') ? 'report-center__message error' : 'report-center__message'}>{message}</div>}
+      {message.text && <div className={message.error ? 'report-center__message error' : 'report-center__message'}>{message.text}</div>}
     </div>
   )
 }

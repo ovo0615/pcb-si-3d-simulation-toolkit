@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- D：電路板一角，兩條 45° 彎折走線接到過孔 -->
+  <rect x="2" y="2" width="60" height="60" rx="13" fill="#0f1b2d" stroke="#2c4a66" stroke-width="2"/>
+  <path d="M10 54V20l10-10h34v44z" fill="#132b3b" stroke="#73d6ff" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M17 46V30l8-8h14" fill="none" stroke="#73d6ff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M26 46V35l5-5h16" fill="none" stroke="#3b82f6" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="44" cy="22" r="5.5" fill="#0f1b2d" stroke="#ffbd5a" stroke-width="3.5"/>
+  <circle cx="47" cy="40" r="5.5" fill="#0f1b2d" stroke="#ffbd5a" stroke-width="3.5"/>
+</svg>

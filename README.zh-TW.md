@@ -14,7 +14,7 @@
 | 建端點 Port、套用規格與掃頻 | [03 Port 與求解設定](docs/manual/03-Port與求解設定.md) |
 | 選整片或分段、逐段指定 HFSS／SIwave | [04 分段與混合求解](docs/manual/04-分段與混合求解.md) |
 | 排程、停止、重試匯出、Touchstone 串接 | [05 排程與串接](docs/manual/05-排程與串接.md) |
-| 模型匯入、IBIS 多埠、AMI 與眼圖 | [06 IBIS 與眼圖](docs/manual/06-IBIS與眼圖.md) |
+| 模型匯入、SPISim 規格模型、眼圖精靈（單通道、多埠、AMI） | [06 IBIS 與眼圖](docs/manual/06-IBIS與眼圖.md) |
 | 模擬／量測 TDR 回標 Layout | [07 TDR 定位](docs/manual/07-TDR定位.md) |
 | 二維截面阻抗、側向收斂 | [08 截面阻抗](docs/manual/08-截面阻抗.md) |
 | 更新快照、浮水印、單檔 HTML | [09 報告與輸出](docs/manual/09-報告與輸出.md) |
@@ -50,6 +50,6 @@
 | 報告／支援包 | 送出前檢查路徑、模型、日誌與識別資料；浮水印不是 DRM |
 | 二維 Q2D | 不涵蓋 Via、轉角與參考層破口的完整三維效應 |
 
-文件適用 `1.0.0-rc.1`／功能基準 `a19eda7`。35 張主圖狀態已盤點，仍有 3 項缺圖；5 張條件圖與工具包驗收尚未完成。[版本說明](CHANGELOG.md)｜[圖片帳冊](docs/visual-assets.md)｜[驗證資料](validation/README.md)｜[疑難排解](docs/manual/11-疑難排解.md)。歷史驗證只支持其記錄的版本、資料與條件。
+文件適用 `1.0.0`／功能基準 `cb01b63`。35 張主圖狀態已盤點，仍有 3 項缺圖；5 張條件圖與工具包驗收尚未完成。[版本說明](CHANGELOG.md)｜[圖片帳冊](docs/visual-assets.md)｜[驗證資料](validation/README.md)｜[疑難排解](docs/manual/11-疑難排解.md)。歷史驗證只支持其記錄的版本、資料與條件。
 
 商用授權與技術支援由虎門科技股份有限公司（Taiwan Auto-Design Co., Ltd.，TADC）提供。此為獨立公開展示，與 Ansys, Inc. 無隸屬或背書關係；相關商標屬原權利人，工具不含、不提供亦不繞過 Ansys 授權。

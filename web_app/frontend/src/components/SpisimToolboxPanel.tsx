@@ -8,18 +8,23 @@ import { useEffect, useRef, useState } from 'react'
 import { setModelsReportMetadata } from './reportMetadataStore'
 import { LicenseTag, useLicenseBlock } from './LicenseTag'
 import { revealPath, commonFolderOf } from '../revealPath'
+import { useT } from '../i18n'
+import { errorText, pickText } from '../backendFields'
 
-interface ToolboxOperation { name: string; description: string }
+interface ToolboxOperation { name: string; description: string; description_en?: string }
 interface BatchStatus {
-  available: boolean; checked_at: string; detail: string
+  available: boolean; checked_at: string; detail: string; detail_en?: string
   /** 原生引擎待收尾紀錄還在（#0083）：後端自動對帳查不到時，讓使用者確認清除。 */
   cleanup_pending?: boolean; claim_id?: string | null; pid?: number | null; work_dir?: string
+  /** #0113：refresh=0 只讀快取。沒探測過 probed:false；快取過期 expired:true。 */
+  probed?: boolean; expired?: boolean
 }
-interface ComStandard { name: string; description: string }
+interface ComStandard { name: string; description: string; description_en?: string }
 interface ComJobState {
   running?: boolean
   status?: string
   message?: string
+  message_en?: string
   standard?: string
   /** 這件工作算的是哪一條通道。面板重掛時要靠它認回來——沒有它就無法確定
    *  結果屬於現在選的檔案。後端已經在 `start_com_job` 把它寫進工作狀態裡
@@ -27,6 +32,7 @@ interface ComJobState {
   touchstone_path?: string
   elapsed_seconds?: number
   error?: string
+  error_en?: string
   result?: {
     reports: Record<string, string>
     artifacts?: string[]
@@ -49,26 +55,38 @@ interface ComReport {
   passed?: boolean
 }
 
-const OPTION_HINTS: Record<string, string> = {
-  renormalize: '目標阻抗（Ω），例如差分半邊 42.5、單端 50',
-  reorder: '新埠序：逗號分隔的舊埠號，例如 1,3,2,4（新位置 k 放哪個舊埠）',
-  resample: '重取樣點數，例如 1001',
-  extrapolate_dc: '無參數：線性外插補出 DC 點',
-  deembed: '左右治具 2 埠 Touchstone（慣例：Port1 朝儀器、Port2 朝 DUT）',
-  flip: '無參數：Port1↔Port2 對調（限 2 埠）',
-}
-
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, options)
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`
-    try { message = (await response.json()).detail || message } catch { /* 保留 */ }
-    throw new Error(message)
+    let detailEn: string | undefined
+    try {
+      const body = await response.json()
+      message = body?.detail || message
+      if (typeof body?.detail_en === 'string' && body.detail_en) detailEn = body.detail_en
+    } catch { /* 保留 */ }
+    // 英文介面要的 detail_en 掛在 Error 上，顯示時用 errorText 挑。
+    throw Object.assign(new Error(message), { detail_en: detailEn })
   }
   return response.json() as Promise<T>
 }
 
-export default function SpisimToolboxPanel() {
+/** `active`：工具箱分頁正在顯示。模型頁一打開就掛載這個面板（隱藏），掛載時只讀快取，
+ *  不得探測 SPISim（審稿 H1：探測會占 Electronics Enterprise，授權不通時卡 84 秒）。 */
+export default function SpisimToolboxPanel({ active = true }: { active?: boolean } = {}) {
+  const { t: messages, lang } = useT()
+  const t = messages.spisim
+  /** `renderComOutcome` 會從輪詢 interval 的舊閉包裡呼叫（見下方 comSourceRef 的說明），
+   *  直接讀 `t` 會拿到啟動當下的語言；同步寫進 ref，切換語言後的結果文字才會對。 */
+  const i18nRef = useRef({ t, lang })
+  i18nRef.current = { t, lang }
+  /** 操作選單的顯示名稱。中文介面照舊用後端的 description；英文介面優先用
+   *  後端的 description_en，沒有就依操作代號（name，穩定識別字）取語言檔。 */
+  const operationLabel = (item: ToolboxOperation) => {
+    if (lang !== 'en') return item.description
+    return item.description_en
+      || (t.operations as Record<string, string>)[item.name] || item.description
+  }
   const [operations, setOperations] = useState<ToolboxOperation[]>([])
   const [operation, setOperation] = useState('renormalize')
   const [source, setSource] = useState('')
@@ -167,14 +185,15 @@ export default function SpisimToolboxPanel() {
   }
 
   function renderComOutcome(state: ComJobState, jobSource?: string) {
+    const { t, lang } = i18nRef.current
     if (state.status === 'failed') {
       // 失敗也要把舊值清掉：不清的話上一次成功的 COM 值會留在報告中繼資料裡，
       // 跟著這一次的快照被寫進報告。
       clearComMetadata()
-      setError(state.error || 'COM 計算失敗')
+      setError(pickText(state, 'error', lang) || t.comFailed)
       return
     }
-    if (state.status === 'cancelled') { clearComMetadata(); setComResult('已取消。'); return }
+    if (state.status === 'cancelled') { clearComMetadata(); setComResult(t.cancelled); return }
     const out = state.result
     if (!out) return
     const com = out.com
@@ -187,8 +206,7 @@ export default function SpisimToolboxPanel() {
     let mismatch = ''
     if (!channel || channel !== sourceRef.current) {
       clearComMetadata()
-      mismatch = `這份結果算的是 ${channel ? nameOf(channel) : '（來源不明）'}，`
-        + '與目前選的來源不同，數字沒有寫進報告中繼資料。'
+      mismatch = t.sourceMismatch(channel ? nameOf(channel) : t.sourceUnknown)
     } else {
       setModelsReportMetadata({
         'COM_標準': state.standard || comStandard,
@@ -197,11 +215,12 @@ export default function SpisimToolboxPanel() {
         // 數字要進報告快照——圖上的字縮小後未必讀得出來。
         // 沒有值時寫「無法取得」而不是空字串：空字串會被報告產生器整筆丟掉，
         // 於是「量不到」看起來就跟「沒做這件事」一樣（ADR-0039）。
-        'COM_最差值_dB': worst ?? '無法取得（引擎未給 COM 值）',
-        'COM_最差case': com?.worst_case || '無法取得',
-        'COM_門檻_dB': com?.pass_threshold_db ?? '無法取得',
+        // 鍵維持中文（後端相依，#0087 另案處理）；值是給人看的，照介面語言。
+        'COM_最差值_dB': worst ?? t.metaNoComValue,
+        'COM_最差case': com?.worst_case || t.metaUnavailable,
+        'COM_門檻_dB': com?.pass_threshold_db ?? t.metaUnavailable,
         'COM_判定': com?.passed === undefined
-          ? '無法判定（沒有 COM 值）' : (com.passed ? '通過' : '不通過'),
+          ? t.metaNoVerdict : (com.passed ? t.metaPass : t.metaFail),
         'COM_引擎訊息': (out.messages || []).slice(-1)[0] || '',
       })
     }
@@ -213,39 +232,41 @@ export default function SpisimToolboxPanel() {
 
     // 結論放最前面。先前只印引擎訊息，COM 值埋在一長串 [MESG] 裡。
     if (worst !== null) {
-      const verdict = com?.passed === undefined ? ''
-        : `　${com.passed ? '✅ 通過' : '❌ 不通過'}`
+      const verdict = com?.passed === undefined ? '' : t.verdict(com.passed)
       const threshold = com?.pass_threshold_db !== undefined
-        ? `（門檻 ${com.pass_threshold_db} dB）` : ''
+        ? t.threshold(com.pass_threshold_db) : ''
       parts.push(`COM = ${worst.toFixed(4)} dB${threshold}${verdict}\n` +
-        `取最差的 ${com?.worst_case || '案例'}——` +
-        `多個案例是同一條通道在不同封裝長度下各算一次。`)
+        t.worstCase(com?.worst_case || t.caseFallback))
+      // 左邊是後端 headline 的鍵（spisim_batch._COM_HEADLINE_FIELDS 的中文標籤，
+      // 拿來查值，不能改）；右邊是畫面上印的名稱。
+      const headlineFields: [string, string][] = [
+        ['眼高 VEO (mV)', t.headlineVeo], ['眼壓縮 VEC (dB)', t.headlineVec],
+        ['Nyquist 插入損耗 (dB)', t.headlineIl], ['Tx 封裝長度 (mm)', t.headlinePkgTx],
+      ]
       const rows = (com?.cases || []).map(item => {
         const head = item.headline || {}
-        const detail = ['眼高 VEO (mV)', '眼壓縮 VEC (dB)', 'Nyquist 插入損耗 (dB)',
-                        'Tx 封裝長度 (mm)']
-          .filter(key => head[key] !== undefined)
-          .map(key => `${key} ${head[key]}`).join('、')
-        return `  ${item.case}：COM ${item.com_db ?? '—'} dB` +
+        const detail = headlineFields
+          .filter(([key]) => head[key] !== undefined)
+          .map(([key, label]) => `${label} ${head[key]}`).join(t.listSep)
+        return t.caseRow(item.case, String(item.com_db ?? '—')) +
           (detail ? `\n    ${detail}` : '')
       })
-      if (rows.length) parts.push('逐案例：\n' + rows.join('\n'))
+      if (rows.length) parts.push(t.perCase + '\n' + rows.join('\n'))
     }
 
     // 引擎自己的 HTML 報告與圖單獨列，不要淹沒在二十幾個檔案裡。
-    if (out.html_report) parts.push('引擎 HTML 報告：\n' + out.html_report)
+    if (out.html_report) parts.push(t.htmlReport + '\n' + out.html_report)
     if (out.plots?.length) {
-      parts.push(`圖（BATH／FD／TD，共 ${out.plots.length} 張）：\n` +
-        out.plots.join('\n'))
+      parts.push(t.plots(out.plots.length) + '\n' + out.plots.join('\n'))
     }
-    if (out.messages?.length) parts.push('引擎訊息：\n' + out.messages.join('\n'))
-    if (out.artifacts?.length) parts.push('全部產出檔：\n' + out.artifacts.join('\n'))
+    if (out.messages?.length) parts.push(t.engineMessages + '\n' + out.messages.join('\n'))
+    if (out.artifacts?.length) parts.push(t.allArtifacts + '\n' + out.artifacts.join('\n'))
     if (names.length && worst === null) {
       // 解析不出 COM 值時才貼原始報表，否則上面的摘要已經夠讀。
-      parts.push(`報告 ${names[0]}：\n` + (out.reports[names[0]] || ''))
+      parts.push(t.reportNamed(names[0]) + '\n' + (out.reports[names[0]] || ''))
     }
     setComResult(parts.length ? parts.join('\n\n')
-      : `引擎已執行但沒有輸出。輸出尾段：\n${out.stdout_tail || ''}`)
+      : `${t.noOutput}\n${out.stdout_tail || ''}`)
   }
 
   useEffect(() => {
@@ -266,10 +287,24 @@ export default function SpisimToolboxPanel() {
         }
       } catch { /* COM 素材不在就不顯示 */ }
       try {
-        setBatchStatus(await api<BatchStatus>('/api/spisim/batch-status'))
-      } catch { /* 探測失敗視同不可用 */ }
+        // 只讀快取、不占授權（任何版本的後端都一樣）。
+        setBatchStatus(await api<BatchStatus>('/api/spisim/license-status?refresh=0'))
+      } catch { /* 舊後端沒有這個端點：等打開分頁再讀 */ }
     })()
   }, [])
+
+  // 打開工具箱分頁才讀完整的引擎狀態（含待收尾紀錄的 PID／claim_id）。#0113 起
+  // batch-status 不帶 refresh 永不探測；要探測請按「重新探測引擎」，COM 開跑時後端自己探。
+  const statusLoaded = useRef(false)
+  useEffect(() => {
+    if (!active || statusLoaded.current) return
+    statusLoaded.current = true
+    void (async () => {
+      try {
+        setBatchStatus(await api<BatchStatus>('/api/spisim/batch-status'))
+      } catch { /* 讀不到就維持掛載時的快取狀態 */ }
+    })()
+  }, [active])
 
   const browseInto = async (setter: (value: string) => void) => {
     try {
@@ -280,8 +315,8 @@ export default function SpisimToolboxPanel() {
       const picked = await api<{ paths?: string[] }>('/api/browse_touchstone')
       const first = picked?.paths?.[0] || ''
       if (first) setter(first)
-      else setError('沒有選到檔案。若剛才有選，請回報——這代表對話框回傳的形狀變了。')
-    } catch (reason) { setError(String(reason)) }
+      else setError(t.noFilePicked)
+    } catch (reason) { setError(errorText(reason, lang)) }
   }
 
   const runToolbox = async () => {
@@ -290,7 +325,8 @@ export default function SpisimToolboxPanel() {
       const options: Record<string, unknown> = {}
       if (operation === 'renormalize') options.impedance_ohm = Number(impedance)
       if (operation === 'reorder') {
-        options.port_order = portOrder.split(/[，,\s]+/).filter(Boolean).map(Number)
+        // \uFF0C 是全形逗號：中文輸入法打出來的「，」也要當分隔符號。
+        options.port_order = portOrder.split(/[\uFF0C,\s]+/).filter(Boolean).map(Number)
       }
       if (operation === 'resample') options.points = Number(points)
       if (operation === 'deembed') {
@@ -303,31 +339,32 @@ export default function SpisimToolboxPanel() {
           body: JSON.stringify({ operation, touchstone_path: source, options }),
         })
       setOutputFolder(out.output_path)
-      setMessage(`完成：${out.output_path}（${out.ports} 埠、${out.points} 點）。`
-        + '路徑可直接貼到串接或通道分析。')
+      setMessage(t.toolboxDone(out.output_path, out.ports, out.points))
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
+      setError(errorText(reason, lang))
     } finally { setBusy(false) }
   }
 
   const openFolder = async (path: string) => {
-    const failure = await revealPath(path)
+    const failure = await revealPath(path, lang)
     if (failure) setError(failure)
   }
+
+  // 沒探測過或快取過期時 COM 仍可按：開跑時後端會自己探測（#0113）。只有「探測過、沒過期、不可用」才擋。
+  const notProbed = Boolean(batchStatus) && (batchStatus!.probed === false || batchStatus!.expired === true)
+  const comUsable = Boolean(batchStatus?.available) || (notProbed && !batchStatus?.cleanup_pending)
 
   const reprobe = async () => {
     setProbing(true)
     try {
       setBatchStatus(await api<BatchStatus>('/api/spisim/batch-status?refresh=1'))
-    } catch (reason) { setError(String(reason)) } finally { setProbing(false) }
+    } catch (reason) { setError(errorText(reason, lang)) } finally { setProbing(false) }
   }
 
   // 後端確定引擎、子程序都不在時會自己清（ADR-0064）；這裡是查不到時的後備。
   const clearPending = async () => {
     if (!batchStatus?.cleanup_pending) return
-    const ok = window.confirm(
-      `請先到工作管理員確認引擎（PID ${batchStatus.pid ?? '未知'}）與它開的程序都已結束。`
-      + '\n\n清除後工具不再擋原生引擎工作；工作目錄保留不刪。確定清除嗎？')
+    const ok = window.confirm(t.clearPendingConfirm(String(batchStatus.pid ?? t.unknown)))
     if (!ok) return
     setClearError('')
     try {
@@ -338,7 +375,7 @@ export default function SpisimToolboxPanel() {
       setBatchStatus(await api<BatchStatus>('/api/spisim/batch-status'))
     } catch (reason) {
       // 顯示在按鈕旁：面板底部的共用錯誤列在畫面外，按了像沒反應（#0083 實機驗證）。
-      setClearError(reason instanceof Error ? reason.message : String(reason))
+      setClearError(errorText(reason, lang))
     }
   }
 
@@ -357,7 +394,7 @@ export default function SpisimToolboxPanel() {
       })
       setComJob(state)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
+      setError(errorText(reason, lang))
     }
   }
 
@@ -368,77 +405,75 @@ export default function SpisimToolboxPanel() {
       setComJob(state)
       renderComOutcome(state)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
+      setError(errorText(reason, lang))
     }
   }
 
   return (
     <div className="ibis-wizard">
       <section>
-        <h3>S 參數工具箱（免授權、skrf 原生）</h3>
-        <p className="hint">
-          處理過的檔案寫進模型庫旁的 sparam_processed，來源檔一個位元不動。
-        </p>
-        <label>來源 Touchstone
+        <h3>{t.toolboxTitle}</h3>
+        <p className="hint">{t.toolboxHint}</p>
+        <label>{t.sourceLabel}
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <input className="input is-wide" value={source}
               placeholder="path\to\channel.s4p"
               onChange={event => setSource(event.target.value)} />
-            <button className="btn" onClick={() => void browseInto(setSource)}>瀏覽…</button>
+            <button className="btn" onClick={() => void browseInto(setSource)}>{t.browse}</button>
           </div>
         </label>
-        <label>操作
+        <label>{t.operationLabel}
           <select className="input" value={operation}
             onChange={event => setOperation(event.target.value)}>
             {operations.map(item => (
-              <option key={item.name} value={item.name}>{item.description}</option>
+              <option key={item.name} value={item.name}>{operationLabel(item)}</option>
             ))}
           </select>
         </label>
-        <p className="hint">{OPTION_HINTS[operation] || ''}</p>
+        <p className="hint">{(t.optionHints as Record<string, string>)[operation] || ''}</p>
         {operation === 'renormalize' && (
-          <label>目標阻抗（Ω）
+          <label>{t.impedanceLabel}
             <input className="input" value={impedance}
               onChange={event => setImpedance(event.target.value)} />
           </label>
         )}
         {operation === 'reorder' && (
-          <label>新埠序
+          <label>{t.portOrderLabel}
             <input className="input" value={portOrder} placeholder="1,3,2,4"
               onChange={event => setPortOrder(event.target.value)} />
           </label>
         )}
         {operation === 'resample' && (
-          <label>點數
+          <label>{t.pointsLabel}
             <input className="input" value={points}
               onChange={event => setPoints(event.target.value)} />
           </label>
         )}
         {operation === 'deembed' && <>
-          <label>左側治具（.s2p）
+          <label>{t.leftFixture}
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <input className="input is-wide" value={leftFixture}
                 onChange={event => setLeftFixture(event.target.value)} />
-              <button className="btn" onClick={() => void browseInto(setLeftFixture)}>瀏覽…</button>
+              <button className="btn" onClick={() => void browseInto(setLeftFixture)}>{t.browse}</button>
             </div>
           </label>
-          <label>右側治具（.s2p，可留空）
+          <label>{t.rightFixture}
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <input className="input is-wide" value={rightFixture}
                 onChange={event => setRightFixture(event.target.value)} />
-              <button className="btn" onClick={() => void browseInto(setRightFixture)}>瀏覽…</button>
+              <button className="btn" onClick={() => void browseInto(setRightFixture)}>{t.browse}</button>
             </div>
           </label>
         </>}
         <button className="btn btn--primary" disabled={busy || !source}
           onClick={() => void runToolbox()}>
-          {busy ? '處理中…' : '執行'}
+          {busy ? t.processing : t.run}
         </button>
         {message && <div className="model-library__notice">{message}</div>}
         {outputFolder && (
           <div className="field-row" style={{ marginTop: 6 }}>
             <button className="btn" onClick={() => void openFolder(outputFolder)}>
-              開啟結果資料夾
+              {t.openFolder}
             </button>
           </div>
         )}
@@ -446,53 +481,55 @@ export default function SpisimToolboxPanel() {
 
       {comStandards.length > 0 && (
         <section>
-          <h3>IEEE COM 簽核（SPISim 批次引擎）</h3>
-          <p className="hint">對串接後的通道算 COM，直接對 IEEE 802.3／OIF 條文。</p>
-          <p className="hint">內建 {comStandards.length} 份標準參數組態，不必自己填門檻。</p>
-          <p className="hint">通道要 4 埠差分，埠序 [in+, in−, out+, out−]；2 埠只出頻域曲線。</p>
-          <p className="hint">即 PORT_ORDER [1 2 3 4]，本工具串接輸出就是這個順序。</p>
-          <p className="hint">送出前會預檢最低頻與埠序；一般約 8 秒，走背景可取消。</p>
-          {batchStatus && !batchStatus.available && (
+          <h3>{t.comTitle}</h3>
+          <p className="hint">{t.comHintClause}</p>
+          <p className="hint">{t.comHintStandards(comStandards.length)}</p>
+          <p className="hint">{t.comHintPorts}</p>
+          <p className="hint">{t.comHintPortOrder}</p>
+          <p className="hint">{t.comHintPreflight}</p>
+          {notProbed && !batchStatus?.cleanup_pending && <p className="hint">{t.notProbed}</p>}
+          {batchStatus && !batchStatus.available && (!notProbed || batchStatus.cleanup_pending) && (
             <div className="model-library__notice model-library__notice--error">
-              引擎探測未通過：{batchStatus.detail}
+              {t.probeFailed}{pickText(batchStatus, 'detail', lang)}
               {batchStatus.cleanup_pending && (
                 <div>
-                  PID：{batchStatus.pid ?? '未知'}；工作目錄：{batchStatus.work_dir || '未知'}。
-                  引擎結束後工具會自動解除，關掉再打開本工具箱就會更新。
+                  {t.pendingInfo(String(batchStatus.pid ?? t.unknown), batchStatus.work_dir || t.unknown)}
+                  {' '}{t.pendingAutoRelease}
                   <button className="btn" style={{ marginLeft: 8 }}
                     onClick={() => void clearPending()}>
-                    確認引擎已結束，清除紀錄
+                    {t.clearPending}
                   </button>
-                  {clearError && <div><strong>沒有清除：</strong>{clearError}</div>}
+                  {clearError && <div><strong>{t.notCleared}</strong>{clearError}</div>}
                 </div>
               )}
             </div>
           )}
           <div className="field-row">
-            <label style={{ minWidth: 260 }}>標準
+            <label style={{ minWidth: 260 }}>{t.standardLabel}
               <select className="input" value={comStandard}
                 style={{ minWidth: 240 }}
                 onChange={event => setComStandard(event.target.value)}>
                 {comStandards.map(item => (
-                  <option key={item.name} value={item.name} title={item.description}>
+                  <option key={item.name} value={item.name}
+                    title={pickText(item, 'description', lang)}>
                     {item.name}
                   </option>
                 ))}
               </select>
             </label>
             <button className="btn" disabled={probing} onClick={() => void reprobe()}>
-              {probing ? '探測中…' : '重新探測引擎'}
+              {probing ? t.probing : t.reprobe}
             </button>
             <button className="btn btn--primary"
-              disabled={Boolean(comJob?.running) || !source || !batchStatus?.available || Boolean(comBlock)}
-              title={comPending ? '原生引擎尚未確認收尾；引擎結束後會自動解除'
-                : comBlock || (batchStatus?.available ? '' : '引擎探測未通過，先按「重新探測引擎」')}
+              disabled={Boolean(comJob?.running) || !source || !comUsable || Boolean(comBlock)}
+              title={comPending ? t.enginePendingTip
+                : comBlock || (comUsable ? '' : t.probeFailedTip)}
               onClick={() => void startCom()}>
-              {comPending ? '引擎待收尾' : comJob?.running ? '計算中…' : '計算 COM（背景）'}
+              {comPending ? t.enginePending : comJob?.running ? t.computing : t.computeCom}
             </button>
             <LicenseTag functions={['spisim_com']} style={{ alignSelf: 'center' }} />
             {comJob?.running && !comPending && (
-              <button className="btn" onClick={() => void cancelCom()}>取消</button>
+              <button className="btn" onClick={() => void cancelCom()}>{t.cancel}</button>
             )}
           </div>
           <label style={{ display: 'flex', flexDirection: 'row', gap: 6,
@@ -500,24 +537,22 @@ export default function SpisimToolboxPanel() {
             <input type="checkbox" checked={comOvernight}
               style={{ width: 'auto' }}
               onChange={event => setComOvernight(event.target.checked)} />
-            放寬逾時到 12 小時（預設 4 小時）
+            {t.overnight}
           </label>
-          <p className="hint">
-            一般通道約 8 秒就出結果，上面那個選項是留給特別大的輸入，不是常態。
-          </p>
+          <p className="hint">{t.overnightHint}</p>
           {comPending && (
-            <p className="hint">{comJob?.message || '原生引擎尚未確認收尾，禁止派工。'}</p>
+            <p className="hint">{pickText(comJob, 'message', lang) || t.pendingNoDispatch}</p>
           )}
           {comJob?.running && !comPending && (
             <p className="hint">
-              {comJob.standard}　·　已跑 {comJob.elapsed_seconds ?? 0} 秒　·
-              {comJob.message || ''}
+              {t.runningStatus(comJob.standard || '', comJob.elapsed_seconds ?? 0)}
+              {pickText(comJob, 'message', lang)}
             </p>
           )}
           {comFolder && (
             <div className="field-row" style={{ marginTop: 6 }}>
               <button className="btn" onClick={() => void openFolder(comFolder)}>
-                開啟結果資料夾
+                {t.openFolder}
               </button>
               <span className="hint" style={{ wordBreak: 'break-all' }}>{comFolder}</span>
             </div>
@@ -531,7 +566,7 @@ export default function SpisimToolboxPanel() {
               <pre
                 data-report-separate-snapshot="true"
                 data-report-kind="com-verdict"
-                data-report-title="COM 判定輸出"
+                data-report-title={t.comSnapshotTitle}
                 style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: 0 }}>
                 {comResult}
               </pre>

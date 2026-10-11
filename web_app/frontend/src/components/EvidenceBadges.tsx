@@ -8,6 +8,8 @@
 // 寫一份：判定的措辭要一致，否則同一份檔案在不同分頁會像有不同的結論。
 
 import { useEffect, useState } from 'react'
+import { errorText, pickList, pickText } from '../backendFields'
+import { useT } from '../i18n'
 
 type Level = 'ok' | 'warn' | 'unknown'
 
@@ -17,6 +19,10 @@ type Badge = {
   value: string
   level: Level
   detail: string
+  /** 卡 0087：後端 channel_evidence 給的英文；呼叫端自帶的徽章可以不給。 */
+  label_en?: string
+  value_en?: string
+  detail_en?: string
 }
 
 type Evidence = {
@@ -25,19 +31,20 @@ type Evidence = {
   may_claim_verified_channel: boolean
   badges: Badge[]
   warnings: string[]
+  warnings_en?: string[]
   /** 查核沒過的**原因**（`verify_for_analysis` 的 issues）。缺哪個欄位、
    *  哪一項對不上，只有這裡說得出來。後端已經在 `channel_evidence` 回傳
    *  這個欄位了，舊版沒有才留成選填。 */
-  issues?: { check?: string; detail?: string }[]
+  issues?: { check?: string; detail?: string; detail_en?: string }[]
   n_ports: number | null
 }
 
 /** 「量不出來」與「量出來不合格」刻意不同色——混成同一個顏色，
  *  使用者會以為模型有問題，而其實是我們不知道。 */
-const LEVEL_STYLE: Record<Level, { dot: string; text: string }> = {
-  ok: { dot: '#3f9a5c', text: '通過' },
-  warn: { dot: '#c9652f', text: '要看' },
-  unknown: { dot: '#8a8f99', text: '未知' },
+const LEVEL_STYLE: Record<Level, { dot: string }> = {
+  ok: { dot: '#3f9a5c' },
+  warn: { dot: '#c9652f' },
+  unknown: { dot: '#8a8f99' },
 }
 
 export default function EvidenceBadges(
@@ -55,29 +62,35 @@ export default function EvidenceBadges(
     dark?: boolean
   },
 ) {
+  const { t, lang } = useT()
   const [data, setData] = useState<Evidence | null>(null)
-  const [error, setError] = useState('')
+  // 存錯誤物件本身：切換語言時才挑得到 detail_en。
+  const [error, setError] = useState<unknown>(null)
   const [open, setOpen] = useState<string>('')
   // 陣列每次 render 都是新物件；用字串當相依，內容沒變就不重查。
   const throughKey = (throughPaths || []).map(([o, i]) => `${o},${i}`).join(';')
 
   useEffect(() => {
-    if (!path) { setData(null); setError(''); return }
+    if (!path) { setData(null); setError(null); return }
     let cancelled = false
     const params = new URLSearchParams({ path })
     if (expectedPorts) params.set('expected_ports', String(expectedPorts))
     for (const item of throughKey ? throughKey.split(';') : []) params.append('through_path', item)
-    setError('')
+    setError(null)
     // 換檔案要先把上一份判定收掉。留著的話，新查詢還在飛的那段時間裡，
     // 上一個 Touchstone 的「通過」徽章會掛在新檔案的標題底下。
     setData(null)
     void fetch(`/api/channel/evidence?${params.toString()}`)
       .then(async res => {
-        if (!res.ok) throw new Error((await res.json())?.detail || `HTTP ${res.status}`)
+        if (!res.ok) {
+          const body = await res.json().catch(() => null)
+          throw Object.assign(new Error(body?.detail || `HTTP ${res.status}`),
+            { detail_en: body?.detail_en })
+        }
         return res.json()
       })
       .then(json => { if (!cancelled) setData(json) })
-      .catch(err => { if (!cancelled) setError(String(err.message || err)) })
+      .catch(err => { if (!cancelled) setError(err) })
     return () => { cancelled = true }
   }, [path, expectedPorts, throughKey])
 
@@ -86,14 +99,14 @@ export default function EvidenceBadges(
   if (error) {
     return (
       <div className={root}>
-        <div className="evidence-badges__error">證據讀不到：{error}</div>
+        <div className="evidence-badges__error">{t.evidence.unreadable}{errorText(error, lang)}</div>
       </div>
     )
   }
   if (!data) {
     return (
       <div className={root}>
-        <div className="evidence-badges__error">讀取證據中…</div>
+        <div className="evidence-badges__error">{t.evidence.loading}</div>
       </div>
     )
   }
@@ -108,29 +121,29 @@ export default function EvidenceBadges(
             key={b.key}
             type="button"
             className={`evidence-badge evidence-badge--${b.level}`}
-            title={b.detail || undefined}
+            title={pickText(b, 'detail', lang) || undefined}
             onClick={() => setOpen(open === b.key ? '' : b.key)}>
             <span className="evidence-badge__dot"
               style={{ background: LEVEL_STYLE[b.level].dot }} />
-            <span className="evidence-badge__label">{b.label}</span>
-            <span className="evidence-badge__value">{b.value}</span>
+            <span className="evidence-badge__label">{pickText(b, 'label', lang)}</span>
+            <span className="evidence-badge__value">{pickText(b, 'value', lang)}</span>
           </button>
         ))}
       </div>
       {badges.filter(b => b.key === open && b.detail).map(b => (
-        <div key={b.key} className="evidence-badges__detail">{b.detail}</div>
+        <div key={b.key} className="evidence-badges__detail">{pickText(b, 'detail', lang)}</div>
       ))}
       {/* 後端算出來的提醒本來完全沒有出口：型別裡宣告了、端點也回了，
           畫面上一個字都沒有。 */}
-      {(data.warnings || []).map((text, index) => (
+      {pickList(data, 'warnings', lang).map((text, index) => (
         <div key={`warn-${index}`} className="evidence-badges__detail">{text}</div>
       ))}
       {!data.may_claim_verified_channel && (
         <div className="evidence-badges__detail">
-          這份結果<b>不得標示為「通道求解已驗證」</b>——
+          {t.evidence.notVerifiedLead}<b>{t.evidence.notVerifiedClaim}</b>{t.evidence.dash}
           {data.has_provenance
-            ? '來源證據存在但未通過查核。'
-            : '旁邊沒有來源證據檔，工具無從確認它怎麼來的。'}
+            ? t.evidence.provenanceFailed
+            : t.evidence.provenanceMissing}
         </div>
       )}
       {/* 沒通過查核的話，把「哪一項沒過」也寫出來。只說「未通過查核」而不說
@@ -138,7 +151,7 @@ export default function EvidenceBadges(
       {!data.may_claim_verified_channel
         && (data.issues || []).filter(item => item.detail).map((item, index) => (
           <div key={`issue-${index}`} className="evidence-badges__detail">
-            {item.detail}
+            {pickText(item, 'detail', lang)}
           </div>
         ))}
     </div>

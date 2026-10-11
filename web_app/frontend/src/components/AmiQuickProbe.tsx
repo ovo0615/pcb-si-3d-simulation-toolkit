@@ -4,6 +4,8 @@
 // 後端一秒回波形（引擎免授權、不開 AEDT），這裡只負責把「等化前後」
 // 畫得一眼能比。正式眼圖仍走 AMI 通道分析，這是模型行為的即時檢視。
 
+import { pickList, pickText } from '../backendFields'
+import { useT } from '../i18n'
 import { minMaxBy } from './chartScale'
 
 export interface QuickProbeSeries {
@@ -109,6 +111,8 @@ export function MiniWave({ series }: { series: QuickProbeSeries[] }) {
 }
 
 export function EyeView({ eye }: { eye: QuickEyeResult }) {
+  const { t, lang } = useT()
+  const tx = t.quickProbe
   const width = 480
   const height = 240
   const pad = { left: 10, right: 10, top: 10, bottom: 20 }
@@ -134,19 +138,18 @@ export function EyeView({ eye }: { eye: QuickEyeResult }) {
   return (
     <div>
       <p className="hint" style={{ marginBottom: 2 }}>
-        <strong>秒級統計眼（最壞情況）：</strong>
+        <strong>{tx.eyeTitle}</strong>
         {m.is_open
-          ? `眼高 ${m.eye_height_v.toFixed(3)} V、眼寬 ${(m.eye_width_ui * 100).toFixed(0)}% UI`
-          : '最壞情況下全閉——通道 ISI 蓋過主游標'}
+          ? tx.eyeOpen(m.eye_height_v.toFixed(3), (m.eye_width_ui * 100).toFixed(0))
+          : tx.eyeClosed}
         {m.pam4_inner_eye_v !== undefined
-          ? `　·　PAM4 內眼 ${m.pam4_inner_eye_v.toFixed(3)} V` : ''}
-        　·　UI {eye.ui_ps.toFixed(1)} ps
+          ? tx.sep + tx.pam4Inner(m.pam4_inner_eye_v.toFixed(3)) : ''}
+        {tx.sep}UI {eye.ui_ps.toFixed(1)} ps
       </p>
       {eye.at_ber && m.is_open && (
         <p className="hint" style={{ marginTop: 0 }}>
-          BER {eye.at_ber.ber} 外插：眼寬 {(eye.at_ber.eye_width_ui * 100).toFixed(0)}% UI、
-          眼高 {eye.at_ber.eye_height_v.toFixed(3)} V
-          （假設 RJ σ={eye.at_ber.rj_sigma_ps} ps，可在 DDR4 遮罩區改）
+          {tx.berExtrap(eye.at_ber.ber, (eye.at_ber.eye_width_ui * 100).toFixed(0),
+            eye.at_ber.eye_height_v.toFixed(3), eye.at_ber.rj_sigma_ps)}
         </p>
       )}
       <svg width={width} height={height} role="img"
@@ -172,12 +175,12 @@ export function EyeView({ eye }: { eye: QuickEyeResult }) {
       {eye.ddr4_mask_check && (
         <p className="hint" style={{ marginTop: 2 }}>
           <strong style={{ color: eye.ddr4_mask_check.passes ? '#43d17a' : '#e5534b' }}>
-            DDR4 Rx 遮罩（BER {eye.ddr4_mask_check.ber}）：
-            {eye.ddr4_mask_check.passes ? '通過' : '不通過'}
+            {tx.maskTitle(eye.ddr4_mask_check.ber)}
+            {eye.ddr4_mask_check.passes ? tx.pass : tx.fail}
           </strong>
-          　寬邊際 {(eye.ddr4_mask_check.margin.width_ui * 100).toFixed(1)}% UI、
-          高邊際 {(eye.ddr4_mask_check.margin.height_v * 1000).toFixed(0)} mV
-          　·　{eye.ddr4_mask_check.assumptions[0]}
+          {' '}{tx.maskMargin((eye.ddr4_mask_check.margin.width_ui * 100).toFixed(1),
+            (eye.ddr4_mask_check.margin.height_v * 1000).toFixed(0))}
+          {tx.sep}{pickList(eye.ddr4_mask_check, 'assumptions', lang)[0]}
         </p>
       )}
     </div>
@@ -185,22 +188,24 @@ export function EyeView({ eye }: { eye: QuickEyeResult }) {
 }
 
 export function QuickProbeView({ result }: { result: QuickProbeResult }) {
+  const { t, lang } = useT()
+  const tx = t.quickProbe
   return (
     <div className="ami-quickprobe">
       <p className="hint">
-        {result.model}（{result.ami_file}）　·　{result.elapsed_ms} ms
+        {tx.modelFile(result.model, result.ami_file)}{tx.sep}{result.elapsed_ms} ms
         {result.stimulus_bit_time_ps
-          ? `　·　位元時間 ${result.stimulus_bit_time_ps.toFixed(1)} ps` : ''}
+          ? tx.sep + tx.bitTime(result.stimulus_bit_time_ps.toFixed(1)) : ''}
         {result.impulse?.pulse_peak_v !== undefined
-          ? `　·　通道脈衝峰值 ${result.impulse.pulse_peak_v.toFixed(3)} V` : ''}
+          ? tx.sep + tx.pulsePeak(result.impulse.pulse_peak_v.toFixed(3)) : ''}
       </p>
       {result.waveforms.map(wave => (
         <div key={wave.stimulus} style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 13, marginBottom: 2 }}>
-            <strong>{wave.label}</strong>
+            <strong>{pickText(wave, 'label', lang)}</strong>
             {wave.series.map(item => (
               <span key={item.name} style={{ marginLeft: 10, color: SERIES_COLORS[item.name] || '#666' }}>
-                ▬ {item.label}（擺幅 {item.swing.toFixed(3)} V）
+                {tx.swing(pickText(item, 'label', lang), item.swing.toFixed(3))}
               </span>
             ))}
           </div>
@@ -210,23 +215,23 @@ export function QuickProbeView({ result }: { result: QuickProbeResult }) {
       {result.quick_eye && <EyeView eye={result.quick_eye} />}
       {result.rx && (
         <p className="hint">
-          Rx：{result.rx.model}（{result.rx.ami_file}）已串接於 Tx 之後。
+          {tx.rxChained(result.rx.model, result.rx.ami_file)}
         </p>
       )}
       {(result.model_info?.messages?.length ?? 0) > 0 && (
         <details>
-          <summary>模型訊息（等化實際設了什麼）</summary>
+          <summary>{tx.messagesSummary}</summary>
           <ul className="hint" style={{ margin: '4px 0' }}>
             {result.model_info.messages!.map((line, index) => (
               <li key={index}><code>{line}</code></li>
             ))}
             {(result.rx?.model_info?.messages || []).map((line, index) => (
-              <li key={`rx-${index}`}><code>Rx：{line}</code></li>
+              <li key={`rx-${index}`}><code>{tx.rxMessage(line)}</code></li>
             ))}
           </ul>
         </details>
       )}
-      {result.notes.map(note => <p className="hint" key={note}>{note}</p>)}
+      {pickList(result, 'notes', lang).map(note => <p className="hint" key={note}>{note}</p>)}
     </div>
   )
 }

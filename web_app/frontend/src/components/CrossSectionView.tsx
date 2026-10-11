@@ -6,6 +6,8 @@
 // 縮放——一段 5 mm 寬的截面配上 1 mm 的疊構，等比例畫出來會是一條線。
 
 import { useMemo, useState } from 'react'
+import { pickList, pickText } from '../backendFields'
+import { useT } from '../i18n'
 
 export interface CrossSectionSegment {
   key: string
@@ -95,6 +97,8 @@ export default function CrossSectionView({
   scan, roleOverrides, onRoleOverride, busy,
 }: Props) {
   const [hovered, setHovered] = useState<string | null>(null)
+  const { t, lang } = useT()
+  const tx = t.crossSection
 
   // 橫向範圍取切線的延伸方向；縱向取疊構的總高。疊構讀不到時退成等高列，
   // 位置資訊仍在，只是層厚不再是真的——這件事要在畫面上講出來。
@@ -153,18 +157,18 @@ export default function CrossSectionView({
                   fontSize: 12, color: TEXT }}>
       <div>
         <div style={{ fontWeight: 700, fontSize: 13, color: HEADING }}>
-          剖視圖 · {scan.cut.name || `${scan.cut.axis.toUpperCase()} = ${scan.cut.coordinate_mm.toFixed(3)} mm`}
+          {tx.heading(scan.cut.name || `${scan.cut.axis.toUpperCase()} = ${scan.cut.coordinate_mm.toFixed(3)} mm`)}
         </div>
         <div style={{ ...HINT,  marginTop: 2 }}>
-          切線長 {scan.cut.length_mm.toFixed(3)} mm，取樣間距 {scan.resolution_um.toFixed(1)} µm。
-          橫向與縱向各自縮放{geometry.toScale ? '' : '；疊構讀不到，層厚為示意'}。
-          橘色是訊號、藍色是參考。
+          {tx.cutInfo(scan.cut.length_mm.toFixed(3), scan.resolution_um.toFixed(1))}
+          {' '}{geometry.toScale ? tx.axesScaled : tx.axesNotToScale}
+          {' '}{tx.colorLegend}
         </div>
         {geometry.rows.length === 0 ? (
           // 疊構與層清單同時是空的：畫不出任何一層，圖會是全空白。與其給一張
           // 空圖讓人以為是渲染壞了，不如講清楚這條切線上什麼都沒有。
           <div style={{ ...statusStyle('warn'), marginTop: 6 }}>
-            這條切線上沒有任何層，剖視圖畫不出來。請確認切線位置與工作範圍。
+            {tx.noLayers}
           </div>
         ) : (
         <svg viewBox={`0 0 ${W} ${H}`} style={{
@@ -180,7 +184,8 @@ export default function CrossSectionView({
                 <rect x={PAD_L} y={top} width={W - PAD_L - PAD_R}
                   height={Math.max(bottom - top, 0.6)}
                   fill={isMetal ? METAL_LAYER_COLOR : DIELECTRIC_COLOR} />
-                <title>{`${row.name}（${row.kind || '未標示'}）${row.material ? ' · ' + row.material : ''}`}</title>
+                <title>{tx.layerTip(row.name, row.kind || tx.unlabeled)
+                  + (row.material ? ' · ' + row.material : '')}</title>
               </g>
             )
           })}
@@ -202,8 +207,9 @@ export default function CrossSectionView({
                 strokeWidth={hovered === segment.key ? 1.2 : 0}
                 onMouseEnter={() => setHovered(segment.key)}
                 onMouseLeave={() => setHovered(null)}>
-                <title>{`${segment.net} @ ${segment.layer}\n寬 ${(segment.width_mm * 1000).toFixed(1)} µm`
-                  + `${segment.is_via ? '\n來源：Via pad' : ''}`}</title>
+                <title>{`${segment.net} @ ${segment.layer}\n`
+                  + tx.segmentWidthTip((segment.width_mm * 1000).toFixed(1))
+                  + (segment.is_via ? '\n' + tx.segmentViaTip : '')}</title>
               </rect>
             )
           })}
@@ -219,22 +225,22 @@ export default function CrossSectionView({
 
       <div style={statusStyle(scan.plan.solvable ? 'ok' : 'warn')}>
         {scan.plan.solvable
-          ? `可以送去求解：導體 ${scan.plan.conductor_count} 個`
-            + `（訊號 ${scan.plan.signal_conductors.length}、參考 ${scan.plan.reference_conductors.length}）。`
-          : '這個截面還不能求解。'}
-        {scan.plan.blockers.map((text, index) => (
+          ? tx.solvable(scan.plan.conductor_count, scan.plan.signal_conductors.length,
+                        scan.plan.reference_conductors.length)
+          : tx.notSolvable}
+        {pickList(scan.plan, 'blockers', lang).map((text, index) => (
           <div key={index} style={{ marginTop: 3 }}>· {text}</div>
         ))}
       </div>
 
       {scan.plan.pairs.length > 0 && (
         <div style={HINT}>
-          自動配對的差分對：
+          {tx.autoPairs}
           {scan.plan.pairs.map(pair => (
             <span key={`${pair.a}|${pair.b}`} style={{ marginLeft: 6 }}>
-              {pair.a} ／ {pair.b}
+              {pair.a}{tx.pairSep}{pair.b}
               <span style={{ color: pair.exact ? '#7ee787' : '#e0b341' }}>
-                （{pair.exact ? '精確' : '近似：其餘導體視為參考電位'}）
+                {tx.paren(pair.exact ? tx.exact : tx.approximate)}
               </span>
             </span>
           ))}
@@ -244,14 +250,14 @@ export default function CrossSectionView({
       {(hard.length > 0 || risk.length > 0) && (
         <div>
           <div style={{ fontWeight: 700, marginBottom: 4, color: HEADING }}>
-            安全性檢查（{hard.length} 個不能算、{risk.length} 個要判斷）
+            {tx.safetyHeading(hard.length, risk.length)}
           </div>
           {[...hard, ...risk].map((item, index) => (
             <div key={index} style={{ ...statusStyle(item.severity === 'hard' ? 'warn' : 'ok'),
                                       marginBottom: 4 }}>
-              <b>{item.severity === 'hard' ? '不能算' : '要判斷'}</b>
-              {item.net ? `　${item.net}` : ''}{item.layer ? ` @ ${item.layer}` : ''}
-              <div style={{ marginTop: 2 }}>{item.message}</div>
+              <b>{item.severity === 'hard' ? tx.hard : tx.risk}</b>
+              {item.net ? tx.gap + item.net : ''}{item.layer ? ` @ ${item.layer}` : ''}
+              <div style={{ marginTop: 2 }}>{pickText(item, 'message', lang)}</div>
             </div>
           ))}
         </div>
@@ -259,10 +265,10 @@ export default function CrossSectionView({
 
       <div>
         <div style={{ fontWeight: 700, marginBottom: 4, color: HEADING }}>
-          截到的段（訊號 {signalCount}、參考 {referenceCount}）
+          {tx.segmentsHeading(signalCount, referenceCount)}
         </div>
         <div style={{ ...HINT,  marginBottom: 4 }}>
-          Reference 的段會合併成單一 GND 導體（假設交流同電位）。改身分後要重新掃描。
+          {tx.segmentsHint}
         </div>
         <div style={{ maxHeight: 260, overflowY: 'auto', border: `1px solid ${RULE}`, borderRadius: 6 }}>
           {/* 表格另外存一張完整快照：外層有 260px 的捲動框，整頁快照只會拍到
@@ -270,15 +276,15 @@ export default function CrossSectionView({
           <table
             data-report-separate-snapshot="true"
             data-report-kind="cross-section-segments"
-            data-report-title="截面：截到的段"
+            data-report-title={tx.segmentsSnapshotTitle}
             style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
               <tr style={{ position: 'sticky', top: 0 }}>
-                <th style={headCell}>層</th>
+                <th style={headCell}>{tx.colLayer}</th>
                 <th style={headCell}>Net</th>
-                <th style={{ ...headCell, textAlign: 'right' }}>位置 mm</th>
-                <th style={{ ...headCell, textAlign: 'right' }}>寬 µm</th>
-                <th style={headCell}>身分</th>
+                <th style={{ ...headCell, textAlign: 'right' }}>{tx.colPosition}</th>
+                <th style={{ ...headCell, textAlign: 'right' }}>{tx.colWidth}</th>
+                <th style={headCell}>{tx.colRole}</th>
               </tr>
             </thead>
             <tbody>
@@ -289,8 +295,8 @@ export default function CrossSectionView({
                   style={{ background: hovered === segment.key ? 'rgba(255,255,255,0.06)' : undefined }}>
                   <td style={cell}>{segment.layer}</td>
                   <td style={cell}>
-                    {segment.net || '（無網路）'}
-                    {segment.is_via && <span style={{ color: '#e0b341' }} title="來自 Via 的 pad">　Via</span>}
+                    {segment.net || tx.noNet}
+                    {segment.is_via && <span style={{ color: '#e0b341' }} title={tx.viaPadTip}>{tx.gap}Via</span>}
                   </td>
                   <td style={{ ...cell, textAlign: 'right' }}>
                     {segment.s0_mm.toFixed(3)}–{segment.s1_mm.toFixed(3)}
@@ -300,12 +306,12 @@ export default function CrossSectionView({
                   </td>
                   <td style={cell}>
                     <select className="input" disabled={busy}
-                      aria-label={`${segment.key} 這一段的角色`}
+                      aria-label={tx.roleAria(segment.key)}
                       style={{ height: 22, padding: '0 4px', fontSize: 11 }}
                       value={roleOverrides[segment.key] ?? segment.role}
                       onChange={event => onRoleOverride(segment.key, event.target.value)}>
-                      <option value="signal">訊號</option>
-                      <option value="reference">參考</option>
+                      <option value="signal">{tx.roleSignal}</option>
+                      <option value="reference">{tx.roleReference}</option>
                     </select>
                   </td>
                 </tr>
@@ -348,10 +354,6 @@ export interface CrossSectionResultRow {
   }
 }
 
-const MODE_LABELS: Record<string, string> = {
-  fast: '快速', standard: '標準', accurate: '高精度',
-}
-
 export function CrossSectionResults({
   rows, selected, onSelect,
 }: {
@@ -359,6 +361,11 @@ export function CrossSectionResults({
   selected: number
   onSelect: (index: number) => void
 }) {
+  const { t, lang } = useT()
+  const tx = t.crossSection
+  const modeLabels: Record<string, string> = {
+    fast: tx.modeFast, standard: tx.modeStandard, accurate: tx.modeAccurate,
+  }
   const row = rows[Math.min(selected, rows.length - 1)]
   const solved = rows.filter(r => r.solved)
   // 沿線剖面只在同一個軸上多條切線時才有意義。一條切線畫不出剖面，兩條不同
@@ -391,8 +398,8 @@ export function CrossSectionResults({
 
       {!row.solved ? (
         <div style={statusStyle('warn')}>
-          {row.name} 沒有求解。
-          {row.blockers.map((text, index) => (
+          {tx.notSolved(row.name)}
+          {pickList(row, 'blockers', lang).map((text, index) => (
             <div key={index} style={{ marginTop: 3 }}>· {text}</div>
           ))}
         </div>
@@ -401,18 +408,18 @@ export function CrossSectionResults({
           <div style={HINT}>
             {row.name}
             {typeof row.coordinate_mm === 'number'
-              ? `　${(row.axis || '').toUpperCase()} = ${row.coordinate_mm.toFixed(3)} mm` : ''}
-            {/* 分隔的全形空格要留在表達式裡：JSX 會把換行後開頭的空白吃掉，
+              ? `${tx.gap}${(row.axis || '').toUpperCase()} = ${row.coordinate_mm.toFixed(3)} mm` : ''}
+            {/* 分隔的空格要留在表達式裡：JSX 會把換行後開頭的空白吃掉，
                 寫成純文字會變成「mm精度」。 */}
             {/* `solve_mode` 可能是 null（後端 `result.get("solve_mode")`），
                 直接印會變成「精度 undefined」。 */}
-            {`　精度 ${MODE_LABELS[row.solve_mode || ''] || row.solve_mode || '未標示'}`}
-            {typeof row.per_error === 'number' ? `（PerError ${row.per_error}%）` : ''}
-            {typeof row.seconds === 'number' ? `　${row.seconds} 秒` : ''}
+            {tx.gap + tx.accuracy(modeLabels[row.solve_mode || ''] || row.solve_mode || tx.unlabeled)}
+            {typeof row.per_error === 'number' ? tx.perError(row.per_error) : ''}
+            {typeof row.seconds === 'number' ? tx.gap + tx.seconds(row.seconds) : ''}
           </div>
 
           <div>
-            <div style={{ fontWeight: 700, marginBottom: 4, color: HEADING }}>單端阻抗 Z₀</div>
+            <div style={{ fontWeight: 700, marginBottom: 4, color: HEADING }}>{tx.singleEndedHeading}</div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
               <tbody>
                 {Object.entries(row.single_ended || {}).map(([name, value]) => (
@@ -426,14 +433,14 @@ export function CrossSectionResults({
                           而實際上是這一項沒有值（ADR-0030）。 */}
                       L {typeof row.matrix?.[`L(${name},${name})`] === 'number'
                         ? `${row.matrix[`L(${name},${name})`].toFixed(2)} nH/m` : '—'}
-                      　C {typeof row.matrix?.[`C(${name},${name})`] === 'number'
+                      {tx.gap}C {typeof row.matrix?.[`C(${name},${name})`] === 'number'
                         ? `${row.matrix[`C(${name},${name})`].toFixed(2)} pF/m` : '—'}
                     </td>
                   </tr>
                 ))}
                 {Object.keys(row.single_ended || {}).length === 0 && (
                   <tr><td style={cell} colSpan={3}>
-                    矩陣裡沒有可用的 L 與 C（求解可能中途停過），所以不顯示數字。
+                    {tx.noLC}
                   </td></tr>
                 )}
               </tbody>
@@ -443,10 +450,10 @@ export function CrossSectionResults({
           {row.convergence && (
             <div>
               <div style={{ fontWeight: 700, marginBottom: 4, color: HEADING }}>
-                側向收斂驗證
+                {tx.convergenceHeading}
               </div>
               <div style={statusStyle(row.convergence.converged === true ? 'ok' : 'warn')}>
-                {row.convergence.message}
+                {pickText(row.convergence, 'message', lang)}
               </div>
               <table style={{
                 width: '100%', borderCollapse: 'collapse', fontSize: 11, marginTop: 4,
@@ -464,7 +471,7 @@ export function CrossSectionResults({
                       <td style={{ ...cell, textAlign: 'right' }}>
                         {item.relative != null
                           ? `${(item.relative * 100).toFixed(2)}%`
-                          : '無法比較'}
+                          : tx.notComparable}
                       </td>
                     </tr>
                   ))}
@@ -475,12 +482,12 @@ export function CrossSectionResults({
 
           {(row.pairs || []).length > 0 && (
             <div>
-              <div style={{ fontWeight: 700, marginBottom: 4, color: HEADING }}>差分阻抗</div>
+              <div style={{ fontWeight: 700, marginBottom: 4, color: HEADING }}>{tx.diffHeading}</div>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                 <tbody>
                   {(row.pairs || []).map(pair => (
                     <tr key={pair.name}>
-                      <td style={cell}>{pair.positive} ／ {pair.negative}</td>
+                      <td style={cell}>{pair.positive}{tx.pairSep}{pair.negative}</td>
                       <td style={{ ...cell, textAlign: 'right', fontWeight: 700 }}>
                         {pair.Zdiff != null ? `${pair.Zdiff.toFixed(3)} Ω` : '—'}
                       </td>
@@ -489,8 +496,8 @@ export function CrossSectionResults({
                       </td>
                       <td style={{ ...cell, color: pair.exact ? '#7ee787' : '#e0b341' }}>
                         {pair.error
-                          ? pair.error
-                          : pair.exact ? '精確' : '近似：其餘導體視為參考電位'}
+                          ? pickText(pair, 'error', lang)
+                          : pair.exact ? tx.exact : tx.approximate}
                       </td>
                     </tr>
                   ))}
@@ -502,10 +509,10 @@ export function CrossSectionResults({
           {profile.length > 1 && (
             <div>
               <div style={{ fontWeight: 700, marginBottom: 4, color: HEADING }}>
-                沿線剖面（{profile.length} 條切線）
+                {tx.profileHeading(profile.length)}
               </div>
               <div style={{ ...HINT,  marginBottom: 4 }}>
-                每個值只在該座標成立，並假設結構沿線均勻。切線之間發生的事這裡看不到。
+                {tx.profileHint}
               </div>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                 <tbody>
@@ -516,7 +523,7 @@ export function CrossSectionResults({
                         <td style={cell}>{(item.axis || '').toUpperCase()} = {item.coordinate_mm?.toFixed(3)}</td>
                         <td style={{ ...cell, textAlign: 'right' }}>
                           {values.length
-                            ? values.map(v => `${v.toFixed(3)} Ω`).join('　')
+                            ? values.map(v => `${v.toFixed(3)} Ω`).join(tx.listSep)
                             : '—'}
                         </td>
                       </tr>

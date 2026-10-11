@@ -7,6 +7,8 @@
 // 第三種可能。
 
 import { useMemo } from 'react'
+import { pickText } from '../backendFields'
+import { useT } from '../i18n'
 import { impedanceRange, minMax } from './chartScale'
 
 const TEXT = '#d1dbe7'
@@ -89,6 +91,8 @@ export default function CrossSectionComparison({
   result, tdrDistanceMm, tdrImpedanceOhm,
   pathLengthMm = null, xMaxMm = null,
 }: Props) {
+  const { t, lang } = useT()
+  const tx = t.crossCompare
   const matched = result.rows.filter(
     r => r.matched && r.tdr_ohm != null && r.q2d_ohm != null)
 
@@ -143,11 +147,10 @@ export default function CrossSectionComparison({
                   fontSize: 12, color: TEXT }}>
       <div>
         <div style={{ fontWeight: 700, fontSize: 13, color: HEADING }}>
-          與 TDR 剖面對照
+          {tx.heading}
         </div>
         <div style={{ ...HINT, marginTop: 2 }}>
-          橫帶寬度＝TDR 的空間解析度（{result.summary.resolution_mm.toFixed(2)} mm），
-          也就是 TDR 在該處平均掉的範圍。
+          {tx.bandHint(result.summary.resolution_mm.toFixed(2))}
         </div>
       </div>
 
@@ -199,7 +202,7 @@ export default function CrossSectionComparison({
                 <circle cx={chart.px(d)} cy={chart.py(zQ2d)} r={3.6} fill={Q2D_COLOR}>
                   <title>{`${row.name}\nQ2D ${zQ2d.toFixed(3)} Ω\nTDR ${zTdr.toFixed(3)} Ω`
                     + (row.ambiguous
-                      ? `\n跨過這個座標 ${row.crossings ?? 2} 次，位置可能對錯折` : '')}</title>
+                      ? '\n' + tx.crossingsTip(row.crossings ?? 2) : '')}</title>
                 </circle>
               </g>
             )
@@ -210,9 +213,9 @@ export default function CrossSectionComparison({
           <text x={chart.W - chart.R} y={chart.H - 7} fill="#9fb0c3" fontSize={12}
             textAnchor="end">{chart.xMax.toFixed(0)} mm</text>
           <text x={chart.W - chart.R} y={chart.T + 13} fill={Q2D_COLOR}
-            fontSize={13} fontWeight={700} textAnchor="end">● Q2D 截面</text>
+            fontSize={13} fontWeight={700} textAnchor="end">{tx.legendQ2d}</text>
           <text x={chart.W - chart.R} y={chart.T + 30} fill={TDR_COLOR}
-            fontSize={13} fontWeight={700} textAnchor="end">— TDR（粗帶＝解析度）</text>
+            fontSize={13} fontWeight={700} textAnchor="end">{tx.legendTdr}</text>
         </svg>
       )}
 
@@ -220,8 +223,7 @@ export default function CrossSectionComparison({
           否則圖上少了兩個點跟「那兩條沒對到」看起來完全一樣。 */}
       {chart && chart.hidden > 0 && (
         <div style={HINT}>
-          另有 {chart.hidden} 條超出顯示範圍（橫軸截到 {chart.xMax.toFixed(1)} mm），
-          圖上沒有畫；下表仍然完整。
+          {tx.hiddenOutside(chart.hidden, chart.xMax.toFixed(1))}
         </div>
       )}
 
@@ -231,7 +233,7 @@ export default function CrossSectionComparison({
           color: '#ffd8a8', background: 'rgba(224, 179, 65, 0.12)',
           border: '1px solid rgba(224, 179, 65, 0.35)',
         }}>
-          <b>{row.name}</b>　{row.note}
+          <b>{row.name}</b>{tx.gap}{pickText(row, 'note', lang)}
         </div>
       ))}
 
@@ -243,14 +245,15 @@ export default function CrossSectionComparison({
         }}>
           {/* 缺值就寫「—」，不要補 0：`中位差 0.0000 Ω` 讀起來是量到了完美
               吻合，而實際上是沒有這個數字（ADR-0030）。 */}
-          {result.summary.comparable} 條切線對得到 TDR 曲線，
-          中位差 {result.summary.median_delta_ohm == null
-            ? '—' : `${result.summary.median_delta_ohm.toFixed(4)} Ω`}。
-          差最多的是 {result.summary.worst || '—'}
-          （{result.summary.worst_relative == null
-            ? '—' : `${(result.summary.worst_relative * 100).toFixed(2)}%`}）。
+          {tx.summary(
+            result.summary.comparable,
+            result.summary.median_delta_ohm == null
+              ? '—' : `${result.summary.median_delta_ohm.toFixed(4)} Ω`,
+            result.summary.worst || '—',
+            result.summary.worst_relative == null
+              ? '—' : `${(result.summary.worst_relative * 100).toFixed(2)}%`)}
           {(result.summary.unstable ?? 0) > 0
-            ? `另有 ${result.summary.unstable} 條落在劇變邊緣，沒有列入統計。` : ''}
+            ? tx.summaryUnstable(result.summary.unstable ?? 0) : ''}
         </div>
       )}
 
@@ -260,15 +263,15 @@ export default function CrossSectionComparison({
         <table
           data-report-separate-snapshot="true"
           data-report-kind="cross-section-comparison"
-          data-report-title="截面阻抗與 TDR 對照表"
+          data-report-title={tx.snapshotTitle}
           style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <thead>
             <tr>
-              <th style={headCell}>切線</th>
-              <th style={{ ...headCell, textAlign: 'right' }}>距起點 mm</th>
+              <th style={headCell}>{tx.colCut}</th>
+              <th style={{ ...headCell, textAlign: 'right' }}>{tx.colDistance}</th>
               <th style={{ ...headCell, textAlign: 'right' }}>Q2D</th>
-              <th style={{ ...headCell, textAlign: 'right' }}>TDR（窗內平均）</th>
-              <th style={{ ...headCell, textAlign: 'right' }}>差</th>
+              <th style={{ ...headCell, textAlign: 'right' }}>{tx.colTdr}</th>
+              <th style={{ ...headCell, textAlign: 'right' }}>{tx.colDelta}</th>
             </tr>
           </thead>
           <tbody>
@@ -281,7 +284,7 @@ export default function CrossSectionComparison({
                       在哪一折上。 */}
                   {row.ambiguous && (
                     <span style={{ color: WARN }}>
-                      　⚠ 跨 {row.crossings ?? 2} 次
+                      {tx.gap}{tx.crossings(row.crossings ?? 2)}
                     </span>
                   )}
                 </td>
@@ -295,7 +298,7 @@ export default function CrossSectionComparison({
                   {row.tdr_ohm != null ? `${row.tdr_ohm.toFixed(3)} Ω` : '—'}
                   {row.tdr_min_ohm != null && row.tdr_max_ohm != null && (
                     <div style={{ color: '#9fb0c3', fontSize: 10.5 }}>
-                      窗內 {row.tdr_min_ohm.toFixed(1)}～{row.tdr_max_ohm.toFixed(1)}
+                      {tx.windowRange(row.tdr_min_ohm.toFixed(1), row.tdr_max_ohm.toFixed(1))}
                     </div>
                   )}
                 </td>
@@ -305,17 +308,17 @@ export default function CrossSectionComparison({
                     ? WARN : undefined,
                 }}>
                   {row.unstable
-                    ? '不適合比較'
+                    ? tx.notSuitable
                     : row.delta_ohm != null
                       ? `${row.delta_ohm > 0 ? '+' : ''}${row.delta_ohm.toFixed(3)}`
-                        + `（${((row.relative ?? 0) * 100).toFixed(2)}%）`
-                      : (row.reason || '—')}
+                        + tx.relative(((row.relative ?? 0) * 100).toFixed(2))
+                      : (pickText(row, 'reason', lang) || '—')}
                   {/* `note` 以前只在算不出差值時才顯示，於是「跨過六次、
                       這裡取的是最近的那一折」這種說明，剛好在有數字可看
                       （最需要提醒的時候）整句消失。有就印，跟數字並存。 */}
                   {row.note && !row.unstable && (
                     <div style={{ color: '#9fb0c3', fontSize: 10.5,
-                                  fontWeight: 400 }}>{row.note}</div>
+                                  fontWeight: 400 }}>{pickText(row, 'note', lang)}</div>
                   )}
                 </td>
               </tr>
@@ -327,18 +330,18 @@ export default function CrossSectionComparison({
       {result.rows.filter(row => (row.features || []).length > 0).map(row => (
         <div key={`features-${row.name}`}>
           <div style={{ fontWeight: 700, marginBottom: 4, color: HEADING }}>
-            {row.name}：這個截面上小於 TDR 解析度的結構
+            {tx.featuresHeading(row.name)}
           </div>
           <div style={{ ...HINT, marginBottom: 4 }}>
-            這是證據不是結論，夠不夠解釋那個差異由你判斷。
+            {tx.featuresHint}
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
               <tr>
-                <th style={headCell}>層</th>
+                <th style={headCell}>{tx.colLayer}</th>
                 <th style={headCell}>Net</th>
-                <th style={{ ...headCell, textAlign: 'right' }}>寬 mm</th>
-                <th style={{ ...headCell, textAlign: 'right' }}>離訊號 mm</th>
+                <th style={{ ...headCell, textAlign: 'right' }}>{tx.colWidth}</th>
+                <th style={{ ...headCell, textAlign: 'right' }}>{tx.colToSignal}</th>
               </tr>
             </thead>
             <tbody>
@@ -346,8 +349,8 @@ export default function CrossSectionComparison({
                 <tr key={index}>
                   <td style={cell}>{feature.layer}</td>
                   <td style={cell}>
-                    {feature.net || '（無網路）'}
-                    {feature.is_via && <span style={{ color: WARN }}>　Via</span>}
+                    {feature.net || tx.noNet}
+                    {feature.is_via && <span style={{ color: WARN }}>{tx.gap}Via</span>}
                   </td>
                   <td style={{ ...cell, textAlign: 'right' }}>
                     {feature.width_mm.toFixed(3)}
@@ -365,18 +368,18 @@ export default function CrossSectionComparison({
 
       <div>
         <div style={{ fontWeight: 700, marginBottom: 4, color: HEADING }}>
-          對不上的三種可能
+          {tx.causesHeading}
         </div>
         <div style={{ ...HINT, marginBottom: 4 }}>
-          不排序——排序等於暗示哪個比較可能，而那需要工程判斷，不是工具能給的。
+          {tx.causesHint}
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <tbody>
             {result.possible_causes.map((item, index) => (
               <tr key={index}>
-                <td style={{ ...cell, whiteSpace: 'normal' }}>{item.cause}</td>
+                <td style={{ ...cell, whiteSpace: 'normal' }}>{pickText(item, 'cause', lang)}</td>
                 <td style={{ ...cell, whiteSpace: 'normal', color: '#9fb0c3' }}>
-                  {item.how_to_check}
+                  {pickText(item, 'how_to_check', lang)}
                 </td>
               </tr>
             ))}

@@ -4,6 +4,7 @@
 // `window.pywebview` 不存在。各元件不要自己去摸 `window.pywebview`，
 // 一律經過這裡，兩種模式的分岔才只有一份。
 import { useEffect, useState } from 'react'
+import { currentLang, messagesFor } from './i18n/catalog'
 
 declare global {
   interface Window {
@@ -12,6 +13,7 @@ declare global {
     pywebview?: {
       api?: {
         copy_text?: (text: string) => Promise<boolean>
+        set_language?: (lang: string) => Promise<boolean>
       }
     }
   }
@@ -40,13 +42,36 @@ export function useDesktopShell(): boolean {
  *
  *  工具視窗裡 `navigator.clipboard` 不保證能用（WebView2 的權限與焦點規則
  *  跟瀏覽器不同），有 pywebview 的 `copy_text` 就走它；否則用瀏覽器 API。
- *  失敗時丟例外，讓呼叫端決定怎麼顯示。 */
+ *  失敗時丟例外，讓呼叫端決定怎麼顯示；訊息依目前畫面語言。 */
 export async function copyText(text: string): Promise<void> {
   const api = window.pywebview?.api
   if (api?.copy_text) {
     const ok = await api.copy_text(text)
-    if (!ok) throw new Error('工具視窗無法寫入剪貼簿。')
+    if (!ok) throw new Error(messagesFor(currentLang()).desktop.copyFailed)
     return
   }
   await navigator.clipboard.writeText(text)
+}
+
+/** 告訴工具視窗目前的介面語言（卡 0087），標題列、關窗確認框與橫幅跟著換。
+ *
+ *  純瀏覽器模式沒有 `window.pywebview`，什麼都不做；pywebview 晚注入時等
+ *  `pywebviewready` 再送一次。回傳取消函式，語言又變了就不送舊的。 */
+export function notifyShellLanguage(lang: string): () => void {
+  if (typeof window === 'undefined') return () => undefined
+  const send = () => {
+    const api = window.pywebview?.api
+    if (!api?.set_language) return false
+    try {
+      Promise.resolve(api.set_language(lang)).catch(() => undefined)
+    } catch { /* 外殼收不到不影響頁面 */ }
+    return true
+  }
+  if (send()) return () => undefined
+  const onReady = () => {
+    window.removeEventListener('pywebviewready', onReady)
+    send()
+  }
+  window.addEventListener('pywebviewready', onReady)
+  return () => window.removeEventListener('pywebviewready', onReady)
 }

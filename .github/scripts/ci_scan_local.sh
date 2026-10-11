@@ -12,9 +12,10 @@ set -u
 export LC_ALL=C
 fail=0
 
-EXCLUDES=":(exclude).git :(exclude).github/** :(exclude,glob)**/dist/** :(exclude,glob)**/*.min.js :(exclude,glob)**/package-lock.json :(exclude,glob)**/*.lock :(exclude,glob)**/*.svg :(exclude,glob)**/*.aedt :(exclude,glob)**/*.aedtz :(exclude)AGENTS.md :(exclude)README.en.md :(exclude)README.zh-TW.md :(exclude)docs/visual-assets.md"
+EXCLUDES=":(exclude).git :(exclude).github/** :(exclude,glob)**/dist/** :(exclude,glob)**/*.min.js :(exclude,glob)**/package-lock.json :(exclude,glob)**/*.lock :(exclude,glob)**/*.svg :(exclude,glob)**/*.aedt :(exclude,glob)**/*.aedtz :(exclude)AGENTS.md :(exclude)README.en.md :(exclude)README.zh-TW.md :(exclude)docs/visual-assets.md :(exclude,glob)web_app/frontend/src/i18n/*.ts"
 CUST_EXCLUDES=":(exclude).git :(exclude).github/** :(exclude,glob)**/dist/** :(exclude,glob)**/package-lock.json :(exclude,glob)**/*.svg :(exclude)AGENTS.md :(exclude)README.en.md :(exclude)README.zh-TW.md :(exclude)docs/visual-assets.md"
-REPORT_SOURCES=":(exclude,glob)**/components/ReportCenter.tsx :(exclude,glob)**/reportTypes.ts :(exclude)一鍵HTML報告_操作與交接.md"
+REPORT_SOURCES=":(exclude,glob)**/components/ReportCenter.tsx :(exclude,glob)**/reportTypes.ts :(exclude)一鍵HTML報告_操作與交接.md :(exclude,glob)web_app/frontend/src/i18n/*.ts"
+I18N="web_app/frontend/src/i18n/*.ts"
 DOCS="AGENTS.md README.en.md README.zh-TW.md docs/visual-assets.md"
 
 check() {  # check <名稱> <命中內容>
@@ -33,6 +34,13 @@ check "禁止追蹤檔型（.venv / node_modules / .aedb / .aedt.lock）" \
 pattern='(^|[^A-Za-z])D:\\|(^|[^A-Za-z])C:\\Users|\\\\[A-Za-z0-9_.-]+\\|10\.[0-9]+\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|api[_-]?key|access[_-]?token|password|secret|private[_-]?key|license.?server|private-source'
 check "敏感路徑／憑證掃描" \
   "$(git grep -I -n -i -E "$pattern" -- . $EXCLUDES || true)"
+
+# 介面語言檔（i18n）是使用者看得到的文字：「授權伺服器」是正常說明，
+# 'path\\to\\board.aedb' 是輸入框範例。這裡改用 TS 原始碼層級的樣式：
+# 真的 D:\ 在 TS 字串裡寫成 D:\\，真的 UNC 寫成 \\\\server\\。
+pattern='(^|[^A-Za-z])[A-Za-z]:(\\\\|/)|\\\\\\\\[A-Za-z0-9_.-]+\\\\|10\.[0-9]+\.[0-9]+\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|api[_-]?key|access[_-]?token|password|secret|private[_-]?key|private-source'
+check "介面語言檔的路徑／憑證掃描" \
+  "$(git grep -I -n -i -E "$pattern" -- $I18N || true)"
 
 check "客戶關鍵字（報告功能原始碼除外）" \
   "$(git grep -I -n -i -E 'customer' -- . $CUST_EXCLUDES $REPORT_SOURCES || true)"

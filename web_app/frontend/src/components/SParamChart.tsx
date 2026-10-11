@@ -1,6 +1,7 @@
 // S 參數曲線圖（純 SVG，無外部相依）— 功能3 電路串接結果檢視
 
 import { useEffect, useId, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useT } from '../i18n'
 
 export interface SParamSeries {
   label: string
@@ -62,6 +63,7 @@ function normalizedRange(min: number, max: number, fallbackSpan: number): [numbe
 export default function SParamChart({
   series, height = 220, interactive = false, onExport, exporting = false,
 }: Props) {
+  const t = useT().t.sparamChart
   const clipId = useId().replace(/:/g, '')
   const svgRef = useRef<SVGSVGElement | null>(null)
   const boxRef = useRef<HTMLDivElement | null>(null)
@@ -179,7 +181,7 @@ export default function SParamChart({
         color: 'var(--faint)', fontSize: 12, border: '1px dashed var(--border)',
         borderRadius: 6,
       }}>
-        還沒有曲線。串接完成後這裡會自動畫出插入／回波損耗與串音。
+        {t.empty}
       </div>
     )
   }
@@ -338,7 +340,7 @@ export default function SParamChart({
       {interactive && (
         <>
           <button type="button" onClick={() => setPanelOpen(open => !open)}
-            title={panelOpen ? '收起圖例與軸控制' : '展開圖例與軸控制'}
+            title={panelOpen ? t.collapseTip : t.expandTip}
             style={{
               position: 'absolute', top: 6, zIndex: 3,
               right: panelOpen ? PANEL_WIDTH + PANEL_GAP : PANEL_GAP,
@@ -347,7 +349,7 @@ export default function SParamChart({
               padding: '3px 9px', fontSize: 12, cursor: 'pointer',
               fontFamily: '"Calibri", "Microsoft JhengHei", sans-serif',
             }}>
-            {panelOpen ? '▶ 收起' : `◀ 圖例／軸（${validSeries.length}）`}
+            {panelOpen ? t.collapse : t.expand(validSeries.length)}
           </button>
 
           {panelOpen && (
@@ -361,7 +363,7 @@ export default function SParamChart({
               onWheel={event => event.stopPropagation()}
               onPointerDown={event => event.stopPropagation()}>
 
-              <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>縮放／平移軸</div>
+              <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>{t.axisMode}</div>
               <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
                 {(['xy', 'x', 'y'] as AxisMode[]).map(mode => (
                   <button key={mode} type="button"
@@ -371,7 +373,7 @@ export default function SParamChart({
                 ))}
               </div>
 
-              <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 8 }}>Y 軸範圍</div>
+              <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 8 }}>{t.yRange}</div>
               <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
                 {([['20', '0…−20'], ['40', '0…−40'], ['80', '0…−80'],
                    ['auto', 'Auto']] as [YPreset, string][]).map(([preset, label]) => (
@@ -389,12 +391,12 @@ export default function SParamChart({
                 <button type="button" className="btn--primary" disabled={exporting}
                   onClick={() => onExport(series)}
                   style={{ width: '100%', marginTop: 6, padding: '5px 0' }}>
-                  {exporting ? '匯出中…' : '匯出 Excel'}
+                  {exporting ? t.exporting : t.exportExcel}
                 </button>
               )}
 
               <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 10 }}>
-                曲線（{validSeries.length}）
+                {t.curves(validSeries.length)}
               </div>
               <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.55 }}>
                 {validSeries.map(item => (
@@ -501,10 +503,10 @@ export default function SParamChart({
       {interactive && (
         <div style={{ color: clippedBelow || clippedAbove ? '#f0b429' : 'var(--faint)', fontSize: 12, marginTop: 5, textAlign: 'center', flex: '0 0 auto' }}>
           {clippedBelow || clippedAbove
-            ? `目前 Y 軸已裁掉範圍外資料${clippedBelow ? '（下方）' : ''}${clippedAbove ? '（上方）' : ''}；按 Fit All 查看全部。`
+            ? t.clipped(`${clippedBelow ? t.clippedBelow : ''}${clippedAbove ? t.clippedAbove : ''}`)
             : readout
-              ? '讀值開啟中；按兩下關閉。'
-              : '滾輪縮放、拖曳平移、按兩下開啟讀值。'}
+              ? t.readoutOn
+              : t.hint}
         </div>
       )}
     </div>

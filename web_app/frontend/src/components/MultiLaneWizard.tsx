@@ -1,4 +1,5 @@
-// 多埠通道：多道串擾分析與位元組通道（ADR-0044、ADR-0045、ADR-0046）。
+// 眼圖精靈的多埠分支：多道串擾分析與位元組通道（ADR-0044、ADR-0045、ADR-0046）。
+// 只嵌在眼圖精靈裡（ADR-0067 收掉「進階：多埠通道」頁籤），通道與速率由精靈第 1、2 步提供。
 //
 // 這個面板的三個設計要點都直接對應 ADR，改動前請先讀那三份：
 //
@@ -10,11 +11,24 @@
 //    結果，兩者都不是安全預設。這些欄位在畫面上是必填，不是「預設值可改」。
 //  * 隨機碼型的**涵蓋率必須顯示出來**。八條道跑 2000 個 UI，最差對齊的期望
 //    出現次數是 0.0122，也就是幾乎確定沒看到最差串擾，而眼圖看起來完全正常。
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ModelPackage } from './ModelLibrary'
-import { useCascadedChannel } from './useCascadedChannel'
 import RunHistory, { RestorableRun } from './RunHistory'
+import EyeImageGallery from './EyeImageGallery'
 import { LicenseTag, useLicenseBlock } from './LicenseTag'
+import { releasedWithErrors, pickText, pickList, errorText } from '../backendFields'
+import { useT } from '../i18n'
+import type { Messages } from '../i18n'
+import { confirmationState } from '../eyeWizard'
+import SelectorFunnelPanel from './SelectorFunnelPanel'
+import { selectorSignature } from '../selectorFunnelSelection'
+import type { SelectorChange, SelectorInput } from '../selectorFunnelSelection'
+type MultiLaneText = Messages['multiLane']
+
+function failure(data: any, fallback: string, key = 'detail'): Error {
+  return Object.assign(new Error(data?.[key] || fallback),
+    { detail_en: data?.[`${key}_en`] })
+}
 
 interface PortBinding {
   port_index: number
@@ -53,6 +67,7 @@ interface Binding {
 
 interface VariantChoice {
   selector: string
+  direct_model?: string
   /** 這一輪扮演的角色。方向定案之後只有一欄用得到——寫入時去追究顆粒的
       驅動強度為什麼不是 48，那個值屬於控制器，問錯了對象。 */
   role: 'driver' | 'receiver' | 'unknown'
@@ -112,7 +127,7 @@ interface Suggestion {
   bandwidth: EdgeBandwidth | null
   lane_orientation: { label: string; input_port: string; output_port: string;
     input_index: number; output_index: number }[]
-  touchstone: { path: string; n_ports: number; port_names: string[]; has_port_names: boolean }
+  touchstone: { path: string; n_ports: number; port_names: string[]; has_port_names: boolean; sha256?: string }
   binding: Binding
   packages: { side: number; package_id: string; display_name: string; component: string }[]
   two_package: boolean
@@ -130,16 +145,14 @@ interface Suggestion {
   }
   blockers: string[]
   warnings: string[]
+  /** 後端 with_warning_fields 補的，與 warnings 同順序。 */
+  warning_codes?: string[]
   ready: boolean
 }
 
 type Disposition = { kind: 'terminate' | 'open' | 'ground'; impedance_ohm?: number; reference_volt?: number }
 
-const EVIDENCE_LABEL: Record<string, string> = {
-  high: '可整批確認',
-  partial: '待逐一檢視',
-  none: '必須人工指定',
-}
+
 
 /** 隨機碼型下最差對齊的期望出現次數。每條攻擊者要轉態且方向相反，各四分之一。 */
 function worstCaseExpectation(laneCount: number, uiCount: number): number {
@@ -171,47 +184,55 @@ interface ChannelJob {
  * （只有 Tx 或只有 Rx）被選到不該去的那一側，跑到求解才爆。判定材料全在
  * manifest 裡，所以在選單上**當場**擋掉，而不是讓人走完流程才知道。
  */
-function sideBlocker(item: ModelPackage, side: 'tx' | 'rx'): string {
+function sideBlocker(item: ModelPackage, side: 'tx' | 'rx', m: MultiLaneText): string {
   const caps = item.capabilities
   if (!caps) return ''
-  if (side === 'tx' && caps.tx_models === 0) return '沒有驅動器模型'
-  if (side === 'rx' && caps.rx_models === 0) return '沒有接收器模型'
+  if (side === 'tx' && caps.tx_models === 0) return m.noDriver
+  if (side === 'rx' && caps.rx_models === 0) return m.noReceiver
   return ''
 }
 
-function packageLabel(item: ModelPackage, side: 'tx' | 'rx'): string {
-  const blocker = sideBlocker(item, side)
-  if (blocker) return `${item.display_name}（${blocker}）`
+function packageLabel(item: ModelPackage, side: 'tx' | 'rx', m: MultiLaneText): string {
+  const blocker = sideBlocker(item, side, m)
+  if (blocker) return `${item.display_name}${m.paren(blocker)}`
   const status = item.compatibility?.status
-  if (status === 'block') return `${item.display_name}（有錯誤）`
-  if (status === 'warning') return `${item.display_name}（有警告）`
+  if (status === 'block') return `${item.display_name}${m.paren(m.hasErrors)}`
+  if (status === 'warning') return `${item.display_name}${m.paren(m.hasWarnings)}`
   return item.display_name
 }
 
 
-export default function MultiLaneWizard(
-  { packages, onLibraryChanged }:
-  { packages: ModelPackage[]; onLibraryChanged?: () => void | Promise<void> },
-) {
-  const cascaded = useCascadedChannel()
-  const [touchstone, setTouchstone] = useState('')
+export interface MultiLaneWizardProps {
+  packages: ModelPackage[]
+  onLibraryChanged?: () => void | Promise<void>
+  /** 通道與速率由精靈第 1、2 步提供；`null` 是使用者還沒填，不代用任何預設值。 */
+  touchstonePath: string
+  dataRateGbps: number | null
+  /** 執行歷史「回到這一版設定」時把通道／速率填回精靈。 */
+  onTouchstoneChange?: (path: string) => void
+  onDataRateChange?: (rate: number) => void
+  /** 精靈目前在第幾步；只顯示屬於這一步的區塊。 */
+  wizardStep: number
+  /** 上層精靈的規範與覆寫紀錄；與本元件的變體依據一起保存。 */
+  presetSelectionBasis?: Record<string, unknown> | null
+}
+
+export default function MultiLaneWizard({
+  packages, onLibraryChanged, touchstonePath, dataRateGbps,
+  onTouchstoneChange, onDataRateChange, wizardStep, presetSelectionBasis,
+}: MultiLaneWizardProps) {
+  const { t, lang } = useT()
+  const m = t.multiLane
+  const hiddenStep = (step: number) => wizardStep !== step
+  const touchstone = touchstonePath
+  const setTouchstone = (path: string) => onTouchstoneChange?.(path)
   const [packageId, setPackageId] = useState('')
   // 另一側的模型套件。DDR 的兩端永遠是控制器與顆粒兩家料號，只給一份會讓
   // 對側綁到同一顆模型——綁得上、是 high 證據、眼圖照畫，只是型號整組是反的。
   const [rxPackageId, setRxPackageId] = useState('')
-  const [dataRate, setDataRate] = useState(1.6)
-  // 驅動強度與 ODT 是**各元件自己的**暫存器設定，不是一組共用的數字。
-  // 寫入用控制器的驅動強度配顆粒的 ODT；同一組值套到兩側，其中一側必然
-  // 對不上——實測 48 Ω 是控制器的值，顆粒只有 34／40 Ω，於是顆粒側整批
-  // 「找不到變體」，而 48 本身沒有錯。
-  const [driveOhmBySide, setDriveOhmBySide] = useState<[string, string]>(['', ''])
-  const [odtOhmBySide, setOdtOhmBySide] = useState<[string, string]>(['', ''])
-  // DDR3 與 DDR3L 常同檔並存且 Z0 完全一樣，差別只在 VDDQ 是 1.5 V 還是
-  // 1.35 V。選錯不會報錯，只會量到別人的板子。
-  const [technology, setTechnology] = useState('')
-  /** 選擇器 → 使用者親手指定的變體。工具說「需要人工判斷」時要有地方回答，
-   *  否則那句話等於把按鈕永久鎖住（實測 PDIFF 有 17 個同阻值的候選）。 */
-  const [variantPick, setVariantPick] = useState<Record<string, string>>({})
+  // 精靈的空速率仍是待填，不代用任何預設值。
+  const dataRate = dataRateGbps ?? 0
+  const setDataRate = (rate: number) => onDataRateChange?.(rate)
   /** Port 索引 → 使用者指定的緩衝器（`[Model Selector]` 或模型名稱）。 */
   const [portModels, setPortModels] = useState<Record<number, string>>({})
   // 上升時間只影響**預檢**（拐點 0.5/Tr 決定 S 參數頻寬夠不夠、也決定
@@ -271,12 +292,20 @@ export default function MultiLaneWizard(
   // 分析狀態就顯示在這一頁。先前它只在「標準 IBIS 通道」頁，那一頁移掉之後
   // 多埠分析會變成「按下去就沒有下文」。
   const [job, setJob] = useState<ChannelJob | null>(null)
+  /** 這個面板自己送出的工作（#0088）：精靈與其他面板共用同一份工作狀態，
+   *  不過濾的話別人的結果會出現在這裡。 */
+  const ownJobIds = useRef(new Set<string>())
+  const own = (id?: string) => { if (id) ownJobIds.current.add(String(id)) }
   const [laneCount, setLaneCount] = useState<number | null>(null)
   // 方向沒有預設值：雙向 I/O 的讀與寫都真實存在，替使用者選一個等於
   // 有一半的機率量到反方向的通道，而且沒有任何跡象（ADR-0049）。
   const [drivingSide, setDrivingSide] = useState<number | null>(null)
   const [dispositions, setDispositions] = useState<Record<number, Disposition>>({})
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null)
+  const [confirmedSignature, setConfirmedSignature] = useState<string | null>(null)
+  const [selectorDecisions, setSelectorDecisions] = useState<Record<string, SelectorChange>>({})
+  const [selectorAnswers, setSelectorAnswers] = useState<Record<string,
+    { odtOhm: number | null; driveOhm: number | null }>>({})
   const [busy, setBusy] = useState(false)
   // 會用到 Ansys 的按鈕（ADR-0062）：沒有空位就變灰並寫原因。
   const quickCheckBlock = useLicenseBlock(['model_check'])
@@ -291,13 +320,47 @@ export default function MultiLaneWizard(
   const [addrDriver, setAddrDriver] = useState('')
   const [addrReceivers, setAddrReceivers] = useState('')
   const [addrCmdRate, setAddrCmdRate] = useState<'1T' | '2T'>('1T')
-  const [addrResult, setAddrResult] = useState<any | null>(null)
+  const [addrCheck, setAddrCheck] = useState<{ signature: string; data: any } | null>(null)
   const [addrBusy, setAddrBusy] = useState(false)
   const [addrError, setAddrError] = useState('')
+  const addrSignature = JSON.stringify([touchstone, addrDriver, addrReceivers, addrCmdRate, dataRate])
+  const currentAddrSignature = useRef(addrSignature)
+  currentAddrSignature.current = addrSignature
+  const addrSeq = useRef(0)
+  const pendingAddr = useRef<{ seq: number; signature: string } | null>(null)
+  const addrResult = addrCheck?.signature === addrSignature ? addrCheck.data : null
+  useEffect(() => {
+    setAddrCheck(null); setAddrError('')
+    if (pendingAddr.current && pendingAddr.current.signature !== addrSignature) {
+      addrSeq.current += 1
+      pendingAddr.current = null
+      setAddrBusy(false)
+    }
+  }, [addrSignature])
   /** 快速檢驗（近無損直連）這一輪的 job 與實際用到的兩顆模型。
    *  結果沿用同一個 /api/ibis-channel/status，靠 job_id 認出它是基準眼圖。 */
   const [quickCheck, setQuickCheck] = useState<
     { jobId: string; txModel: string; rxModel: string } | null>(null)
+
+  const suggestSeq = useRef(0)
+  const pendingSuggest = useRef<{ seq: number; signature: string } | null>(null)
+  const suggestSignature = (side = drivingSide) => JSON.stringify([
+    touchstone, packageId, rxPackageId, dataRate, side,
+    portModels, riseTimePs, patternKind, transientUi,
+  ])
+  const currentSuggestSignature = useRef('')
+  currentSuggestSignature.current = suggestSignature()
+  // 父精靈改速率、或使用者改選型時，未完成的舊預檢不得恢復原接線。
+  useEffect(() => {
+    const pending = pendingSuggest.current
+    if (pending && pending.signature !== currentSuggestSignature.current) {
+      suggestSeq.current += 1
+      pendingSuggest.current = null
+      setBusy(false)
+    }
+    setSuggestion(null)
+  }, [touchstone, packageId, rxPackageId, dataRate, drivingSide,
+    portModels, riseTimePs, patternKind, transientUi])
 
   const ibisPackages = useMemo(
     () => packages.filter(item => item.kind === 'ibis'), [packages])
@@ -340,6 +403,11 @@ export default function MultiLaneWizard(
   /** `sideOverride` 讓方向下拉一改就重新推導，不必等 setState 生效。 */
   async function runSuggest(sideOverride?: number | null) {
     const side = sideOverride === undefined ? drivingSide : sideOverride
+    const seq = ++suggestSeq.current
+    const signature = suggestSignature(side)
+    pendingSuggest.current = { seq, signature }
+    const current = () => seq === suggestSeq.current
+      && signature === currentSuggestSignature.current
     setBusy(true); setError(''); setSuggestion(null); setStarted('')
     try {
       const body: Record<string, unknown> = {
@@ -348,11 +416,6 @@ export default function MultiLaneWizard(
       }
       if (rxPackageId) body.rx_package_id = rxPackageId
       if (side !== null) body.driving_side = side
-      body.ohms_by_side = [0, 1].map(side => ({
-        drive_ohm: driveOhmBySide[side] ? Number(driveOhmBySide[side]) : null,
-        odt_ohm: odtOhmBySide[side] ? Number(odtOhmBySide[side]) : null,
-      }))
-      if (technology) body.technology = technology
       // 模型檔裡沒有那根腳的 Port，由使用者指定用哪顆緩衝器——等同
       // Ansys DDR Wizard 的「Net Group」指派。不給的話 DM 只剩「終結掉」
       // 一個選項，而終結一條真實的訊號路徑會低估串擾。
@@ -367,14 +430,17 @@ export default function MultiLaneWizard(
         body: JSON.stringify(body),
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data?.detail || '預檢失敗')
+      if (!current()) return
+      if (!response.ok) throw failure(data,  m.suggestFailed)
       setSuggestion(data as Suggestion)
       setLaneCount(null)
       setDispositions({})
       // portModels 不清：那是使用者填的，清掉等於每次重新預檢都要再填一次。
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : String(exc))
-    } finally { setBusy(false) }
+      if (current()) setError(errorText(exc, lang))
+    } finally {
+      if (current()) { pendingSuggest.current = null; setBusy(false) }
+    }
   }
 
   /** 反方向沒有驅動器的道。DDR 的 DM 是單向的，讀取方向會少這一條。 */
@@ -411,6 +477,10 @@ export default function MultiLaneWizard(
   }, [suggestion, usedPorts, reverseDroppedPorts])
 
   const strobePair = suggestion?.group.strobe_pairs?.[0]
+  // 兩側都是顆粒（#0099）：顯示後端那句，中英文由代碼表給，這裡只加標題。
+  const bothDramIndex = suggestion?.warning_codes?.indexOf('multilane.both_sides_dram') ?? -1
+  const bothDramWarning = suggestion && bothDramIndex >= 0
+    ? pickList(suggestion, 'warnings', lang)[bothDramIndex] : ''
   const vref = Number(vddq) / 2
   const thresholds = {
     vih_ac: vref + Number(acOffset), vil_ac: vref - Number(acOffset),
@@ -428,22 +498,22 @@ export default function MultiLaneWizard(
       const keys = Object.keys(parsed)
       const allowed = ['tds_ps', 'tdh_ps', 'tis_ps', 'tih_ps']
       const bad = keys.filter(k => !allowed.includes(k))
-      if (bad.length) return { table: null, error: `不認得的項目：${bad.join('、')}` }
+      if (bad.length) return { table: null, error: m.deratingUnknownKeys(bad.join(m.listSep)) }
       for (const key of keys) {
         const rows = parsed[key]
-        if (!Array.isArray(rows)) return { table: null, error: `${key} 要是陣列` }
+        if (!Array.isArray(rows)) return { table: null, error: m.deratingNotArray(key) }
         for (const row of rows) {
           if (typeof row?.slew_v_per_ns !== 'number'
             || typeof row?.adjust_ps !== 'number') {
-            return { table: null, error: `${key} 每列都要有 slew_v_per_ns 與 adjust_ps` }
+            return { table: null, error: m.deratingRowFields(key) }
           }
         }
       }
       return { table: parsed, error: '' }
     } catch (exc) {
-      return { table: null, error: exc instanceof Error ? exc.message : String(exc) }
+      return { table: null, error: errorText(exc, lang) }
     }
-  }, [deratingText])
+  }, [deratingText, m])
 
   /** 時序相關的送出欄位。沒有選通、或使用者關掉，就一個都不送。 */
   function timingPayload(): Record<string, unknown> {
@@ -458,10 +528,10 @@ export default function MultiLaneWizard(
     if (tds && tdh) {
       payload.compliance_profile = {
         schema_version: 1,
-        name: `DDR 判讀準位（使用者提供）`,
+        name: m.userProfileName,
         version: 'user',
         applicability: `${dataRate} Gbps`,
-        source: '由使用者於介面填入',
+        source: m.userProfileSource,
         limits: { setup_margin_ps: 0, hold_margin_ps: 0 },
         requirements: {
           tds_ps: Number(tds), tdh_ps: Number(tdh),
@@ -499,26 +569,7 @@ export default function MultiLaneWizard(
    */
   useEffect(() => {
     setSuggestion(null); setDrivingSide(null); setStarted('')
-  }, [touchstone, packageId, rxPackageId])
-
-  /** 挑一個多埠 Touchstone。
-   *
-   *  沿用 `/api/browse_touchstone`（外部檔案接線本來就在用），它是多選的，
-   *  這裡只要一個就取第一個。按了取消會回空陣列——那不是錯誤，不要跳訊息。
-   *
-   *  換了檔案就把預檢結果清掉：那份結果是綁在上一個 Touchstone 的埠名與埠數
-   *  上的，留著會讓人以為新檔案已經預檢過了。
-   */
-  async function browseTouchstone() {
-    setBusy(true); setError('')
-    try {
-      const picked = await fetch('/api/browse_touchstone').then(r => r.json())
-      const first: string = picked?.paths?.[0] || ''
-      if (first) { setTouchstone(first); setSuggestion(null); setStarted('') }
-    } catch (exc) {
-      setError(exc instanceof Error ? exc.message : String(exc))
-    } finally { setBusy(false) }
-  }
+  }, [touchstone, packageId, rxPackageId, dataRate])
 
   /** 就地匯入 IBIS：瀏覽、匯入、重新整理，然後把新模型直接選起來。
    *
@@ -540,13 +591,13 @@ export default function MultiLaneWizard(
           body: JSON.stringify({ path }),
         })
         const data = await response.json()
-        if (!response.ok) throw new Error(data?.detail || `匯入失敗：${path}`)
+        if (!response.ok) throw failure(data,  m.importFailed(path))
         lastId = data?.model?.package_id || lastId
       }
       await onLibraryChanged?.()
       if (lastId) (target === 'tx' ? setPackageId : setRxPackageId)(lastId)
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : String(exc))
+      setError(errorText(exc, lang))
     } finally { setBusy(false) }
   }
 
@@ -568,47 +619,58 @@ export default function MultiLaneWizard(
         }),
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data?.detail || '快速檢驗啟動失敗')
+      if (!response.ok) throw failure(data,  m.quickCheckFailed)
+      own(data.job_id)
       setQuickCheck({
         jobId: data.job_id || '',
         txModel: data.quick_check?.tx_model || '',
         rxModel: data.quick_check?.rx_model || '',
       })
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : String(exc))
+      setError(errorText(exc, lang))
     } finally { setBusy(false) }
   }
 
   /** 位址命令群：把埠名攤成 fly-by 的道（乙7）。 */
   async function analyzeAddressGroup() {
-    setAddrBusy(true); setAddrError(''); setAddrResult(null)
+    const seq = ++addrSeq.current
+    const signature = addrSignature
+    pendingAddr.current = { seq, signature }
+    const current = () => seq === addrSeq.current && signature === currentAddrSignature.current
+    setAddrBusy(true); setAddrError(''); setAddrCheck(null)
     try {
       const response = await fetch('/api/address-command/lanes', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           touchstone_path: touchstone,
           driver_component: addrDriver.trim(),
-          receiver_components: addrReceivers.split(/[，,]/)
+          receiver_components: addrReceivers.split(/[\uFF0C,]/)
             .map(item => item.trim()).filter(Boolean),
           data_rate_gbps: dataRate,
           command_rate: addrCmdRate,
         }),
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data?.detail || '分組失敗')
-      if (data.reason) throw new Error(data.reason)
-      setAddrResult(data)
+      if (!current()) return
+      if (!response.ok) throw failure(data,  m.groupFailed)
+      if (data.reason) throw failure(data, '', 'reason')
+      setAddrCheck({ signature, data })
     } catch (exc) {
-      setAddrError(exc instanceof Error ? exc.message : String(exc))
-    } finally { setAddrBusy(false) }
+      if (current()) setAddrError(errorText(exc, lang))
+    } finally {
+      if (current()) { pendingAddr.current = null; setAddrBusy(false) }
+    }
   }
 
   /** 以指定顆粒的 CK 對為時間基準啟動位址群分析。
    *  電路裡留著**全部**接收端（fly-by 的負載就是那幾顆），只換 strobe。 */
   async function startAddressRun(device: string) {
     if (!suggestion || !addrResult) return
+    if (addrCheck?.signature !== currentAddrSignature.current) return
+    if (confirmation !== 'confirmed') return
+    if (addrBusy || variantPending || Boolean(job?.running) || Boolean(multiLaneBlock)) return
     if (directionPending) {
-      setAddrError('匯流排方向尚未指定，請先在上方選定驅動側。')
+      setAddrError(m.directionNotSet)
       return
     }
     setAddrBusy(true); setAddrError(''); setStarted('')
@@ -625,6 +687,7 @@ export default function MultiLaneWizard(
         body: JSON.stringify({
           touchstone_path: touchstone,
           package_id: packageId, rx_package_id: rxPackageId,
+          selection_basis: selectionBasis,
           lanes: addrResult.lanes,
           // 位址群就是 fly-by（一驅動多接收）。分組端點已經這樣標了，
           // 照原樣送過去；讓後端去猜拓樸，只要有一顆顆粒沒被歸進來，
@@ -650,16 +713,16 @@ export default function MultiLaneWizard(
         }),
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data?.detail || '啟動失敗')
-      setStarted(`位址群已排入背景（job ${data.job_id ?? '—'}，`
-        + `時間基準：${device} 的 CK 對）。進度顯示在下方。`)
+      if (!response.ok) throw failure(data,  m.startFailed)
+      own(data.job_id); setStarted(m.addrQueued(data.job_id ?? '—', device))
     } catch (exc) {
-      setAddrError(exc instanceof Error ? exc.message : String(exc))
+      setAddrError(errorText(exc, lang))
     } finally { setAddrBusy(false) }
   }
 
   async function start(sweep = false) {
     if (!suggestion) return
+    if (!canStart || Boolean(multiLaneBlock) || (sweep && corners.length === 0)) return
     setBusy(true); setError(''); setStarted('')
     try {
       // 驅動器取自**驅動側**的選擇器、接收器取自接收側，不能兩個都拿
@@ -692,13 +755,13 @@ export default function MultiLaneWizard(
        * 找不到對應的選擇器就留空——後端會沿用共用的那一組，不會失敗。
        */
       const variantFor = (portIndex: number | undefined,
-        role: VariantChoice['role']): string => {
+        role: VariantChoice['role'], targetRole = role): string => {
         if (portIndex === undefined) return ''
         const row = suggestion.binding.bindings[portIndex]
         if (!row?.model) return ''
         const match = suggestion.variant_choices.find(
           item => item.selector === row.model && item.role === role)
-        return match ? pickedVariant(match) : ''
+        return match ? pickedVariant(match, targetRole) : ''
       }
       const choice = {
         tx: { selected: driver ? pickedVariant(driver) : '' },
@@ -721,16 +784,16 @@ export default function MultiLaneWizard(
               input_port: oriented?.output_port ?? lane.names[1],
               output_port: oriented?.input_port ?? lane.names[0],
               // 反方向：驅動器與接收器對調，所以角色也要跟著對調。
-              tx_buffer: variantFor(oriented?.output_index, 'receiver'),
-              rx_buffer: variantFor(oriented?.input_index, 'driver'),
+              tx_buffer: variantFor(oriented?.output_index, 'receiver', 'driver'),
+              rx_buffer: variantFor(oriented?.input_index, 'driver', 'receiver'),
             }
           })
         : []
       const reverse = driver && receiver && reverseLanes.length ? {
         mode: busMode === 'write' ? 'read' : 'write',
         driving_side: receiver.side,
-        tx_buffer: pickedVariant(receiver),
-        rx_buffer: pickedVariant(driver),
+        tx_buffer: pickedVariant(receiver, 'driver'),
+        rx_buffer: pickedVariant(driver, 'receiver'),
         lanes: reverseLanes,
         // 整組都送過去，遠端會把「這個方向由緩衝器驅動」的那幾個忽略掉。
         // 不能只送共用的那組：反方向少跑的道，它們的 Port 在這個方向沒人用。
@@ -744,6 +807,7 @@ export default function MultiLaneWizard(
         body: JSON.stringify({
           touchstone_path: touchstone, package_id: packageId,
           rx_package_id: rxPackageId,
+          selection_basis: selectionBasis,
           // 依定案的方向送出。遠端會再強制一次（ADR-0049），這裡送對的是
           // 為了讓畫面上顯示的方向與送出的內容一致。
           lanes: lanes.slice(0, selectedLanes).map((lane, index) => {
@@ -785,30 +849,30 @@ export default function MultiLaneWizard(
         }),
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(data?.detail || '啟動失敗')
+      if (!response.ok) throw failure(data,  m.startFailed)
       // 勾了雙向就是「方向 × Corner」。只印 Corner 數會與進度列的 [1/6]
       // 對不上——畫面上兩個數字互相矛盾時，看的人只會不信任兩個。
       const passes = corners.length * (sweep && bothDirections && reverse ? 2 : 1)
-      setStarted(`已排入背景（job ${data.job_id ?? '—'}）。`
-        + (sweep ? `共 ${passes} 組（${corners.length} 個 Corner`
-            + (passes > corners.length ? ' × 2 個方向' : '') + '），依序執行。' : '')
-        + '進度顯示在下方的「分析狀態與結果」。')
+      own(data.job_id); setStarted(m.queued(data.job_id ?? '—')
+        + (sweep ? m.sweepPlan(passes, corners.length, passes > corners.length) : '')
+        + m.progressBelow)
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : String(exc))
+      setError(errorText(exc, lang))
     } finally { setBusy(false) }
   }
 
-  const jobElapsed = job?.started_at
-    ? Math.max(0, Math.round(((job.finished_at || Date.now() / 1000) - job.started_at)))
+  const shownJob = job && ownJobIds.current.has(String(job.job_id || '')) ? job : null
+  const jobElapsed = shownJob?.started_at
+    ? Math.max(0, Math.round(((shownJob.finished_at || Date.now() / 1000) - shownJob.started_at)))
     : 0
-  const jobResult = job?.status === 'done' ? job?.result : null
+  const jobResult = shownJob?.status === 'done' ? shownJob?.result : null
   const ranking = jobResult?.ranking || null
   const signalTables: any[] = jobResult?.sweep
     ? (jobResult.tables || [])
     : (jobResult?.signal_table ? [jobResult.signal_table] : [])
   const timingWhy = jobResult?.sweep
-    ? (jobResult.runs?.[0]?.result?.timing?.why || '')
-    : (jobResult?.timing?.why || '')
+    ? pickText(jobResult.runs?.[0]?.result?.timing, 'why', lang)
+    : pickText(jobResult?.timing, 'why', lang)
   const fmtPs = (value: unknown) =>
     typeof value === 'number' ? value.toFixed(1) : '—'
   /** 目前顯示的結果是不是快速檢驗那一輪（近無損直連基準）。 */
@@ -825,7 +889,7 @@ export default function MultiLaneWizard(
     //   走這一種）、多道單次 lanes。少了中間那種，快速檢驗只會有狀態沒有圖。
     const groups: { lanes: any[]; corner: string }[] = jobResult.sweep
       ? (jobResult.runs || []).map((run: any) => ({
-        lanes: run?.result?.lanes || [], corner: run?.label || '' }))
+        lanes: run?.result?.lanes || [], corner: pickText(run, 'label', lang) }))
       : jobResult.results
         ? (jobResult.results || []).map((res: any) => ({
           lanes: res?.lanes || [], corner: '' }))
@@ -837,17 +901,18 @@ export default function MultiLaneWizard(
         const imageIndex = (lane.image_paths || []).length > 1 ? 1 : 0
         cards.push({
           key: `${analysisIndex}-${laneIndex}`,
-          title: isQuickCheck ? '基準眼圖（近無損直連）'
+          title: isQuickCheck ? m.baselineEye
             : lane.label || `Lane ${laneIndex + 1}`,
           corner: isQuickCheck && quickCheck
             ? `${quickCheck.txModel} → ${quickCheck.rxModel}` : group.corner,
           imageUrl: `/api/ibis-channel/image?analysis_index=${analysisIndex}`
-            + `&lane_index=${laneIndex}&image_index=${imageIndex}`,
+            + `&lane_index=${laneIndex}&image_index=${imageIndex}`
+            + `&job_id=${encodeURIComponent(String(shownJob?.job_id || ''))}`,
         })
       })
     })
     return cards
-  }, [jobResult, isQuickCheck, quickCheck])
+  }, [jobResult, isQuickCheck, quickCheck, m, lang])
 
   const missingDisposition = portsNeedingDisposition.filter(item => {
     const plan = dispositions[item.index]
@@ -855,28 +920,65 @@ export default function MultiLaneWizard(
     if (plan.kind !== 'terminate') return false
     return plan.impedance_ohm === undefined || plan.reference_volt === undefined
   })
-  /** 這個選擇器這一輪實際會用到的那一欄。方向未定時兩欄都算。 */
-  const usedRoles = (item: VariantChoice) =>
-    item.role === 'driver' ? [item.tx]
-      : item.role === 'receiver' ? [item.rx]
-        : [item.tx, item.rx]
   /**
    * 人工覆寫的鍵要含**側**。兩份 `.ibs` 出自同一個系列時選擇器會同名
    * （Ansys 的控制器與顆粒兩邊都叫 `ansys_ddr4_dq`），只用名稱當鍵的話
    * 改控制器那一欄會連顆粒那一欄一起改掉，而畫面上兩欄都顯示成你選的值。
    */
-  const variantKey = (item: VariantChoice) => `${item.side}:${item.selector}`
-  /** 這個選擇器最後會用哪一個變體：人工指定優先，其次工具選的。 */
-  const pickedVariant = (item: VariantChoice) =>
-    variantPick[variantKey(item)] || usedRoles(item).find(r => r.selected)?.selected || ''
-  const variantPending = (suggestion?.variant_choices ?? [])
-    .some(item => usedRoles(item).some(role => role.requires_user)
-      && !variantPick[variantKey(item)])
+  const variantKey = (item: VariantChoice) => `${item.side}:${item.selector}:${item.role}`
+  // 反向求解須重新依角色選型：正向的接收端 ODT 不能直接拿去當驅動端。
+  const reversePorts = new Set(lanes.slice(0, selectedLanes)
+    .filter(lane => !reverseOnlyDropped.includes(lane.label)).flatMap(lane => lane.ports))
+  const participatesInReverse = (item: VariantChoice) =>
+    (suggestion?.binding.bindings || []).some((row, index) =>
+      reversePorts.has(row.port_index ?? index) && row.model === item.selector
+        && (row.side == null || row.side === item.side))
+  const selectorChoices = (suggestion?.variant_choices || []).flatMap(item =>
+    bothDirections && item.role !== 'unknown' && participatesInReverse(item)
+      ? [item, { ...item, role: item.role === 'driver' ? 'receiver' as const : 'driver' as const }]
+      : [item])
+  const selectorInput = (item: VariantChoice): SelectorInput => {
+    const answers = selectorAnswers[variantKey(item)]
+    return {
+      packageId: suggestion?.packages.find(p => p.side === item.side)?.package_id
+        || (item.side === 0 ? packageId : rxPackageId || packageId),
+      selector: item.selector, side: item.side, dataRateGbps: dataRate,
+      driving: item.role === 'driver' ? true : item.role === 'receiver' ? false
+        : suggestion?.bus_direction.driving_side == null ? null
+          : suggestion.bus_direction.driving_side === item.side,
+      odtOhm: answers?.odtOhm ?? null, driveOhm: answers?.driveOhm ?? null,
+      directModel: item.direct_model || '',
+    }
+  }
+  const currentDecision = (item: VariantChoice) => {
+    const decision = selectorDecisions[variantKey(item)]
+    return decision?.inputSignature === selectorSignature(selectorInput(item)) ? decision : null
+  }
+  const selectionBasis = {
+    ...Object.fromEntries(selectorChoices
+      .map(item => [variantKey(item), currentDecision(item)?.selectionBasis || {}])),
+    ...(presetSelectionBasis ? { preset: presetSelectionBasis } : {}),
+  }
+  /** 這個選擇器最後會用哪一個變體：變體漏斗的決定（含使用者在漏斗裡的覆寫）。 */
+  const pickedVariant = (item: VariantChoice, role = item.role) =>
+    currentDecision({ ...item, role })?.model || ''
+  const variantPending = selectorChoices
+    .some(item => !currentDecision(item) || currentDecision(item)!.requiresUser)
   const directionPending = Boolean(suggestion)
     && suggestion!.bus_direction.driving_side === null
+  const confirmationSignature = JSON.stringify([
+    touchstone, packageId, rxPackageId, dataRate, suggestion, drivingSide,
+    selectionBasis, portModels,
+    riseTimePs, patternKind, transientUi, settleUi, bothPatterns,
+    measureTiming, busMode, bothDirections, vddq, acOffset, dcOffset,
+    tds, tdh, maskUi, maskMv, deratingText, corners, laneCount, dispositions,
+    addrDriver, addrReceivers, addrCmdRate, addrResult,
+  ])
+  const confirmation = confirmationState(confirmedSignature, confirmationSignature)
   const canStart = Boolean(suggestion) && suggestion!.blockers.length === 0
     && missingDisposition.length === 0 && !variantPending && !directionPending && !busy
     && selectedLanes >= 1
+    && confirmation === 'confirmed'
 
   /** 把某一次紀錄的物理輸入填回表單。
    *
@@ -889,41 +991,41 @@ export default function MultiLaneWizard(
     if (run.rxPackageId) setRxPackageId(run.rxPackageId)
     if (run.dataRateGbps > 0) setDataRate(run.dataRateGbps)
     setError(run.unrestored.length
-      ? `已填回通道、模型套件與資料率。這幾項要自己重設：${run.unrestored.join('、')}。`
-      : '已填回這一版的設定。舊紀錄原封不動保留。')
+      ? m.restoredPartial(run.unrestored.join(m.listSep))
+      : m.restoredAll)
   }
+
+  // CA 群組的送解放在第五步（第 4 步只做分組）。
+  const addressDevices = () => (addrResult?.devices || []).map((device: any) => (
+    <div key={device.device} className="field-row" style={{ alignItems: 'center' }}>
+      <span>{m.device}<strong>{device.device}</strong>{m.laneCountParen(device.lanes.length)}</span>
+      {device.strobe_labels?.length === 2
+        ? <button className="btn"
+            disabled={!suggestion || addrBusy || directionPending || variantPending || Boolean(job?.running)
+              || Boolean(multiLaneBlock) || confirmation !== 'confirmed'}
+            title={multiLaneBlock || (!suggestion ? m.needSuggestTip : directionPending ? m.needDirectionTip : m.startWithCkTip)}
+            onClick={() => void startAddressRun(device.device)}>{m.startWithDevice(device.device)}</button>
+        : <span className="hint">{pickText(device, 'why', lang)}</span>}
+    </div>
+  ))
 
   return (
     <div className="ibis-wizard multi-lane-wizard">
-      <section>
-        <h3>選擇多埠 Touchstone 與 IBIS</h3>
+      {wizardStep === 5 && error && <p className="error">{error}</p>}
+      {wizardStep === 5 && addrError && <p className="error">{addrError}</p>}
+      {wizardStep === 5 && confirmation !== 'confirmed' && <p className="warning">
+        {confirmation === 'stale' ? t.eyeWizard.stale : t.eyeWizard.missing.confirm}</p>}
+      <section data-wizard-step={3} hidden={hiddenStep(3)}>
+        <h3>{m.selectTitle}</h3>
         <p className="hint">
-          8 埠以上的完整通道模型。位元組通道與多道串擾的數值不可互相比較。
-        </p>
-        <label>Touchstone 路徑
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <input className="input is-wide" value={touchstone}
-              placeholder="path\to\channel.s16p"
-              onChange={event => setTouchstone(event.target.value)} />
-            <button className="btn" disabled={busy}
-              onClick={() => void browseTouchstone()}>瀏覽…</button>
-          </div>
-        </label>
-        {cascaded && <div className="ibis-wizard__from-cascade">
-          <button className="btn"
-            onClick={() => setTouchstone(cascaded.path)}>帶入串接結果</button>
-          <code title={cascaded.path}>
-            {cascaded.path.split(/[\\/]/).pop()}（{cascaded.n_ports} Port）
-          </code>
-        </div>}
-        <label>IBIS 模型套件（驅動側）
-          <select className="input" value={packageId}
+          {m.selectHint}</p>
+        <label>{m.txPackage}<select className="input" value={packageId}
             onChange={event => setPackageId(event.target.value)}>
-            <option value="">請選擇…</option>
+            <option value="">{m.choose}</option>
             {ibisPackages.map(item => (
               <option key={item.package_id} value={item.package_id}
-                disabled={Boolean(sideBlocker(item, 'tx'))}>
-                {packageLabel(item, 'tx')}
+                disabled={Boolean(sideBlocker(item, 'tx', m))}>
+                {packageLabel(item, 'tx', m)}
               </option>
             ))}
           </select>
@@ -933,103 +1035,84 @@ export default function MultiLaneWizard(
             照畫、預檢照過，不會有任何錯誤訊息。同名時輔助技術的按鈕清單裡也
             會出現兩個一模一樣的項目，完全分不出來。 */}
         <button className="btn" disabled={busy} onClick={() => void importIbis('tx')}>
-          瀏覽並匯入驅動側 .ibs…
-        </button>
-        <label>另一側的模型套件
-          <select className="input" value={rxPackageId}
+          {m.importTx}</button>
+        <label>{m.rxPackage}<select className="input" value={rxPackageId}
             onChange={event => setRxPackageId(event.target.value)}>
-            <option value="">同上（兩側同一料號）</option>
+            <option value="">{m.sameAsAbove}</option>
             {ibisPackages.map(item => (
               <option key={item.package_id} value={item.package_id}
-                disabled={Boolean(sideBlocker(item, 'rx'))}>
-                {packageLabel(item, 'rx')}
+                disabled={Boolean(sideBlocker(item, 'rx', m))}>
+                {packageLabel(item, 'rx', m)}
               </option>
             ))}
           </select>
         </label>
         <button className="btn" disabled={busy} onClick={() => void importIbis('rx')}>
-          瀏覽並匯入另一側 .ibs…
-        </button>
-        {/* 這裡只收 kind === 'ibis'。ADR-0055 收掉 AMI 面板之後，IBIS-AMI 套件
-            在整個介面上已經沒有分析路徑——但模型庫照樣讓人匯入、掃描、信任。
-            不講的話，使用者匯完 AMI 套件回到這一頁，只會看到選單裡沒有它。
-            2026-08-24 實測：模型庫六個套件，兩個是 AMI，這一頁只看得到四個。 */}
-        {ibisPackages.length === 0 && amiPackages.length > 0 && <p className="hint">
-          這裡只吃一般 IBIS，AMI 目前沒有分析路徑。
-        </p>}
+          {m.importRx}</button>
+        {/* 這裡只收 kind === 'ibis'。不講的話，使用者匯完 AMI 套件回到這一頁，
+            只會看到選單裡沒有它（2026-08-24 實測）。AMI 走精靈的單通道（≤4 埠）路徑。 */}
         {ibisPackages.length === 0 && amiPackages.length === 0 && <p className="hint">
-          模型庫是空的，用上面兩顆按鈕各挑一份 .ibs。
-        </p>}
-        {ibisPackages.length > 0 && amiPackages.length > 0 && <p className="hint">
-          另有 {amiPackages.length} 個 AMI 套件，這裡用不到。
-        </p>}
-        <p className="hint">DDR 兩端是兩家料號，兩個都要選。</p>
-        <label>資料率（Gbps）
-          <input className="input" type="number" step="0.1" value={dataRate}
-            onChange={event => setDataRate(Number(event.target.value))} />
-        </label>
-        <label>上升時間（ps）
-          <input className="input" type="number" value={riseTimePs}
-            placeholder={`留空＝取自 IBIS [Ramp]（通則 ${(200 / dataRate).toFixed(0)}）`}
+          {m.libraryEmpty}</p>}
+        {amiPackages.length > 0 && <p className="hint">
+          {m.amiSkipped(amiPackages.length)}</p>}
+        <p className="hint">{m.pickBoth}</p>
+        {/* 速率在精靈第 2 步填，這裡不出第二個欄位；上升時間覆寫精靈也要看得到（#0104）。 */}
+        <div>
+        <label>{m.riseTime}<input className="input" type="number" value={riseTimePs}
+            placeholder={dataRate > 0 ? m.riseTimePlaceholder((200 / dataRate).toFixed(0)) : ''}
             onChange={event => setRiseTimePs(event.target.value)} />
         </label>
-        <p className="hint">留空即可，預檢完會顯示模型實際的邊緣。</p>
-        <p className="hint">這個值不是餵給緩衝器的邊緣，那由 IBIS 決定。</p>
-        <p className="hint">它只用來算拐點 0.5/Tr，決定頻寬夠不夠。</p>
-        <button className="btn" disabled={!touchstone || !packageId || busy}
-          onClick={() => void runSuggest()}>{busy ? '處理中…' : '執行預檢'}</button>
+        <p className="hint">{m.riseHint1}</p>
+        <p className="hint">{m.riseHint2}</p>
+        <p className="hint">{m.riseHint3}</p>
+        </div>
+        <button className="btn" disabled={!touchstone || !packageId || !(dataRate > 0) || busy}
+          onClick={() => void runSuggest()}>{busy ? m.working : m.runSuggest}</button>
         {error && <p className="error">{error}</p>}
       </section>
 
-      <section>
-        <h3>快速檢驗：參考通道基準眼圖</h3>
+      {/* #0104：精靈模式也看得到，放在第 3 步（選完套件就能跑）。 */}
+      <section data-wizard-step={3} hidden={hiddenStep(3)}>
+        <h3>{t.eyeWizard.quickTitle}</h3>
         {/* 不接使用者通道：TX 與 RX 之間放的是工具自產的參考線——近無損
             直連看模型本來的眼，有損檔位看典型中等損耗下還剩多少。
             模型由套件角色自動挑，不需要 Touchstone。 */}
-        <p className="hint">把上面選的兩側模型背對背接上工具自產參考線。</p>
-        <p className="hint">基準眼就不好＝模型或資料率的問題，跟通道無關。</p>
-        <p className="hint">基準眼好、接上通道才壞＝通道的問題。</p>
+        {/* 和單通道共用同一段說明（畫面驗收 T11）。 */}
+        <p className="hint">{t.eyeWizard.quickHint}</p>
+        <p className="hint">{t.eyeWizard.quickAttribution}</p>
         <label style={{ display: 'flex', flexDirection: 'row', gap: 6,
           alignItems: 'center' }}>
           <input type="checkbox" checked={lossyReference}
             style={{ width: 'auto' }}
             onChange={event => setLossyReference(event.target.checked)} />
-          用有損參考通道（Nyquist −10 dB 趨膚模型；預設是近無損直連，Nyquist 約 −0.5 dB）
-        </label>
-        <button className="btn" disabled={!packageId || busy || Boolean(job?.running)
+          {t.eyeWizard.lossyReference}</label>
+        <button className="btn" disabled={!packageId || !(dataRate > 0) || busy || Boolean(job?.running)
           || Boolean(quickCheckBlock)}
           title={quickCheckBlock || undefined}
           onClick={() => void runQuickCheck()}>
-          {busy ? '處理中…' : '快速檢驗（不需 Touchstone）'}
+          {busy ? m.working : m.quickRun}
         </button>
         <LicenseTag functions={['model_check']} />
         {quickCheck && <p className="hint">
-          已排入背景：{quickCheck.txModel} → {quickCheck.rxModel}，
-          結果顯示在下方「分析狀態與結果」。
-        </p>}
+          {m.quickQueued(quickCheck.txModel, quickCheck.rxModel)}</p>}
       </section>
 
-      <section>
+      <section data-wizard-step={4} hidden={hiddenStep(4)}>
         <details>
-          <summary>位址命令群（fly-by：一顆控制器推多顆顆粒）</summary>
+          <summary>{m.addrTitle}</summary>
           <p className="hint">
-            電路是一對多接的：共用驅動埠的道共用同一顆驅動器與訊號源。
-          </p>
+            {m.addrHint1}</p>
           <p className="hint">
-            建議用只含位址群的裁切檔；末端 VTT 電阻要在下方 Port 處置指定。
-          </p>
+            {m.addrHint2}</p>
           <div className="field-row">
-            <label>驅動端元件
-              <input className="input" value={addrDriver} placeholder="U1"
+            <label>{m.addrDriver}<input className="input" value={addrDriver} placeholder="U1"
                 onChange={event => setAddrDriver(event.target.value)} />
             </label>
-            <label>接收顆粒（逗號分隔；留空＝除驅動端外全部）
-              <input className="input" value={addrReceivers}
+            <label>{m.addrReceivers}<input className="input" value={addrReceivers}
                 placeholder="U35, U37"
                 onChange={event => setAddrReceivers(event.target.value)} />
             </label>
-            <label>命令速率
-              <select className="input" value={addrCmdRate}
+            <label>{m.cmdRate}<select className="input" value={addrCmdRate}
                 onChange={event => setAddrCmdRate(
                   event.target.value as '1T' | '2T')}>
                 <option value="1T">1T</option>
@@ -1038,99 +1121,132 @@ export default function MultiLaneWizard(
             </label>
             <button className="btn" disabled={!touchstone || !addrDriver || addrBusy}
               onClick={() => void analyzeAddressGroup()}>
-              {addrBusy ? '分組中…' : '分析分組'}
+              {addrBusy ? m.grouping : m.analyzeGroups}
             </button>
           </div>
           {addrError && <p className="error">{addrError}</p>}
           {addrResult && <>
             <p className="hint">
-              {addrResult.lanes.length} 條道（{addrResult.clock_nets.length} 條時脈）
+              {m.addrLanes(addrResult.lanes.length, addrResult.clock_nets.length)}
               {addrResult.windows
-                ? `　·　tCK ${addrResult.windows.clock_period_ps?.toFixed(0)} ps、位址窗 ${addrResult.windows.address_window_ps?.toFixed(0)} ps（${addrCmdRate}）`
+                ? m.addrWindows(addrResult.windows.clock_period_ps?.toFixed(0), addrResult.windows.address_window_ps?.toFixed(0), addrCmdRate)
                 : ''}
             </p>
             {(addrResult.unassigned || []).length > 0 && (
               <p className="hint" style={{ color: '#e3b341' }}>
-                {addrResult.unassigned.length} 個埠沒有歸屬（多半是 VTT 終端）：
-                {addrResult.unassigned.slice(0, 4).map((item: any) => item.port).join('、')}
-                ——請在「Port 處置」指定終結，否則啟動會被擋。
-              </p>
+                {m.unassignedLead(addrResult.unassigned.length)}
+                {addrResult.unassigned.slice(0, 4).map((item: any) => item.port).join(m.listSep)}
+                {m.unassignedTail}</p>
             )}
-            {(addrResult.devices || []).map((device: any) => (
-              <div key={device.device} className="field-row"
-                style={{ alignItems: 'center' }}>
-                <span>顆粒 <strong>{device.device}</strong>
-                  （{device.lanes.length} 條道）</span>
-                {device.strobe_labels?.length === 2
-                  ? <button className="btn"
-                      disabled={!suggestion || addrBusy || directionPending
-                        || Boolean(job?.running) || Boolean(multiLaneBlock)}
-                      title={multiLaneBlock ? multiLaneBlock
-                        : !suggestion ? '先按上方「執行預檢」取得緩衝器選擇'
-                        : directionPending ? '先選定驅動側再啟動'
-                          : '以這顆的 CK 對為時間基準啟動'}
-                      onClick={() => void startAddressRun(device.device)}>
-                      以 {device.device} 為基準啟動
-                    </button>
-                  : <span className="hint">{device.why}</span>}
-              </div>
-            ))}
             <p className="hint">
-              每輪電路都保留全部接收端（fly-by 的負載），只有時間基準換顆粒；
-              時序判讀需要在上方填妥判讀準位。
-            </p>
+              {m.addrFootnote}</p>
           </>}
         </details>
       </section>
 
+      <section data-wizard-step={5} hidden={hiddenStep(5)}>
+        {!suggestion && <p className="hint">{m.needSuggestTip}</p>}
+        {addrResult && <><h3>{m.addrTitle}</h3>{addressDevices()}</>}
+      </section>
+
       {suggestion && <>
-        <section>
-          <h3>群組判定</h3>
+        {/* 放在選兩端晶片的這一步：使用者在這裡就能換模型。不擋（ADR-0050）。 */}
+        {bothDramWarning && <section data-wizard-step={3} hidden={hiddenStep(3)}>
+          <p className="warning"><strong>{t.multiLanePreflight.bothDramTitle}</strong></p>
+          <p className="hint">{bothDramWarning}</p>
+        </section>}
+        <section data-wizard-step={4} hidden={hiddenStep(4)}>
+          <div className="eye-wizard__diagram" data-report-separate-snapshot="true"
+            data-report-kind="multiport-wiring" data-report-title={t.eyeWizard.steps.wiring}>
+            <div className="eye-wizard__box">
+              <strong>{t.eyeWizard.tx}</strong>
+              {(suggestion.packages || []).filter(item => item.side === suggestion.bus_direction.driving_side)
+                .map(item => <span key={item.side}>{item.display_name}</span>)}
+              {suggestion.variant_choices.filter(item => item.role === 'driver')
+                .map(item => <div key={variantKey(item)}><code>{item.selector}{m.fieldSep}{pickedVariant(item) || '—'}</code>
+                  <em>{currentDecision(item)?.selectionBasis.basis === 'override'
+                    ? t.eyeWizard.diagramReason.override(String(currentDecision(item)?.selectionBasis.override_reason || ''))
+                    : currentDecision(item)?.selectionBasis.basis === 'plain'
+                      ? t.eyeWizard.diagramReason.plain : t.eyeWizard.diagramReason.funnel}</em></div>)}
+              <span>{m.singleRunCorner}</span>
+            </div>
+            <div className="eye-wizard__wire">
+              <strong>{t.eyeWizard.diagramChannel}</strong>
+              <code>{touchstone.split(/[\\/]/).pop()}</code>
+              {suggestion.touchstone.sha256 && <code>SHA-256{m.fieldSep}{suggestion.touchstone.sha256}</code>}
+              {lanes.slice(0, selectedLanes).map((lane, index) => <span key={lane.label}>
+                {lane.label}{m.fieldSep}{suggestion.lane_orientation[index]
+                  ? `${suggestion.lane_orientation[index].input_port} → ${suggestion.lane_orientation[index].output_port}`
+                  : '—'}</span>)}
+            </div>
+            <div className="eye-wizard__box">
+              <strong>{t.eyeWizard.rx}</strong>
+              {(suggestion.packages || []).filter(item => item.side === suggestion.bus_direction.receiving_side)
+                .map(item => <span key={item.side}>{item.display_name}</span>)}
+              {suggestion.variant_choices.filter(item => item.role === 'receiver')
+                .map(item => <div key={variantKey(item)}><code>{item.selector}{m.fieldSep}{pickedVariant(item) || '—'}</code>
+                  <em>{currentDecision(item)?.selectionBasis.basis === 'override'
+                    ? t.eyeWizard.diagramReason.override(String(currentDecision(item)?.selectionBasis.override_reason || ''))
+                    : currentDecision(item)?.selectionBasis.basis === 'plain'
+                      ? t.eyeWizard.diagramReason.plain : t.eyeWizard.diagramReason.funnel}</em></div>)}
+              <span>{t.multiLane.cornersTitle}{m.fieldSep}{corners.join(m.listSep)}</span>
+            </div>
+          </div>
+          <label className="eye-wizard__confirm">
+            <input type="checkbox" checked={confirmation === 'confirmed'}
+              disabled={busy || variantPending || directionPending || suggestion.blockers.length > 0}
+              onChange={event => setConfirmedSignature(event.target.checked ? confirmationSignature : null)} />
+            {t.eyeWizard.confirm}
+          </label>
+          {confirmation === 'stale' && <p className="warning">{t.eyeWizard.stale}</p>}
+        </section>
+        <section data-wizard-step={4} hidden={hiddenStep(4)}>
+          <h3>{m.groupTitle}</h3>
           <p>
-            <strong>{suggestion.analysis_kind === 'byte_lane' ? '位元組通道' : '多道串擾分析'}</strong>
-            　{suggestion.binding.lanes.length} 條道
-            　分側依據：{suggestion.binding.sides.basis}
-            {suggestion.binding.sides.labels.length > 0 &&
-              `（${suggestion.binding.sides.labels.map((label, index) => {
+            <strong>{suggestion.analysis_kind === 'byte_lane' ? m.byteLane : m.multiLaneCrosstalk}</strong>
+            {m.lanesCount(suggestion.binding.lanes.length)}
+            {m.sideBasis(pickText(suggestion.binding.sides, 'basis', lang))}
+            {pickList(suggestion.binding.sides, 'labels', lang).length > 0 &&
+              m.paren(pickList(suggestion.binding.sides, 'labels', lang).map((label, index) => {
                 const alias = suggestion.binding.sides.label_aliases?.[index] ?? []
-                return alias.length > 0 ? `${label}＝${alias.join('＝')}` : label
-              }).join(' ↔ ')}）`}
+                return alias.length > 0 ? `${label}${m.aliasJoin}${alias.join(m.aliasJoin)}` : label
+              }).join(' ↔ '))}
           </p>
-          <p className="hint">{suggestion.group.why}</p>
+          <p className="hint">{pickText(suggestion.group, 'why', lang)}</p>
+          {suggestion.group.strobe_pairs.length === 0 &&
+            <p className="hint">{t.multiLanePreflight.noStrobeHowTo}</p>}
           {/* 哪一份套件對到哪一側是推出來的：填反了不會報錯，只會讓眼圖
               用錯緩衝器，所以一定要顯示出來讓人核對。 */}
           {(suggestion.packages || []).length === 2 && <p className="hint">
-            模型套件：
-            {suggestion.packages.map(item => (
+            {m.packagesLead}{suggestion.packages.map(item => (
               <span key={item.side}>
-                {item.side > 0 ? '　｜　' : ''}
-                第 {item.side + 1} 側
-                {suggestion.binding.sides.labels[item.side]
-                  ? `（${suggestion.binding.sides.labels[item.side]}）` : ''}
-                ＝ {item.display_name || '未指定'}
-                {item.component ? `／${item.component}` : ''}
+                {item.side > 0 ? m.sideSep : ''}
+                {m.sideN(item.side + 1)}{pickList(suggestion.binding.sides, 'labels', lang)[item.side]
+                  ? m.paren(pickList(suggestion.binding.sides, 'labels', lang)[item.side]) : ''}
+                {m.equals}{item.display_name || m.unspecified}
+                {item.component ? `${m.slash}${item.component}` : ''}
               </span>
             ))}
             {suggestion.two_package && suggestion.package_assignment?.swapped &&
-              '　（依腳位號證據自動對調）'}
+              m.swappedNote}
             {suggestion.two_package && suggestion.package_assignment?.tie &&
-              '　（兩種對應同分，沿用填寫順序，請自行核對）'}
+              m.tieNote}
           </p>}
           {suggestion.group.strobe_pairs.map(pair => (
             <p key={pair.labels.join()} className="hint">
-              選通：{pair.labels.join(' / ')}　腳位 {pair.pins.join(' / ')}
+              {m.strobeLine(pair.labels.join(' / '), pair.pins.join(' / '))}
             </p>
           ))}
         </section>
 
-        <section>
-          <h3>匯流排方向</h3>
+        <section data-wizard-step={4} hidden={hiddenStep(4)}>
+          <h3>{m.busTitle}</h3>
           {/* ADR-0049：方向決定哪一側接驅動緩衝器。接反了電路照樣解得動、
               眼圖照樣畫得出來，只是量到的是反方向的通道——沒有任何跡象。
               單向訊號由 Model_type 定死，不給選；雙向 I/O 必選，不給預設。 */}
-          <p className="hint">{suggestion.bus_direction.reason}</p>
+          <p className="hint">{pickText(suggestion.bus_direction, 'reason', lang)}</p>
           {suggestion.bus_direction_applies ? <>
-            <label>驅動側<span className="required">必填</span>
+            <label>{m.drivingSide}<span className="required">{m.required}</span>
               <select className="input"
                 value={suggestion.bus_direction.driving_side ?? ''}
                 onChange={event => {
@@ -1138,67 +1254,61 @@ export default function MultiLaneWizard(
                   setDrivingSide(value)
                   void runSuggest(value)
                 }}>
-                <option value="">請選擇…</option>
+                <option value="">{m.choose}</option>
                 {suggestion.bus_direction.sides
                   .filter(item => suggestion.bus_direction.feasible.includes(item.side))
                   .map(item => (
                     <option key={item.side} value={item.side}>
-                      第 {item.side + 1} 側（{item.label}）驅動
-                    </option>
+                      {m.sideDrives(item.side + 1, item.label)}</option>
                   ))}
               </select>
             </label>
           </> : (
             <p>
-              驅動側：<strong>
-                {suggestion.bus_direction.driving_side === null ? '未定案'
-                  : `第 ${suggestion.bus_direction.driving_side + 1} 側（${
-                    suggestion.bus_direction.sides[suggestion.bus_direction.driving_side].label}）`}
+              {m.drivingSideIs}<strong>
+                {suggestion.bus_direction.driving_side === null ? m.undecided
+                  : m.sideWithLabel(suggestion.bus_direction.driving_side + 1, suggestion.bus_direction.sides[suggestion.bus_direction.driving_side].label)}
               </strong>
-              {suggestion.bus_direction.basis === 'model_type' && '　由 IBIS 的 Model_type 定死'}
+              {suggestion.bus_direction.basis === 'model_type' && m.fixedByModelType}
             </p>
           )}
           <table className="model-library__table">
-            <thead><tr><th>側</th><th>Model_type</th><th>可驅動</th><th>可接收</th></tr></thead>
+            <thead><tr><th>{m.colSide}</th><th>Model_type</th><th>{m.colCanDrive}</th><th>{m.colCanReceive}</th></tr></thead>
             <tbody>{suggestion.bus_direction.sides.map(item => (
               <tr key={item.side}>
-                <td>第 {item.side + 1} 側（{item.label || '—'}）</td>
-                <td>{item.model_types.join('、') || '—'}</td>
-                <td>{item.can_drive ? '是' : '否'}</td>
-                <td>{item.can_receive ? '是' : '否'}</td>
+                <td>{m.sideWithLabel(item.side + 1, item.label || '—')}</td>
+                <td>{item.model_types.join(m.listSep) || '—'}</td>
+                <td>{item.can_drive ? m.yes : m.no}</td>
+                <td>{item.can_receive ? m.yes : m.no}</td>
               </tr>
             ))}</tbody>
           </table>
           {suggestion.bus_direction.lanes.some(item => item.feasible.length === 0) &&
             <details open>
               <summary>
-                擋住方向的道（{suggestion.bus_direction.lanes
-                  .filter(item => item.feasible.length === 0).length} 條）
-              </summary>
+                {m.blockingLanes(suggestion.bus_direction.lanes
+                  .filter(item => item.feasible.length === 0).length)}</summary>
               {/* 位元組通道本來就會混著單向道與雙向道：DDR 的資料遮罩由控制器
                   單向驅動，記憶體端沒有它的驅動器。這不是檔案壞掉。 */}
               <table className="model-library__table">
-                <thead><tr><th>道</th><th>兩側模型</th><th>原因</th></tr></thead>
+                <thead><tr><th>{m.colLane}</th><th>{m.colModels}</th><th>{m.colReason}</th></tr></thead>
                 <tbody>{suggestion.bus_direction.lanes
                   .filter(item => item.feasible.length === 0).map(item => (
                     <tr key={item.label}>
                       <td>{item.label}</td>
                       <td>{item.models.map(name => name || '—').join(' ↔ ')}</td>
-                      <td>{item.why}</td>
+                      <td>{pickText(item, 'why', lang)}</td>
                     </tr>
                   ))}</tbody>
               </table>
               <p className="hint">
-                把「要出眼圖的道數」調到不含這些道，就可以用
-                {suggestion.bus_direction.feasible_without_blocking_lanes
-                  .map(side => `第 ${side + 1} 側`).join(' 或 ') || '（沒有可行的方向）'}
-                驅動繼續。
-              </p>
+                {m.blockingHint(suggestion.bus_direction.feasible_without_blocking_lanes
+                  .map(side => m.sideN(side + 1)).join(m.or) || m.noFeasible)}</p>
             </details>}
           {suggestion.lane_orientation.length > 0 && <details>
-            <summary>依此方向的逐道接法（{suggestion.lane_orientation.length} 條）</summary>
+            <summary>{m.orientation(suggestion.lane_orientation.length)}</summary>
             <table className="model-library__table">
-              <thead><tr><th>道</th><th>驅動端 Port</th><th>接收端 Port</th></tr></thead>
+              <thead><tr><th>{m.colLane}</th><th>{m.colDriverPort}</th><th>{m.colReceiverPort}</th></tr></thead>
               <tbody>{suggestion.lane_orientation.map(item => (
                 <tr key={item.label}>
                   <td>{item.label}</td><td>{item.input_port}</td><td>{item.output_port}</td>
@@ -1208,165 +1318,88 @@ export default function MultiLaneWizard(
           </details>}
         </section>
 
-        {suggestion.blockers.length > 0 && <section className="blockers">
-          <h3>必須先解決</h3>
-          <ul>{suggestion.blockers.map(text => <li key={text}>{text}</li>)}</ul>
+        {suggestion.blockers.length > 0 && <section className="blockers" data-wizard-step={4} hidden={hiddenStep(4)}>
+          <h3>{m.blockersTitle}</h3>
+          <ul>{pickList(suggestion, 'blockers', lang).map(text => <li key={text}>{text}</li>)}</ul>
         </section>}
 
-        {suggestion.warnings.length > 0 && <section>
-          <h3>提醒</h3>
-          <ul>{suggestion.warnings.map(text => <li key={text}>{text}</li>)}</ul>
+        {suggestion.warnings.length > 0 && <section data-wizard-step={4} hidden={hiddenStep(4)}>
+          <h3>{m.warningsTitle}</h3>
+          <ul>{pickList(suggestion, 'warnings', lang).map(text => <li key={text}>{text}</li>)}</ul>
         </section>}
 
-        <section>
-          <h3>綁定證據</h3>
+        <section data-wizard-step={4} hidden={hiddenStep(4)}>
+          <h3>{m.bindingTitle}</h3>
           {/* 分級整批確認：高證據的預先配好、一次確認；partial 必須逐一檢視。
               顯示的是「對上了幾個鍵」這種可稽核的證據，不是信心分數。 */}
           <p>
             {(['high', 'partial', 'none'] as const).map(level => (
               <span key={level} style={{ marginRight: '1.5em' }}>
-                {EVIDENCE_LABEL[level]}：<strong>{suggestion.binding.evidence_counts[level] ?? 0}</strong> 個
-              </span>
+                {m.evidence[level]}{m.fieldSep}<strong>{suggestion.binding.evidence_counts[level] ?? 0}</strong> {m.countSuffix}</span>
             ))}
           </p>
           {suggestion.binding.components.map((item, index) => item.ranking.length > 0 && (
             <details key={index}>
               <summary>
-                第 {index + 1} 側元件：{item.selected || '（分數相同，未自動選定）'}
+                {m.sideComponent(index + 1)}{item.selected || m.tieNotSelected}
               </summary>
               <table className="model-library__table">
-                <thead><tr><th>元件</th><th>兩鍵吻合</th><th>訊號唯一</th><th>依據</th></tr></thead>
+                <thead><tr><th>{m.colComponent}</th><th>{m.colTwoKey}</th><th>{m.colUniqueSignal}</th><th>{m.colBasis}</th></tr></thead>
                 <tbody>{item.ranking.map(rank => (
                   <tr key={rank.component}>
                     <td>{rank.component}</td><td>{rank.two_key_ports}</td>
-                    <td>{rank.unique_signal_ports}</td><td>{rank.basis}</td>
+                    <td>{rank.unique_signal_ports}</td><td>{pickText(rank, 'basis', lang)}</td>
                   </tr>
                 ))}</tbody>
               </table>
             </details>
           ))}
           <details>
-            <summary>逐埠綁定（{suggestion.binding.bindings.length} 個 Port）</summary>
+            <summary>{m.perPort(suggestion.binding.bindings.length)}</summary>
             <table className="model-library__table">
-              <thead><tr><th>Port</th><th>側</th><th>腳位</th><th>訊號</th><th>模型</th><th>證據</th></tr></thead>
+              <thead><tr><th>Port</th><th>{m.colSide}</th><th>{m.colPin}</th><th>{m.colSignal}</th><th>{m.colModel}</th><th>{m.colEvidence}</th></tr></thead>
               <tbody>{suggestion.binding.bindings.map(row => (
                 <tr key={row.port_index}>
                   <td>{row.port}</td><td>{row.side_label || '—'}</td>
                   <td>{row.pin || '—'}</td><td>{row.signal || '—'}</td>
                   <td>{row.model || '—'}</td>
-                  <td>{EVIDENCE_LABEL[row.evidence]}
-                    {row.keys.length > 0 && `（${row.keys.join('＋')}）`}</td>
+                  <td>{m.evidence[row.evidence]}
+                    {row.keys.length > 0 && m.paren(row.keys.join(m.plus))}</td>
                 </tr>
               ))}</tbody>
             </table>
           </details>
         </section>
 
-        <section>
-          <h3>緩衝器變體</h3>
-          {/* 速率等級與有無 ODT 可以推導；阻值是設計選擇，由控制器設定
-              決定，工具沒有依據代選（ADR-0046）。**兩側各有自己的一組**：
-              寫入用控制器的驅動強度配顆粒的 ODT。 */}
-          <p className="hint">兩端各自一組：驅動強度與 ODT 是各元件的暫存器設定。</p>
-          {[0, 1].map(side => {
-            const label = suggestion.binding.sides.labels[side] || `第 ${side + 1} 側`
-            const driving = suggestion.bus_direction.driving_side === side
-            return (
-              <div key={side} className="field-row">
-                <strong style={{ minWidth: '9em' }}>
-                  {label}{driving ? '（本次驅動）' : '（本次接收）'}
-                </strong>
-                <label>驅動阻抗（Ω）
-                  <input className="input" type="number"
-                    value={driveOhmBySide[side]}
-                    onChange={e => setDriveOhmBySide(prev => {
-                      const next = [...prev] as [string, string]
-                      next[side] = e.target.value
-                      return next
-                    })} />
-                </label>
-                <label>ODT（Ω）
-                  <input className="input" type="number" value={odtOhmBySide[side]}
-                    onChange={e => setOdtOhmBySide(prev => {
-                      const next = [...prev] as [string, string]
-                      next[side] = e.target.value
-                      return next
-                    })} />
-                </label>
-              </div>
-            )
+        <section data-wizard-step={3} hidden={hiddenStep(3)}>
+          <h3>{m.variantsTitle}</h3>
+          {bothDirections && <p className="hint">{t.eyeWizard.reverseVariants}</p>}
+          {selectorChoices.map(choice => {
+            const input = selectorInput(choice)
+            const key = variantKey(choice)
+            return <div key={key}>
+              <p><strong>{m.sideN(choice.side + 1)}{m.fieldSep}
+                {choice.role === 'driver' ? t.eyeWizard.tx : t.eyeWizard.rx}</strong></p>
+              <SelectorFunnelPanel choice={choice} {...input}
+              onChange={decision => {
+                setSelectorAnswers(previous => {
+                  const old = previous[key]
+                  return old?.odtOhm === decision.odtOhm && old?.driveOhm === decision.driveOhm
+                    ? previous : { ...previous, [key]: { odtOhm: decision.odtOhm, driveOhm: decision.driveOhm } }
+                })
+                setSelectorDecisions(previous => JSON.stringify(previous[key]) === JSON.stringify(decision)
+                  ? previous : { ...previous, [key]: decision })
+              }} />
+            </div>
           })}
-          <label>世代（同檔有 DDR3 與 DDR3L 時才需要）
-            <select className="input" value={technology}
-              onChange={e => setTechnology(e.target.value)}>
-              <option value="">不篩選</option>
-              {['DDR3', 'DDR3L', 'DDR4', 'DDR5', 'LPDDR3', 'LPDDR4', 'LPDDR5']
-                .map(name => <option key={name} value={name}>{name}</option>)}
-            </select>
-          </label>
-          <p className="hint">DDR3 與 DDR3L 的 Z0 一樣，差在 VDDQ。選錯不會報錯。</p>
-          <button className="btn" disabled={busy} onClick={() => void runSuggest()}>
-            套用並重新推導變體
-          </button>
+          {/* 上升時間對應的可用頻寬（舊進階頁籤只在這裡顯示，ADR-0067 搬來第 3 步）。 */}
           {suggestion.bandwidth && <p className="hint">
-            邊緣 {suggestion.bandwidth.rise_time_ps.toFixed(0)} ps
-            → 可用頻寬 {suggestion.bandwidth.usable_bandwidth_ghz.toFixed(2)} GHz、
-            建議掃到 {suggestion.bandwidth.sweep_max_ghz.toFixed(2)} GHz
-          </p>}
-          {suggestion.variant_choices.map(choice => {
-            // 方向定案後只顯示這一輪用得到的那一欄。兩欄都印會讓人去解一個
-            // 這次用不到的問題——實測就是這樣卡住的。
-            type Row = [string, VariantChoice['tx']]
-            const rows: Row[] = choice.role === 'driver' ? [['驅動', choice.tx]]
-              : choice.role === 'receiver' ? [['接收', choice.rx]]
-                : [['驅動', choice.tx], ['接收', choice.rx]]
-            return (
-              // React 的 key 也要含側：同一個系列的兩份 `.ibs` 選擇器同名，
-              // 只用名稱當 key 會讓 React 把兩張卡片當成同一張。
-              <div key={variantKey(choice)}>
-                <h4>
-                  {choice.selector}（{choice.variants.length} 個變體）
-                  {choice.component && `　${choice.component}`}
-                  {choice.role !== 'unknown' &&
-                    `　本次為${choice.role === 'driver' ? '驅動' : '接收'}側`}
-                </h4>
-                {rows.map(([name, item]) => (
-                  <p key={name}>
-                    {name}：{item.selected || <em>{item.reason}</em>}
-                    {item.selected && item.rate_checked === false &&
-                      <span className="hint">　（描述無速率等級，這項未查）</span>}
-                  </p>
-                ))}
-                {/* 工具說「需要人工判斷」時，這裡就是判斷的地方。
-                    沒有這一格的話那句話等於把按鈕永久鎖住。 */}
-                {usedRoles(choice).some(role => role.requires_user) && (() => {
-                  const candidates = usedRoles(choice)
-                    .flatMap(role => role.candidates)
-                  const unique = Array.from(new Set(candidates))
-                  return (
-                    <label>由你指定（{unique.length} 個候選）
-                      <select className="input"
-                        value={variantPick[variantKey(choice)] || ''}
-                        onChange={e => setVariantPick(prev => ({
-                          ...prev, [variantKey(choice)]: e.target.value,
-                        }))}>
-                        <option value="">（未指定，無法送出）</option>
-                        {unique.map(name => (
-                          <option key={name} value={name}>{name}</option>
-                        ))}
-                      </select>
-                    </label>
-                  )
-                })()}
-              </div>
-            )
-          })}
+            {m.edgeBandwidth(suggestion.bandwidth.rise_time_ps.toFixed(0), suggestion.bandwidth.usable_bandwidth_ghz.toFixed(2), suggestion.bandwidth.sweep_max_ghz.toFixed(2))}</p>}
         </section>
 
-        <section>
-          <h3>分析範圍與碼型</h3>
-          <label>要出眼圖的道數（其餘 Port 需指定處置）
-            <input className="input" type="number" min={1} max={lanes.length}
+        <section data-wizard-step={4} hidden={hiddenStep(4)}>
+          <h3>{m.scopeTitle}</h3>
+          <label>{m.laneCountLabel}<input className="input" type="number" min={1} max={lanes.length}
               value={selectedLanes}
               onChange={event => {
                 // 清空欄位時 `Number('')` 是 0，會讓「最差碼型涵蓋率」用 0 條道
@@ -1375,73 +1408,61 @@ export default function MultiLaneWizard(
                 setLaneCount(Number.isFinite(value) && value >= 1 ? value : null)
               }} />
           </label>
-          <label>碼型
-            <select className="input" value={patternKind}
+          <label>{m.pattern}<select className="input" value={patternKind}
               disabled={bothPatterns}
               onChange={event => setPatternKind(event.target.value as 'worst_case' | 'prbs')}>
-              <option value="worst_case">決定性最差（建議）</option>
-              <option value="prbs">隨機 PRBS</option>
+              <option value="worst_case">{m.patternWorst}</option>
+              <option value="prbs">{m.patternPrbs}</option>
             </select>
           </label>
           <label className="checkbox">
             <input type="checkbox" checked={bothPatterns}
               onChange={event => setBothPatterns(event.target.checked)} />
-            串擾與時序各跑一次（Corner 掃描才有效）
-          </label>
+            {m.bothPatterns}</label>
           {bothPatterns && <>
-            <p className="hint">最差碼型看串擾、PRBS 量 Setup／Hold。</p>
-            <p className="hint">兩者不可互換，一份完整報告兩個都要。</p>
-            <p className="hint">兩種碼型分開排名，不會混在一起比。</p>
+            <p className="hint">{m.bothHint1}</p>
+            <p className="hint">{m.bothHint2}</p>
+            <p className="hint">{m.bothHint3}</p>
           </>}
           {patternKind === 'worst_case' ? <>
-            <label>翻轉前保持的 UI 數
-              <input className="input" type="number" min={1} value={settleUi}
+            <label>{m.settleUi}<input className="input" type="number" min={1} value={settleUi}
                 onChange={event => setSettleUi(Number(event.target.value))} />
             </label>
             <p className="hint">
-              共 {selectedLanes * 2 * 2 * settleUi} 個 UI。每條道各有一個 UI
-              是全部鄰居同時反向切換——**必然發生**，不是期望。
+              {m.worstCaseUi(selectedLanes * 2 * 2 * settleUi)}
             </p>
           </> : <>
-            <label>暫態 UI 數
-              <input className="input" type="number" min={1} value={transientUi}
+            <label>{m.transientUi}<input className="input" type="number" min={1} value={transientUi}
                 onChange={event => setTransientUi(Number(event.target.value))} />
             </label>
             {/* ADR-0045：隨機碼型的涵蓋率必須顯示，否則使用者會把
                 「沒看到最差」誤讀成「沒有問題」。 */}
             <p className="warning">
-              此設定下最差對齊的期望出現次數：
-              <strong>{worstCaseExpectation(selectedLanes, transientUi).toFixed(4)}</strong>
-              　（{selectedLanes - 1} 條攻擊者）。
-              遠小於 1 代表這次沒看到最差串擾，<b>不得標示為最差情況</b>。
-            </p>
+              {m.expectationLead}<strong>{worstCaseExpectation(selectedLanes, transientUi).toFixed(4)}</strong>
+              {m.aggressors(selectedLanes - 1)}
+              {m.expectationWarnLead}<b>{m.notWorstCase}</b>{m.period}</p>
           </>}
         </section>
 
-        {portsNeedingModel.length > 0 && <section>
-          <h3>模型檔裡沒有這根腳的 Port（{portsNeedingModel.length} 個）</h3>
+        {portsNeedingModel.length > 0 && <section data-wizard-step={4} hidden={hiddenStep(4)}>
+          <h3>{m.noPinTitle(portsNeedingModel.length)}</h3>
           <p className="hint">
-            另一端已經綁到模型，所以確定是訊號路徑。
-          </p>
+            {m.noPinHint1}</p>
           <p className="hint">
-            缺的是這一側 IBIS 沒有對應腳位。
-          </p>
+            {m.noPinHint2}</p>
           <p className="hint">
-            終結掉等於把真實訊號當廢埠，會低估串擾。
-          </p>
+            {m.noPinHint3}</p>
           <p className="hint">
-            這就是 DDR Wizard 用 Net Group 指派模型在做的事。
-          </p>
+            {m.noPinHint4}</p>
           <p className="hint">
-            例如 DDR 的 DM 併進 DQ 群。指定完請重新預檢。
-          </p>
+            {m.noPinHint5}</p>
           <table className="model-library__table">
-            <thead><tr><th>Port</th><th>用哪顆緩衝器</th></tr></thead>
+            <thead><tr><th>Port</th><th>{m.colBuffer}</th></tr></thead>
             <tbody>{portsNeedingModel.map(item => (
               <tr key={item.index}>
                 <td>{item.name}</td>
                 <td>
-                  <select className="input" aria-label={`${item.name} 要用哪顆緩衝器`}
+                  <select className="input" aria-label={m.bufferAria(item.name)}
                     value={portModels[item.index] ?? ''}
                     onChange={event => setPortModels(previous => {
                       const next = { ...previous }
@@ -1449,7 +1470,7 @@ export default function MultiLaneWizard(
                       else delete next[item.index]
                       return next
                     })}>
-                    <option value="">（未指定）</option>
+                    <option value="">{m.unspecifiedParen}</option>
                     {bufferChoices.map(name => (
                       <option key={name} value={name}>{name}</option>
                     ))}
@@ -1459,40 +1480,37 @@ export default function MultiLaneWizard(
             ))}</tbody>
           </table>
           {Object.keys(portModels).length > 0 && <p className="hint">
-            已指定 {Object.keys(portModels).length} 個，按上方的預檢按鈕重新推導。
-          </p>}
+            {m.assignedCount(Object.keys(portModels).length)}</p>}
         </section>}
 
-        {portsNeedingDisposition.length > 0 && <section>
-          <h3>未接緩衝器的 Port（{portsNeedingDisposition.length} 個）</h3>
+        {portsNeedingDisposition.length > 0 && <section data-wizard-step={4} hidden={hiddenStep(4)}>
+          <h3>{m.dispTitle(portsNeedingDisposition.length)}</h3>
           {/* 留著不接等於默默選了開路，而開路與終結給出不同的串擾結果——
               實測差 3.7 mV 峰值。兩者都不是安全預設（ADR-0046）。 */}
           <p className="hint">
-            留著不接等於默默選了開路，必須明確指定。DDR 的終端是 ODT 對 VTT，不是
-            阻值對地。
-          </p>
+            {m.dispHint}</p>
           <table className="model-library__table">
-            <thead><tr><th>Port</th><th>處置</th><th>阻值（Ω）</th><th>參考電壓（V）</th></tr></thead>
+            <thead><tr><th>Port</th><th>{m.colDisposition}</th><th>{m.colOhm}</th><th>{m.colVref}</th></tr></thead>
             <tbody>{portsNeedingDisposition.map(item => {
               const plan = dispositions[item.index]
               return (
                 <tr key={item.index}>
                   <td>{item.name}</td>
                   <td>
-                    <select className="input" aria-label={`${item.name} 的處置方式`}
+                    <select className="input" aria-label={m.dispAria(item.name)}
                       value={plan?.kind ?? ''}
                       onChange={event => setDispositions(previous => ({
                         ...previous,
                         [item.index]: { kind: event.target.value as Disposition['kind'] },
                       }))}>
-                      <option value="">請選擇…</option>
-                      <option value="terminate">終結</option>
-                      <option value="open">開路</option>
-                      <option value="ground">接地</option>
+                      <option value="">{m.choose}</option>
+                      <option value="terminate">{m.terminate}</option>
+                      <option value="open">{m.open}</option>
+                      <option value="ground">{m.ground}</option>
                     </select>
                   </td>
                   <td>{plan?.kind === 'terminate' && (
-                    <input className="input" type="number" aria-label={`${item.name} 的終結阻抗（Ω）`}
+                    <input className="input" type="number" aria-label={m.termOhmAria(item.name)}
                       value={plan.impedance_ohm ?? ''}
                       onChange={event => setDispositions(previous => ({
                         ...previous,
@@ -1501,7 +1519,7 @@ export default function MultiLaneWizard(
                   )}</td>
                   <td>{plan?.kind === 'terminate' && (
                     <input className="input" type="number" step="0.01"
-                      aria-label={`${item.name} 的終結參考電壓（V）`}
+                      aria-label={m.termVrefAria(item.name)}
                       value={plan.reference_volt ?? ''}
                       onChange={event => setDispositions(previous => ({
                         ...previous,
@@ -1513,193 +1531,179 @@ export default function MultiLaneWizard(
             })}</tbody>
           </table>
           {missingDisposition.length > 0 && <p className="warning">
-            還有 {missingDisposition.length} 個 Port 的處置未填完整。
-          </p>}
+            {m.dispIncomplete(missingDisposition.length)}</p>}
         </section>}
 
-        {suggestion.quality.executed && <section>
-          <h3>通道模型預檢</h3>
+        {suggestion.quality.executed && <section data-wizard-step={4} hidden={hiddenStep(4)}>
+          <h3>{m.qualityTitle}</h3>
           {/* 分兩層顯示：檔案固有的性質與這次激勵是否充分是兩件事，
               合併成一個通過與否會讓人把「這次夠用」誤讀成「這個檔案沒問題」
               （ADR-0048）。 */}
           {suggestion.quality.intrinsic && <>
-            <h4>檔案固有</h4>
-            <p>被動性（最大奇異值）：{suggestion.quality.intrinsic.passivity_max_singular_value}</p>
-            <p>因果性（前置能量占比，逐道取最差）：
-              {suggestion.quality.intrinsic.causality_precursor_energy_ratio ?? '量不出來'}
-              　共 {suggestion.quality.intrinsic.causality_per_path.length} 條道</p>
+            <h4>{m.intrinsic}</h4>
+            <p>{m.passivity(String(suggestion.quality.intrinsic.passivity_max_singular_value))}</p>
+            <p>{m.causality}{suggestion.quality.intrinsic.causality_precursor_energy_ratio ?? m.notMeasurable}
+              {m.lanesTotal(suggestion.quality.intrinsic.causality_per_path.length)}</p>
           </>}
-          <h4>這次激勵是否充分</h4>
+          <h4>{m.excitation}</h4>
           <table className="model-library__table">
-            <thead><tr><th>項目</th><th>數值</th><th>門檻</th><th>判定</th></tr></thead>
+            <thead><tr><th>{m.colItem}</th><th>{m.colValue}</th><th>{m.colLimit}</th><th>{m.colVerdict}</th></tr></thead>
             <tbody>{(suggestion.quality.checks ?? [])
               .filter(row => ['bandwidth', 'frequency_resolution', 'dc_extrapolation'].includes(row.check))
               .map(row => (
                 <tr key={row.check}>
-                  <td>{row.label}</td><td>{row.value ?? '—'}</td><td>{row.limit}</td>
-                  <td>{row.status === 'pass' ? '通過' : row.status === 'fail' ? '未達' : '量不出來'}</td>
+                  <td>{pickText(row, 'label', lang)}</td><td>{row.value ?? '—'}</td><td>{row.limit}</td>
+                  <td>{row.status === 'pass' ? m.pass : row.status === 'fail' ? m.fail : m.notMeasurable}</td>
                 </tr>
               ))}</tbody>
           </table>
         </section>}
 
         {/* 沒有選通就沒有時序裕度這個量（ADR-0044），所以整段跟著選通出現。 */}
-        {strobePair && <section>
-          <h3>DDR 時序裕度</h3>
+        {strobePair && <section data-wizard-step={4} hidden={hiddenStep(4)}>
+          <h3>{m.timingTitle}</h3>
           <label>
             <input type="checkbox" checked={measureTiming}
               onChange={e => setMeasureTiming(e.target.checked)} />
-            　以選通為時間基準量 Setup／Hold
-          </label>
-          <p className="hint">選通：{strobePair.labels.join(' / ')}</p>
-          <p className="hint">不勾只出眼圖，量到的是串擾劣化不是裕度。</p>
+             {t.library.spacer}{m.measureTiming}</label>
+          <p className="hint">{m.strobeIs(strobePair.labels.join(' / '))}</p>
+          <p className="hint">{m.timingHint}</p>
 
           {measureTiming && <>
-            <label>方向
-              <select className="input" value={busMode}
+            <label>{m.direction}<select className="input" value={busMode}
                 onChange={e => setBusMode(e.target.value as 'write' | 'read')}>
-                <option value="write">寫入（控制器→顆粒）</option>
-                <option value="read">讀取（顆粒→控制器）</option>
+                <option value="write">{m.write}</option>
+                <option value="read">{m.read}</option>
               </select>
             </label>
             <p className="hint">
-              選通相位 {strobePhaseUi} UI，由方向決定，不必自己填。
-            </p>
-            <p className="hint">寫入時 DQS 對齊在資料眼中央；讀取是邊緣對齊。</p>
+              {m.strobePhase(String(strobePhaseUi))}</p>
+            <p className="hint">{m.strobeAlignHint}</p>
 
-            <h4>判讀準位</h4>
+            <h4>{m.thresholdsTitle}</h4>
             <div className="field-row">
-              <label>VDDQ（V）
-                <input className="input" type="number" step="0.01" value={vddq}
+              <label>{m.vddq}<input className="input" type="number" step="0.01" value={vddq}
                   onChange={e => setVddq(e.target.value)} />
               </label>
-              <label>AC 偏移（V）
-                <input className="input" type="number" step="0.005" value={acOffset}
+              <label>{m.acOffset}<input className="input" type="number" step="0.005" value={acOffset}
                   onChange={e => setAcOffset(e.target.value)} />
               </label>
-              <label>DC 偏移（V）
-                <input className="input" type="number" step="0.005" value={dcOffset}
+              <label>{m.dcOffset}<input className="input" type="number" step="0.005" value={dcOffset}
                   onChange={e => setDcOffset(e.target.value)} />
               </label>
             </div>
             <p className="hint">
-              Vref ＝ {Number.isFinite(vref) ? vref.toFixed(3) : '—'} V；
-              AC {thresholds.vih_ac.toFixed(3)}／{thresholds.vil_ac.toFixed(3)}、
-              DC {thresholds.vih_dc.toFixed(3)}／{thresholds.vil_dc.toFixed(3)} V
+              {m.thresholdSummary(Number.isFinite(vref) ? vref.toFixed(3) : '—',
+                thresholds.vih_ac.toFixed(3), thresholds.vil_ac.toFixed(3),
+                thresholds.vih_dc.toFixed(3), thresholds.vil_dc.toFixed(3))}
             </p>
-            <p className="hint">AC 嚴、DC 鬆，兩組門檻不同不是筆誤。</p>
+            <p className="hint">{m.acDcHint}</p>
 
-            <h4>規格要求（選填）</h4>
+            <h4>{m.specTitle}</h4>
             <div className="field-row">
-              <label>tDS（ps）
-                <input className="input" type="number" value={tds}
+              <label>{m.tds}<input className="input" type="number" value={tds}
                   onChange={e => setTds(e.target.value)} />
               </label>
-              <label>tDH（ps）
-                <input className="input" type="number" value={tdh}
+              <label>{m.tdh}<input className="input" type="number" value={tdh}
                   onChange={e => setTdh(e.target.value)} />
               </label>
             </div>
-            <p className="hint">裕度 ＝ 量到的時間 − 這裡的要求 − derating。</p>
-            <p className="hint">兩個都留空＝只出時間，不判 Pass／Fail。</p>
-            <p className="hint">工具不內建 JEDEC 數值（ADR-0015），請自行填。</p>
+            <p className="hint">{m.specHint1}</p>
+            <p className="hint">{m.specHint2}</p>
+            <p className="hint">{m.specHint3}</p>
 
             <div className="field-row">
-              <label>Rx 遮罩寬（UI）
-                <input className="input" type="number" step="0.01" value={maskUi}
+              <label>{m.maskWidth}<input className="input" type="number" step="0.01" value={maskUi}
                   onChange={e => setMaskUi(e.target.value)} />
               </label>
-              <label>Rx 遮罩高（mV）
-                <input className="input" type="number" value={maskMv}
+              <label>{m.maskHeight}<input className="input" type="number" value={maskMv}
                   onChange={e => setMaskMv(e.target.value)} />
               </label>
             </div>
-            <p className="hint">DDR4 資料群的判準是遮罩，不是 setup／hold。</p>
-            <p className="hint">位址命令群沒有跟著改，仍然是 setup／hold。</p>
-            <p className="hint">暫態眼圖到不了 BER 1e-16，通過只是必要條件。</p>
+            <p className="hint">{m.maskHint1}</p>
+            <p className="hint">{m.maskHint2}</p>
+            <p className="hint">{m.maskHint3}</p>
 
-            <label>Derating 表（選填，貼 JSON）
-              <textarea className="input" rows={4} value={deratingText}
+            <label>{m.deratingLabel}<textarea className="input" rows={4} value={deratingText}
                 placeholder={'{"tds_ps":[{"slew_v_per_ns":1.0,"adjust_ps":125},'
                   + '{"slew_v_per_ns":4.0,"adjust_ps":0}]}'}
                 onChange={e => setDeratingText(e.target.value)} />
             </label>
-            <p className="hint">base 值假設某個邊緣斜率，慢邊緣要求會變嚴。</p>
-            <p className="hint">沒有表＝用 base 值，可能高估裕度。</p>
-            <p className="hint">逐個選通邊各自查表，取最差的那一個。</p>
+            <p className="hint">{m.deratingHint1}</p>
+            <p className="hint">{m.deratingHint2}</p>
+            <p className="hint">{m.deratingHint3}</p>
             {derating.error && <p className="warning">
-              Derating 表讀不進來：{derating.error}
-            </p>}
+              {m.deratingError(derating.error)}</p>}
             {derating.table !== null && !derating.error && <p className="hint">
-              已讀入 {Object.keys(derating.table as object).join('、')}。
-            </p>}
+              {m.deratingLoaded(Object.keys(derating.table as object).join(m.listSep))}</p>}
           </>}
         </section>}
 
-        <section>
-          <h3>送出分析</h3>
+        <section data-wizard-step={5} hidden={hiddenStep(5)}>
+          <h3>{m.submitTitle}</h3>
           <button className="btn" disabled={!canStart || Boolean(multiLaneBlock)}
             title={multiLaneBlock || undefined}
             onClick={() => void start(false)}>
-            {busy ? '處理中…' : '開始多道分析'}
+            {busy ? m.working : m.startMulti}
           </button>
           <LicenseTag functions={['multi_lane']} />
+          {/* #0088 小修 7：單次執行固定 typ，原本畫面沒寫。 */}
+          <p className="hint">{m.singleRunCorner}</p>
 
           {/* 最差條件由結果排序得出，不預先假設 Slow 最差（ADR-0011）。 */}
-          <h4>或一次跑多個 Corner</h4>
+          <h4>{m.cornersTitle}</h4>
           <div className="field-row">
             {[['typ', 'Typical'], ['min', 'Slow'], ['max', 'Fast']].map(([code, label]) => (
               <label key={code}>
                 <input type="checkbox" checked={corners.includes(code)}
                   onChange={e => setCorners(prev => e.target.checked
                     ? [...prev, code] : prev.filter(c => c !== code))} />
-                　{label}
+                 {t.library.spacer}{label}
               </label>
             ))}
           </div>
           <label>
             <input type="checkbox" checked={bothDirections}
               onChange={e => setBothDirections(e.target.checked)} />
-            　同時跑讀取與寫入（兩張眼圖都真實存在而且不同）
-          </label>
+             {t.library.spacer}{m.bothDirections}</label>
           {bothDirections && reverseOnlyDropped.length > 0 && <p className="hint">
-            反方向少跑 {reverseOnlyDropped.join('、')}：那一側沒有驅動器。
-          </p>}
+            {m.reverseDropped(reverseOnlyDropped.join(m.listSep))}</p>}
           <button className="btn" disabled={!canStart || corners.length === 0 || Boolean(multiLaneBlock)}
             title={multiLaneBlock || undefined}
             onClick={() => void start(true)}>
-            {busy ? '處理中…'
-              : `掃描 ${corners.length * (bothDirections ? 2 : 1)} 組`}
+            {busy ? m.working
+              : m.sweepN(corners.length * (bothDirections ? 2 : 1))}
           </button>
-          <p className="hint">只有 IBIS Corner 不同，其餘設定完全相同。</p>
-          <p className="hint">最差條件由結果排序得出，不假設 Slow 最差。</p>
+          <p className="hint">{m.sweepHint}</p>
+          <p className="hint">{m.worstFromResults}</p>
           {!canStart && !busy && <p className="hint">
-            {suggestion.blockers.length > 0 ? '請先解決上方的阻擋項目。'
-              : directionPending ? '請先指定由哪一側驅動。'
-                : variantPending ? '有選擇器還沒定案：填好兩側阻值重新推導，或在該欄自行指定。'
-                  : missingDisposition.length > 0 ? '請把未接 Port 的處置填完整。' : ''}
+            {confirmation !== 'confirmed'
+              ? confirmation === 'stale' ? t.eyeWizard.stale : t.eyeWizard.missing.confirm
+              : suggestion.blockers.length > 0 ? m.blockedByBlockers
+              : directionPending ? m.blockedByDirection
+                : variantPending ? m.blockedByVariant
+                  : missingDisposition.length > 0 ? m.blockedByDisposition : ''}
           </p>}
           {started && <p>{started}</p>}
         </section>
 
       </>}
 
-      {(job && job.status !== "idle") && <section>
-        <h3>分析狀態與結果</h3>
-          <div className={`ibis-wizard__job is-${job?.status || 'idle'}`}>
-            <div><strong>{job?.phase || '尚未執行'}</strong><span>{job?.message}</span></div>
-            <div>狀態：{job?.status || 'idle'}　·　耗時 {jobElapsed} 秒
-              　·　Job {job?.job_id || '—'}</div>
+      {(shownJob && shownJob.status !== "idle") && <section data-wizard-step={5} hidden={hiddenStep(5)}>
+        <h3>{m.statusTitle}</h3>
+          <div className={`ibis-wizard__job is-${shownJob?.status || 'idle'}`}>
+            <div><strong>{pickText(shownJob, 'phase', lang) || m.notRun}</strong><span>{pickText(shownJob, 'message', lang)}</span></div>
+            <div>{m.jobLine(shownJob?.status || 'idle', jobElapsed, shownJob?.job_id || '—')}</div>
           </div>
-          {job?.error && <div className="model-library__issue is-error">
-            失敗：{job.error}</div>}
+          {shownJob?.error && <div className="model-library__issue is-error">
+            {m.failed(pickText(shownJob, 'error', lang))}</div>}
 
           {/* 執行警告要跟著結果一起看——特別是「帶錯誤放行」：這份眼圖
               是帶著相容性錯誤跑出來的，判讀時要對照原話。 */}
           {(jobResult?.warnings?.length ?? 0) > 0 && (
-            <details open={jobResult.warnings.some((w: string) => w.includes('放行'))}>
-              <summary>執行警告（{jobResult.warnings.length} 則）</summary>
-              <ul>{jobResult.warnings.map((w: string) => (
+            <details open={releasedWithErrors(jobResult)}>
+              <summary>{m.runWarnings(jobResult.warnings.length)}</summary>
+              <ul>{pickList(jobResult, 'warnings', lang).map((w: string) => (
                 <li key={w} className="hint">{w}</li>
               ))}</ul>
             </details>
@@ -1707,10 +1711,10 @@ export default function MultiLaneWizard(
 
           {/* Corner 掃描：先給排序表——看的人第一個問題是「哪個最差」。 */}
           {ranking?.ranked?.length > 0 && <>
-            <h4>Corner 排序（最差在最上面）</h4>
+            <h4>{m.rankingTitle}</h4>
             <table className="model-library__table">
-              <thead><tr><th>Corner</th><th>最差 Setup 裕度 (ps)</th>
-                <th>最差訊號</th><th>判定</th></tr></thead>
+              <thead><tr><th>Corner</th><th>{m.colWorstSetup}</th>
+                <th>{m.colWorstSignal}</th><th>{m.colVerdict}</th></tr></thead>
               <tbody>{ranking.ranked.map((row: any) => {
                 const detail = (ranking.per_corner || []).find(
                   (item: any) => item.corner === row.corner) || {}
@@ -1722,16 +1726,16 @@ export default function MultiLaneWizard(
                 </tr>
               })}</tbody>
             </table>
-            <p className="hint">最差條件由結果排序得出，不假設 Slow 最差。</p>
+            <p className="hint">{m.worstFromResults}</p>
           </>}
 
           {signalTables.map((table: any, index: number) => (
             <div key={index}>
-              <h4>逐訊號裕度{table.corner ? `　${table.corner}` : ''}</h4>
+              <h4>{m.perSignal}{table.corner ? `${m.gap}${table.corner}` : ''}</h4>
               <table className="model-library__table">
-                <thead><tr><th>訊號</th><th>驅動腳</th><th>接收腳</th>
+                <thead><tr><th>{m.colSignal}</th><th>{m.colDriverPin}</th><th>{m.colReceiverPin}</th>
                   <th>Setup (ps)</th><th>Hold (ps)</th><th>tVAC (ps)</th>
-                  <th>約束邊</th><th>判定</th></tr></thead>
+                  <th>{m.colEdges}</th><th>{m.colVerdict}</th></tr></thead>
                 <tbody>{(table.rows || []).map((row: any) => (
                   <tr key={row.signal}>
                     <td>{row.signal}</td><td>{row.driver_pin}</td>
@@ -1762,11 +1766,10 @@ export default function MultiLaneWizard(
             if (!withSlew.length) return null
             return (
               <p className="hint">
-                Slew 最慢（V/ns）：{withSlew.slice(0, 8).map((row: any) =>
-                  `${row.label} 升 ${row.slew_rise_min_v_per_ns?.toFixed(2) ?? '—'}`
-                  + `／降 ${row.slew_fall_min_v_per_ns?.toFixed(2) ?? '—'}`
-                ).join('；')}
-                {withSlew.length > 8 ? `　…共 ${withSlew.length} 條道` : ''}
+                {m.slewLead}{withSlew.slice(0, 8).map((row: any) =>
+                  m.slewRow(row.label, row.slew_rise_min_v_per_ns?.toFixed(2) ?? '—', row.slew_fall_min_v_per_ns?.toFixed(2) ?? '—')
+                ).join(m.listSemi)}
+                {withSlew.length > 8 ? m.moreLanes(withSlew.length) : ''}
               </p>
             )
           })()}
@@ -1780,10 +1783,10 @@ export default function MultiLaneWizard(
             if (!ck.length) return null
             return (
               <p className="hint">
-                選通品質：{ck.map((item: any) => item.why
-                  ? `${item.label}（${item.why}）`
-                  : `${item.label} ${item.monotonic ? '單調 ✓' : `不單調（${item.violation_count} 處、最大回頭 ${item.worst_reversal_mv?.toFixed(1)} mV）⚠`}`
-                ).join('；')}
+                {m.ckLead}{ck.map((item: any) => item.why
+                  ? `${item.label}${m.paren(pickText(item, 'why', lang))}`
+                  : `${item.label} ${item.monotonic ? m.monotonic : m.nonMonotonic(item.violation_count, item.worst_reversal_mv?.toFixed(1))}`
+                ).join(m.listSemi)}
               </p>
             )
           })()}
@@ -1793,40 +1796,32 @@ export default function MultiLaneWizard(
               ADR-0039 的可得性包裝，取不到時要把原因印出來。 */}
           {quickMeasurements && quickMeasurements.available === false && (
             <p className="hint">
-              取不到眼圖量測：{quickMeasurements.unavailable_reason}
-            </p>
+              {m.noMeasurements(pickText(quickMeasurements, 'unavailable_reason', lang))}</p>
           )}
           {quickMeasurements
             && Object.keys(quickMeasurements.metrics || {}).length > 0 && <>
-            <h4>基準眼圖量測（近無損直連）</h4>
-            <table className="model-library__table">
-              <thead><tr><th>量測</th><th>數值</th></tr></thead>
+            <h4>{m.baselineMeasurements}</h4>
+            <table className="model-library__table eye-metrics">
+              <thead><tr><th>{m.colMeasurement}</th><th>{m.colValue}</th></tr></thead>
               <tbody>{Object.entries(quickMeasurements.metrics)
                 .map(([key, item]: [string, any]) => (
                   <tr key={key}>
-                    <td>{item.label || key}</td>
+                    <td>{pickText(item, 'label', lang) || key}</td>
                     <td>{item.value !== undefined
                       ? `${Number(item.value).toPrecision(4)} ${item.unit || ''}`
-                      : item.text}</td>
+                      : pickText(item, 'text', lang)}</td>
                   </tr>
                 ))}</tbody>
             </table>
           </>}
 
           {eyeCards.length > 0 && <>
-            <h4>眼圖（{eyeCards.length} 張）</h4>
-            <div className="ibis-eye-gallery">
-              {eyeCards.map(card => (
-                <article key={card.key}
-                  data-report-separate-snapshot="true"
-                  data-report-kind={`multilane-${card.key}`}
-                  data-report-title={`多埠眼圖：${card.title}`}>
-                  <header><div><strong>{card.title}</strong>
-                    <span>{card.corner}</span></div></header>
-                  <img src={card.imageUrl} alt={`${card.title} 眼圖`} />
-                </article>
-              ))}
-            </div>
+            <h4>{m.eyeCount(eyeCards.length)}</h4>
+            <EyeImageGallery items={eyeCards.map(card => ({
+              key: card.key, title: card.title, sub: card.corner, url: card.imageUrl,
+              alt: m.eyeAlt(card.title),
+              reportKind: `multilane-${card.key}`, reportTitle: m.reportEyeTitle(card.title),
+            }))} />
           </>}
         </section>}
 
@@ -1836,7 +1831,7 @@ export default function MultiLaneWizard(
           先前這裡讀的是 Touchstone 旁邊的 `ibis_channel_runs`——那些是
           **點對點通道**的紀錄，跟多道是不同的分析，列在這裡會讓人以為
           自己跑過但其實沒有。2026-08-31 多道開始寫自己的紀錄之後改掉。 */}
-      <RunHistory kind="multi_lane" title="多道執行歷史" onRestore={restoreRun} />
+      <RunHistory kind="multi_lane" title={m.historyTitle} onRestore={restoreRun} />
     </div>
   )
 }

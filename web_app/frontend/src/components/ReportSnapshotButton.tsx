@@ -2,6 +2,8 @@
 import { useEffect, useState } from 'react'
 import { toPng } from 'html-to-image'
 
+import { errorText } from '../backendFields'
+import { useT } from '../i18n'
 import {
   createReportSnapshot,
   openReportWorkspace,
@@ -48,11 +50,16 @@ export default function ReportSnapshotButton({
   basePath, projectName, targetId, kind, title, section,
   sourceRevision = '', sourceMetadata = {}, onSaved,
 }: Props) {
+  const { t, lang } = useT()
+  const s = t.snapshot
   const [open, setOpen] = useState(false)
   const [caption, setCaption] = useState('')
   const [status, setStatus] = useState<SnapshotStatus>('display')
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState('')
+  const [message, setMessageState] = useState<{ text: string; error: boolean }>({ text: '', error: false })
+  // 紅字由呼叫端表明（setFailure），不再看訊息裡有沒有「失敗」——切到英文後那個字就不在了。
+  const setMessage = (text: string) => setMessageState({ text, error: false })
+  const setFailure = (text: string) => setMessageState({ text, error: true })
   // App 裡只有一個實例，切換分頁只換 kind：不清的話上一頁的圖說會接到這一頁（#0083）。
   useEffect(() => { setCaption('') }, [kind])
 
@@ -63,19 +70,19 @@ export default function ReportSnapshotButton({
     // 「先設定分析輸出路徑」卻沒說在哪設定，等於把人擋死。
     const target = document.getElementById(targetId)
     if (!target) {
-      setMessage('找不到目前結果畫面，請重新切換分頁後再試。')
+      setMessage(s.noTarget)
       return
     }
     setBusy(true)
-    setMessage('正在建立高解析度快照…')
+    setMessage(s.creating)
     try {
-      const workspaceResult = await openReportWorkspace(basePath, projectName || 'PCB SI 分析專案')
+      const workspaceResult = await openReportWorkspace(basePath, projectName || t.report.defaultProject)
       const save = async (payload: CreateSnapshotPayload) => {
         try {
           await createReportSnapshot(payload)
         } catch (error) {
           const typed = error as Error & { status?: number }
-          if (typed.status !== 409 || !window.confirm(`${typed.message}\n\n是否移除最舊版本並建立新快照？`)) throw error
+          if (typed.status !== 409 || !window.confirm(t.report.pruneConfirm(errorText(error, lang)))) throw error
           await createReportSnapshot({ ...payload, prune_confirmed: true })
         }
       }
@@ -109,8 +116,8 @@ export default function ReportSnapshotButton({
       ))
       for (let index = 0; index < details.length; index += 1) {
         const element = details[index]
-        const detailTitle = element.dataset.reportTitle || `${title}—結果 ${index + 1}`
-        setMessage(`正在建立獨立結果快照（${index + 1}／${details.length}）…`)
+        const detailTitle = element.dataset.reportTitle || s.detailTitle(title, index + 1)
+        setMessage(s.creatingDetail(index + 1, details.length))
         const detailDataUrl = await render(element)
         await save({
           ...payload,
@@ -118,8 +125,8 @@ export default function ReportSnapshotButton({
           title: detailTitle,
           image_data_url: detailDataUrl,
           caption: safeCaption
-            ? `${safeCaption}\n獨立結果：${detailTitle}`
-            : `獨立結果：${detailTitle}`,
+            ? `${safeCaption}\n${s.detailCaption(detailTitle)}`
+            : s.detailCaption(detailTitle),
           source_metadata: {
             ...payload.source_metadata,
             parent_kind: kind,
@@ -128,7 +135,7 @@ export default function ReportSnapshotButton({
           },
         })
       }
-      setMessage(`快照已保存，共 ${details.length + 1} 張；捲動的結果已各自完整輸出。`)
+      setMessage(s.saved(details.length + 1))
       setCaption('')
       window.dispatchEvent(new CustomEvent('pcbsi-report-snapshot-saved', {
         detail: { workspace: workspaceResult.workspace, kind },
@@ -136,7 +143,7 @@ export default function ReportSnapshotButton({
       onSaved?.(workspaceResult.workspace)
       window.setTimeout(() => setOpen(false), 900)
     } catch (error) {
-      setMessage(`建立快照失敗：${String((error as Error)?.message || error)}`)
+      setFailure(s.failed(errorText(error, lang)))
     } finally {
       setBusy(false)
     }
@@ -149,37 +156,37 @@ export default function ReportSnapshotButton({
         className="btn report-snapshot-trigger"
         data-report-ignore="true"
         onClick={() => { setMessage(''); setOpen(true) }}
-        title="保存目前縮放、圖層、曲線與標記，供 HTML 報告使用"
+        title={s.triggerTip}
       >
-        📷 更新報告快照
+        {s.trigger}
       </button>
       {open && (
         <div className="report-modal-backdrop" data-report-ignore="true">
-          <div className="report-modal" role="dialog" aria-modal="true" aria-label="更新報告快照">
-            <h3>更新報告快照</h3>
+          <div className="report-modal" role="dialog" aria-modal="true" aria-label={s.dialog}>
+            <h3>{s.dialog}</h3>
             <div className="report-muted">{title}</div>
             <div className="report-muted">
-              眼圖與會捲動的表格會另存完整快照，不會只拍到看得見的部分。
+              {s.scrollNote}
             </div>
-            <label>工程狀態
+            <label>{s.statusLabel}
               <select value={status} onChange={event => setStatus(event.target.value as SnapshotStatus)}>
-                <option value="display">僅供展示</option>
-                <option value="pass">通過</option>
-                <option value="attention">注意</option>
-                <option value="fail">失敗</option>
+                <option value="display">{t.report.status.display}</option>
+                <option value="pass">{t.report.status.pass}</option>
+                <option value="attention">{t.report.status.attention}</option>
+                <option value="fail">{t.report.status.fail}</option>
               </select>
             </label>
-            <label>圖說／工程備註
+            <label>{s.caption}
               <textarea rows={4} value={caption} onChange={event => setCaption(event.target.value)}
-                placeholder="這張圖要證明什麼？可稍後在報告中心修改。" />
+                placeholder={s.captionPlaceholder} />
             </label>
-            {message && <div className={message.includes('失敗') ? 'report-message report-message--error' : 'report-message'}>{message}</div>}
+            {message.text && <div className={message.error ? 'report-message report-message--error' : 'report-message'}>{message.text}</div>}
             <div className="report-modal-actions">
               <button className="btn" type="button" disabled={busy}
                 style={{ whiteSpace: 'nowrap' }}
-                onClick={() => setOpen(false)}>取消</button>
+                onClick={() => setOpen(false)}>{s.cancel}</button>
               <button className="btn btn--primary" type="button" disabled={busy} onClick={capture}>
-                {busy ? '建立快照中…' : '確認並保存'}
+                {busy ? s.savingButton : s.saveButton}
               </button>
             </div>
           </div>
