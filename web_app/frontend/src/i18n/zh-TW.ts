@@ -1367,6 +1367,8 @@ ${p2}${p3}`,
     detailTitle: (title: string, index: number) => `${title}—結果 ${index}`,
     creatingDetail: (index: number, total: number) => `正在建立獨立結果快照（${index}／${total}）…`,
     detailCaption: (title: string) => `獨立結果：${title}`,
+    // 沒有表頭的量測表（GetWave 疊眼）進報告時用的欄名（#0115）。
+    tableColumns: ['項目', '數值'],
     saved: (count: number) => `快照已保存，共 ${count} 張；捲動的結果已各自完整輸出。`,
     failed: (error: string) => `建立快照失敗：${error}`,
     triggerTip: '保存目前縮放、圖層、曲線與標記，供 HTML 報告使用',
@@ -2127,6 +2129,15 @@ ${p2}${p3}`,
     blocked: "已阻止",
     ready: "可使用",
   },
+  openSimFolder: {
+    label: '開啟模擬資料夾',
+    title: (path: string) => `在檔案總管開啟這次模擬的輸出資料夾：${path}`,
+  },
+  resultDetails: {
+    open: '眼圖參數',
+    close: '關閉',
+    title: '眼圖參數與量測',
+  },
   /** EyeImageGallery.tsx（#0104 結果頁共用眼圖畫廊）。 */
   eyeGallery: {
     open: '點一下放大',
@@ -2703,6 +2714,8 @@ ${p2}${p3}`,
     failed: (error: string) => `失敗：${error}`,
     runWarnings: (n: number) => `執行警告（${n} 則）`,
     rankingTitle: 'Corner 排序（最差在最上面）',
+    worstCornerSummary: (corner: string, value: string, verdict: string) =>
+      `最差 Corner：${corner}（最差 Setup 餘裕 ${value} ps，判定 ${verdict}）。完整排序與逐訊號時序在「眼圖參數」。`,
     colWorstSetup: '最差 Setup 裕度 (ps)',
     colWorstSignal: '最差訊號',
     perSignal: '逐訊號裕度',

@@ -27,3 +27,11 @@ export function stepIndex(index: number, delta: number, length: number): number 
   if (length <= 0) return 0
   return ((index + delta) % length + length) % length
 }
+
+/** 結果頁的欄數（#0115）：眼圖是主角，盡量大、不留大空白。
+ *  一張佔滿；兩張、四張排成兩欄剛好填滿；三張以上三欄（三張一列、五張 3＋2）。 */
+export function galleryColumns(count: number): number {
+  if (count <= 1) return 1
+  if (count === 2 || count === 4) return 2
+  return 3
+}

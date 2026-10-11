@@ -4,6 +4,7 @@
 // `errorText(err, lang)` 依語言挑；這裡自己產生的訊息依目前畫面語言。
 import { currentLang, messagesFor } from './i18n/catalog'
 import type { Lang } from './i18n/lang'
+import type { ReportTableData } from './reportTables'
 import type {
   ReportBrand,
   ReportSettings,
@@ -85,6 +86,8 @@ export interface CreateSnapshotPayload {
   external?: boolean
   /** 拍攝時的介面語言（卡 0087）。報告語言不同時，後端在報告警告區提醒重拍。 */
   ui_locale?: Lang
+  /** 截圖拍不到的量測表（#0115），報告印在這張圖下。 */
+  tables?: ReportTableData[]
 }
 
 /** 沒指定 `ui_locale` 就記目前畫面語言：截圖拍的就是這個語言的畫面。 */

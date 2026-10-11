@@ -42,6 +42,7 @@ import CrossSectionComparison, {
 } from './components/CrossSectionComparison'
 import SParamChart, { SParamSeries } from './components/SParamChart'
 import EvidenceBadges from './components/EvidenceBadges'
+import OpenFolderButton from './components/OpenFolderButton'
 import TdrChart from './components/TdrChart'
 import TaskPicker from './components/TaskPicker'
 import {
@@ -720,6 +721,9 @@ export default function App() {
 
   // ── 電路串接 ──
   const [cascadeResult, setCascadeResult] = useState<any | null>(null)
+  // 「載入外部 S 參數」的結果是使用者自己的檔案，不是工具產出：沒有 summary_path，
+  // 不給「開啟模擬資料夾」（後端也不會開）。串接（含手動接線）一定寫摘要（#0115）。
+  const cascadeIsToolOutput = Boolean(cascadeResult?.summary_path)
   const [cascadeBusy, setCascadeBusy] = useState(false)
   const [cascadeMode, setCascadeMode] = useState<'tool' | 'external'>('tool')
   const [schematicGraph, setSchematicGraph] = useState<CascadeGraph | null>(null)
@@ -5587,6 +5591,12 @@ export default function App() {
                       })}
                     </div>
                   )}
+                  {/* 分段求解的 Touchstone 寫在各段 .aedb 旁邊，也就是 segments.json 所在的資料夾（#0115）。 */}
+                  {schedStatus && !schedStatus.running && (schedStatus.counts?.done ?? 0) > 0 && (
+                    <div style={{ marginTop: 6 }}>
+                      <OpenFolderButton path={schedStatus.metadata_path} />
+                    </div>
+                  )}
                   <p className="panel-caveat">
                     <b>{t.appView.siwaveUsesAQuasiStaticApproximation}</b>{t.appView.suitableForScreeningRecheckChannelsRequiringSign}</p>
                 </div>
@@ -5763,6 +5773,9 @@ export default function App() {
                           後端的判定早就有了，這是它第一個對使用者的出口。 */}
                       <EvidenceBadges path={cascadeResult.output_path}
                         expectedPorts={cascadeResult.n_ports} />
+                      <div style={{ marginTop: 6 }}>
+                        <OpenFolderButton path={cascadeIsToolOutput ? cascadeResult.output_path : ''} />
+                      </div>
                       {cascadeMode === 'tool' && (
                         <button className="btn" onClick={handleCascadeExportAs}
                           disabled={cascadeBusy}
@@ -5894,6 +5907,7 @@ export default function App() {
                         {circuitResult && (
                           <div className="status status--ok"
                             style={{ marginTop: 6, fontSize: 11, wordBreak: 'break-all' }}>{t.appView.symbol459(circuitResult.solved ? t.appView.quickeyeComplete : t.appView.circuitExported, circuitResult.output_path)}{circuitResult.image_path && <div>{t.appView.eyeDiagram(circuitResult.image_path)}</div>}
+                            <div style={{ marginTop: 4 }}><OpenFolderButton path={circuitResult.output_path} /></div>
                           </div>
                         )}
                       </div>
@@ -6518,6 +6532,9 @@ export default function App() {
                                   {/* 這一區會被拍進客戶報告，只顯示檔名；完整路徑在提示裡（卡 0083 R5）。 */}
                                   {displayFileName(eyeJob.result?.image_path)}
                                 </div>
+                                <div style={{ marginTop: 6, flexShrink: 0 }}>
+                                  <OpenFolderButton path={eyeJob.result?.output_path} dark />
+                                </div>
                               </div>
                             )}
                             {!eyeJob?.running && eyeJob?.status !== 'done' && eyeJob?.status !== 'error' && (
@@ -6759,6 +6776,8 @@ export default function App() {
                                       {tdrJob.result.source === 'measured_waveform'
                                         ? t.appView.measuredWaveform(displayFileName(tdrJob.result.csv_path))
                                         : t.appView.circuitProject(displayFileName(tdrJob.result.project_path))}</span>
+                                    {/* 量測波形沒有輸出檔（只寫執行紀錄），不給按鈕。 */}
+                                    <OpenFolderButton path={tdrJob.result.source === 'measured_waveform' ? '' : tdrJob.result.project_path} dark />
                                   </div>
                                 </>
                               )
@@ -6786,6 +6805,7 @@ export default function App() {
                             <EvidenceBadges path={cascadeResult.output_path}
                               expectedPorts={cascadeResult.n_ports}
                               throughPaths={tdrThroughPaths} dark />
+                            <div><OpenFolderButton path={cascadeIsToolOutput ? cascadeResult.output_path : ''} dark /></div>
 
                             <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
                               <div style={{ display: 'flex', gap: 4 }}>
@@ -6977,6 +6997,9 @@ export default function App() {
                                     rows={xsJob.result.cuts}
                                     selected={xsResultIdx}
                                     onSelect={setXsResultIdx} />
+                                  <div style={{ marginTop: 8 }}>
+                                    <OpenFolderButton path={xsJob.result.project_path} dark />
+                                  </div>
                                 </div>
                               )}
                               {xsCompare && (

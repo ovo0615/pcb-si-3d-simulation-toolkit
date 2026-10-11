@@ -8,6 +8,7 @@ import { useState } from 'react'
 
 import { errorText, pickList, pickText } from '../backendFields'
 import { useT } from '../i18n'
+import OpenFolderButton from './OpenFolderButton'
 import type { Lang, Messages } from '../i18n'
 
 type SerdesText = Messages['serdes']
@@ -21,6 +22,7 @@ interface JudgeResult {
   verdict: string; warnings?: string[]; checks: Check[]; disclaimer?: string
   profile?: { name: string; version: string; source: string }
   report_table?: { columns: string[]; rows: string[][]; verdicts: string[] } | null
+  erl_run?: { result_path?: string | null }
 }
 interface LoadedProfile {
   name: string; version: string; source: string
@@ -229,6 +231,8 @@ export default function SerdesCompliancePanel() {
           )}
           <p className="hint">{pickText(result, 'disclaimer', lang)}</p>
           <p className="hint">{tx.reportHint}</p>
+          {/* 只有跑了 ERL 才有輸出檔（com_reports/ERL_*）；純判定沒有資料夾可開。 */}
+          <OpenFolderButton path={result.erl_run?.result_path} />
         </section>
       )}
     </div>

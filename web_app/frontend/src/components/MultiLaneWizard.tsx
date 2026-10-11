@@ -15,6 +15,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ModelPackage } from './ModelLibrary'
 import RunHistory, { RestorableRun } from './RunHistory'
 import EyeImageGallery from './EyeImageGallery'
+import OpenFolderButton from './OpenFolderButton'
+import ResultDetailsDrawer, { useResultDrawer } from './ResultDetailsDrawer'
 import { LicenseTag, useLicenseBlock } from './LicenseTag'
 import { releasedWithErrors, pickText, pickList, errorText } from '../backendFields'
 import { useT } from '../i18n'
@@ -866,6 +868,7 @@ export default function MultiLaneWizard({
     ? Math.max(0, Math.round(((shownJob.finished_at || Date.now() / 1000) - shownJob.started_at)))
     : 0
   const jobResult = shownJob?.status === 'done' ? shownJob?.result : null
+  const details = useResultDrawer(shownJob?.job_id)
   const ranking = jobResult?.ranking || null
   const signalTables: any[] = jobResult?.sweep
     ? (jobResult.tables || [])
@@ -1709,6 +1712,27 @@ export default function MultiLaneWizard({
             </details>
           )}
 
+          {/* #0115：結果頁只放眼圖；排序表、逐訊號時序、量測收進「眼圖參數」抽屜。
+              最差 Corner 與判定留一行在頁面上——FAIL 不能藏在按鈕後面。 */}
+          {eyeCards.length > 0 && ranking?.ranked?.length > 0 && (() => {
+            const worst = ranking.ranked[0]
+            const detail = (ranking.per_corner || []).find((item: any) => item.corner === worst.corner) || {}
+            return <p className="warning">
+              {m.worstCornerSummary(String(worst.corner), Number(worst.value).toFixed(1), String(detail.verdict || '—'))}</p>
+          })()}
+          {(eyeCards.length > 0 || Boolean(jobResult?.run_dir || jobResult?.output_dir)) && <div className="eye-results__toolbar">
+            {eyeCards.length > 0 && <h4>{m.eyeCount(eyeCards.length)}</h4>}
+            {eyeCards.length > 0 && <button type="button" className="btn"
+              aria-expanded={details.open} onClick={details.toggle}>
+              {t.resultDetails.open}</button>}
+            <OpenFolderButton path={jobResult?.run_dir || jobResult?.output_dir} />
+          </div>}
+          {eyeCards.length > 0 && <EyeImageGallery items={eyeCards.map(card => ({
+            key: card.key, title: card.title, sub: card.corner, url: card.imageUrl,
+            alt: m.eyeAlt(card.title),
+            reportKind: `multilane-${card.key}`, reportTitle: m.reportEyeTitle(card.title),
+          }))} />}
+          <ResultDetailsDrawer open={details.open} onClose={details.close} inline={eyeCards.length === 0}>
           {/* Corner 掃描：先給排序表——看的人第一個問題是「哪個最差」。 */}
           {ranking?.ranked?.length > 0 && <>
             <h4>{m.rankingTitle}</h4>
@@ -1815,14 +1839,7 @@ export default function MultiLaneWizard({
             </table>
           </>}
 
-          {eyeCards.length > 0 && <>
-            <h4>{m.eyeCount(eyeCards.length)}</h4>
-            <EyeImageGallery items={eyeCards.map(card => ({
-              key: card.key, title: card.title, sub: card.corner, url: card.imageUrl,
-              alt: m.eyeAlt(card.title),
-              reportKind: `multilane-${card.key}`, reportTitle: m.reportEyeTitle(card.title),
-            }))} />
-          </>}
+          </ResultDetailsDrawer>
         </section>}
 
       {/* 執行歷史。ADR-0016 的不可變紀錄一直只存在於後端，這是它的入口。

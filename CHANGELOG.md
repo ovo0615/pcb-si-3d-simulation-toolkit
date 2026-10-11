@@ -16,14 +16,15 @@
 | Port 與求解設定 | 元件端 Port 自動判定、內建規格設定檔、掃頻由資料率帶入 | [03](docs/manual/03-Port與求解設定.md) |
 | 分段與混合求解 | 等分或依 3D 複雜度切成 N 段，逐段指定 HFSS／SIwave；切面品質評分 | [04](docs/manual/04-分段與混合求解.md) |
 | 排程與串接 | 逐段求解、可停止與重試匯出，再串回完整通道 Touchstone | [05](docs/manual/05-排程與串接.md) |
-| 眼圖精靈 | 通道 → 速率 → 兩端晶片 → 接線確認 → 執行，五步做完單通道、多埠／DDR 與 IBIS-AMI；`[Model Selector]` 變體依驅動強度／ODT 篩選；量測表與眼圖畫廊並排 | [06](docs/manual/06-IBIS與眼圖.md#眼圖精靈五步) |
+| 眼圖精靈 | 通道 → 速率 → 兩端晶片 → 接線確認 → 執行，五步做完單通道、多埠／DDR 與 IBIS-AMI；`[Model Selector]` 變體依驅動強度／ODT 篩選；結果頁只放眼圖，量測表在「眼圖參數」抽屜 | [06](docs/manual/06-IBIS與眼圖.md#眼圖精靈五步) |
 | 常見規範預設 | DDR4／5、LPDDR4／4X／5／5X、PCIe Gen3～6、USB 3.2 Gen1／Gen2、USB4 Gen2／Gen3、UCIe 1.1；只帶資料率、調變、bit 數下限，附官方出處 | [06](docs/manual/06-IBIS與眼圖.md#眼圖精靈五步) |
 | 模型庫 | IBIS／IBIS-AMI 受管副本、相容性預檢與自動修正、DLL 掃描與信任、參考通道健檢 | [06](docs/manual/06-IBIS與眼圖.md#模型庫與-dll-信任) |
 | SPISim 規格模型 | 沒有原廠模型時，從本機 AEDT 範本產生 IBIS／IBIS-AMI 規格模型；產生前探測授權，自動標「非原廠」 | [06](docs/manual/06-IBIS與眼圖.md#沒有模型從-aedt-內建規格產生spisim) |
 | SerDes 合規判定 | 以自建規格設定檔判頻域限值、TDR、眼罩、ERL | [06](docs/manual/06-IBIS與眼圖.md#serdes-合規判定) |
 | TDR 定位 | 模擬或量測 TDR，把阻抗劇變標回 Layout 走線 | [07](docs/manual/07-TDR定位.md) |
 | 截面阻抗（Q2D） | 從 EDB 還原實際截面求阻抗，可與 TDR 對照 | [08](docs/manual/08-截面阻抗.md) |
-| 一鍵 HTML 報告 | 結果快照、浮水印、單檔 HTML；報告語言可另選 | [09](docs/manual/09-報告與輸出.md) |
+| 一鍵 HTML 報告 | 結果快照、浮水印、單檔 HTML；報告語言可另選；眼圖量測表隨快照印進報告 | [09](docs/manual/09-報告與輸出.md) |
+| 開啟模擬資料夾 | 分段排程、串接、QuickEye、眼圖精靈、TDR、截面阻抗、ERL 完成後一鍵開輸出資料夾；只開工具自己產出的資料夾 | [09](docs/manual/09-報告與輸出.md#結果檔保存) |
 | 其他工作模式 | 外部通道、遠端求解包、S 參數工具箱、COM | [10](docs/manual/10-其他工作模式.md) |
 | 介面 | 工具視窗（沒有 WebView2 時改開瀏覽器）；黑色主控台在視窗開好後自動隱藏；「檢視 → Language／語言」切換中英 | [01](docs/manual/01-開始使用.md) |
 
