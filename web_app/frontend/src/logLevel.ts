@@ -13,8 +13,22 @@
 //
 // 規則刻意只認中文關鍵字：後端所有訊息都是中文，英文字只會出現在 AEDT 的欄位
 // 名、檔名與例外訊息裡，拿它們判斷嚴重性只會製造誤判。
+//
+// 卡 0087 起後端改送結構化的一則日誌 `{text, level, code?, text_en?}`。有 `level`
+// 就照它上色——切到英文後畫面上是 text_en，再拿中文關鍵字猜嚴重性就靜默失效了。
+// 下面這套中文規則只留給還沒帶 level 的舊格式（純文字一行）。
+
+import type { Lang } from './i18n/lang'
 
 export type LogLevel = 'error' | 'warn' | 'info'
+
+/** 一則日誌。舊格式（純文字）解析後只有 text。 */
+export type LogEntry = {
+  text: string
+  level?: LogLevel
+  code?: string
+  text_en?: string
+}
 
 /** 已標明是警告的行。警告優先於錯誤——寫的人已經表態了，不要再猜。 */
 const WARN = /警告|注意/
@@ -36,9 +50,43 @@ export function logLevel(line: string): LogLevel {
   return 'info'
 }
 
+function isLevel(value: unknown): value is LogLevel {
+  return value === 'error' || value === 'warn' || value === 'info'
+}
+
+/** WebSocket 收到的一則：JSON 物件且有字串 text 才當結構化紀錄，其餘一律當純文字。 */
+export function parseLogMessage(raw: string): LogEntry {
+  if (raw.startsWith('{')) {
+    try {
+      const data = JSON.parse(raw)
+      if (data && typeof data === 'object' && typeof data.text === 'string') {
+        return {
+          text: data.text,
+          level: isLevel(data.level) ? data.level : undefined,
+          code: typeof data.code === 'string' ? data.code : undefined,
+          text_en: typeof data.text_en === 'string' ? data.text_en : undefined,
+        }
+      }
+    } catch { /* 不是 JSON：當成一行純文字 */ }
+  }
+  return { text: raw }
+}
+
+/** 後端給了 level 就照它；沒有才退回上面的中文規則。 */
+export function entryLevel(entry: LogEntry | string): LogLevel {
+  if (typeof entry === 'string') return logLevel(entry)
+  return entry.level ?? logLevel(entry.text)
+}
+
+/** 畫面上要印的字：英文介面優先用 text_en，沒有就顯示原文，不在前端硬翻。 */
+export function logText(entry: LogEntry | string, lang: Lang): string {
+  if (typeof entry === 'string') return entry
+  return (lang === 'en' && entry.text_en) || entry.text
+}
+
 /** 對應到 CSS 變數；info 回 undefined，沿用容器本身的顏色。 */
-export function logColor(line: string): string | undefined {
-  const level = logLevel(line)
+export function logColor(entry: LogEntry | string): string | undefined {
+  const level = entryLevel(entry)
   if (level === 'error') return 'var(--danger)'
   if (level === 'warn') return 'var(--warn)'
   return undefined

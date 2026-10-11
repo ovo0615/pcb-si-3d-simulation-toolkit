@@ -2,6 +2,7 @@
 // 右側面板仿 SIwave 欄位設計：Layers / Components / Nets 分頁
 //   Layers 欄位由左至右：Fill/Unfill All、Show/Hide All、Planes、Traces、Pads、Vias、Circuit Elements
 import React, { useEffect, useRef, useState, useCallback } from 'react'
+import { useT } from '../i18n'
 
 export interface PreviewData {
   layers: Record<string, any[]>
@@ -186,21 +187,21 @@ const DEFAULT_MODE: LayerMode = {
 }
 
 // ── 欄位定義 ─────────────────────────────────────────────────
+// 欄位名稱跟著介面語言，放在語言檔 t.preview2d.layerCols[key]，這裡只留圖示與底色。
 interface ColDef {
   key: keyof LayerMode
   icon: string
-  title: string
   headerBg?: string
 }
 
 const LAYER_COLS: ColDef[] = [
-  { key: 'filled',     icon: '■',  title: 'Fill / Unfill All',   headerBg: 'rgba(255,215,0,0.15)' },
-  { key: 'visible',    icon: '●',  title: 'Show / Hide All',     headerBg: 'rgba(255,255,255,0.06)' },
-  { key: 'planes',     icon: '▣',  title: 'Planes（銅箔平面）',   headerBg: undefined },
-  { key: 'traces',     icon: '≡',  title: 'Traces（走線）',       headerBg: undefined },
-  { key: 'pads',       icon: '◉',  title: 'Pads（焊盤）',         headerBg: undefined },
-  { key: 'vias',       icon: '◎',  title: 'Vias（過孔）',         headerBg: undefined },
-  { key: 'components', icon: '⊞',  title: 'Circuit Elements（元件外框）', headerBg: undefined },
+  { key: 'filled',     icon: '■',  headerBg: 'rgba(255,215,0,0.15)' },
+  { key: 'visible',    icon: '●',  headerBg: 'rgba(255,255,255,0.06)' },
+  { key: 'planes',     icon: '▣',  headerBg: undefined },
+  { key: 'traces',     icon: '≡',  headerBg: undefined },
+  { key: 'pads',       icon: '◉',  headerBg: undefined },
+  { key: 'vias',       icon: '◎',  headerBg: undefined },
+  { key: 'components', icon: '⊞',  headerBg: undefined },
 ]
 
 const COL_W = 26   // 每個欄位寬度（px）
@@ -236,6 +237,10 @@ export default function Preview2D({
   showOnlySelected: showOnlySelectedProp,
   onShowOnlySelectedChange,
 }: Preview2DProps) {
+  // tp 只在切換語言時換成另一份物件（messagesFor 回傳固定的字典），
+  // 所以放進 drawCanvas 的相依不會造成多餘的重畫。
+  const { t } = useT()
+  const tp = t.preview2d
   const canvasRef    = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   // 拖曳中的暫時矩形（mm）。放開滑鼠才回報，拖曳過程只是預覽。
@@ -1084,11 +1089,12 @@ export default function Preview2D({
         // 系統日誌矛盾，截進文件的圖會自打嘴巴。
         const modeLabel = extentType || 'Bounding'
         ctx.fillStyle = '#ff8c00'
-        ctx.fillText(`▣ PyEDB 精確預估 [${modeLabel}]  向外 ±${exp} mm`, 12, rect.height - 12)
+        ctx.fillText(tp.estimatedCutoutLabel(modeLabel, exp), 12, rect.height - 12)
         ctx.restore()
       }
     }
-  }, [data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, segmentCuts, draggingCut, showSegmentSafetyOverlay, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, tdrMarkers, crossSectionRegion, crossSectionCut, drawingRegion, getLayerColor, getStackupLayers, computeContentBounds])
+  // tp：畫布上的字（上面的預估外框標籤）跟著語言，切換語言時要重畫。
+  }, [tp, data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, segmentCuts, draggingCut, showSegmentSafetyOverlay, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, tdrMarkers, crossSectionRegion, crossSectionCut, drawingRegion, getLayerColor, getStackupLayers, computeContentBounds])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
@@ -1425,7 +1431,7 @@ export default function Preview2D({
                  outline:'none' }}
         tabIndex={0}
         onKeyDown={handleKeyDown}
-        title="點一下畫布後可用鍵盤：方向鍵平移（Shift 跨大步）、+／− 縮放、0 回到全覽。"
+        title={tp.keyboardTip}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -1451,8 +1457,8 @@ export default function Preview2D({
             onMouseDown={event => event.stopPropagation()}
           >
             {([
-              ['region', '框工作範圍', '拖曳框出範圍。它也是截面的側向截斷邊界，太窄會讓阻抗偏高。'],
-              ['cut', '拉切線', '在範圍內點一下。軸向由範圍的長邊決定，不允許斜切。'],
+              ['region', tp.regionMode, tp.regionModeTip],
+              ['cut', tp.cutMode, tp.cutModeTip],
             ] as [CrossSectionMode, string, string][]).map(([mode, label, hint]) => (
               <button
                 key={mode}
@@ -1481,14 +1487,14 @@ export default function Preview2D({
               type="button"
               aria-pressed={showSegmentSafetyOverlay}
               title={showSegmentSafetyOverlay
-                ? '關閉禁切區與拒絕候選疊圖，讓 Layout 細節更清楚'
-                : '顯示硬性禁切區、風險區與拒絕候選'}
+                ? tp.safetyOverlayHideTip
+                : tp.safetyOverlayShowTip}
               onClick={event => {
                 event.stopPropagation()
                 onSegmentSafetyOverlayChange(!showSegmentSafetyOverlay)
               }}
             >
-              安全疊圖：{showSegmentSafetyOverlay ? '開啟' : '關閉'}
+              {tp.safetyOverlay(showSegmentSafetyOverlay)}
             </button>
           </div>
         )}
@@ -1509,14 +1515,14 @@ export default function Preview2D({
               type="button"
               aria-pressed={showSolverRegionOverlay}
               title={showSolverRegionOverlay
-                ? '關閉 HFSS／SIwave 求解區域色塊'
-                : '顯示每個 Segment 的求解器區域'}
+                ? tp.solverOverlayHideTip
+                : tp.solverOverlayShowTip}
               onClick={event => {
                 event.stopPropagation()
                 onSolverRegionOverlayChange(!showSolverRegionOverlay)
               }}
             >
-              求解區域：{showSolverRegionOverlay ? '開啟' : '關閉'}
+              {tp.solverOverlay(showSolverRegionOverlay)}
             </button>
           </div>
         )}
@@ -1527,7 +1533,7 @@ export default function Preview2D({
             <button
               type="button"
               onClick={e=>{ e.stopPropagation(); fitView() }}
-              title="縮放至全板 (Fit All)"
+              title={tp.fitAllTip}
               style={{
                 padding:'5px 12px', fontSize:12, fontWeight:600,
                 background:'rgba(22,26,33,0.92)', color:'#e0e6ed',
@@ -1546,7 +1552,7 @@ export default function Preview2D({
           {/* 折疊把手：一條細長按鈕 */}
           <div
             onClick={() => setPanelOpen(o => !o)}
-            title={panelOpen ? '收合面板' : '展開面板'}
+            title={panelOpen ? tp.collapsePanelTip : tp.expandPanelTip}
             style={{
               width: 14,
               background: 'rgba(22,28,40,0.95)',
@@ -1610,7 +1616,7 @@ export default function Preview2D({
                     {LAYER_COLS.map(col => (
                       <th
                         key={col.key}
-                        title={`${col.title}（點擊切換全部）`}
+                        title={tp.colHeaderTip(tp.layerCols[col.key])}
                         onClick={() => toggleAllCol(col.key)}
                         style={{
                           textAlign:'center', padding:'6px 2px',
@@ -1655,7 +1661,7 @@ export default function Preview2D({
                             <td key={col.key} style={{ textAlign:'center', padding:'3px 2px' }}>
                               <input
                                 type="checkbox"
-                                aria-label={`${layer} 的 ${col.title}`}
+                                aria-label={tp.layerColAria(layer, tp.layerCols[col.key])}
                                 checked={!!mode[col.key]}
                                 onChange={() => toggleLayerCol(layer, col.key)}
                                 style={{
@@ -1681,11 +1687,11 @@ export default function Preview2D({
             <div style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0 }}>
               <div style={{ padding:'8px 10px', display:'flex', gap:6, alignItems:'center', flexShrink:0 }}>
                 <input
-                  type="text" aria-label="搜尋元件" placeholder="搜尋元件…" value={compFilter}
+                  type="text" aria-label={tp.searchComponents} placeholder={tp.searchComponentsPlaceholder} value={compFilter}
                   onChange={e=>setCompFilter(e.target.value)} style={searchInput}
                 />
-                <button onClick={()=>setAllItems('comps',true)}  style={smallBtn}>全選</button>
-                <button onClick={()=>setAllItems('comps',false)} style={smallBtn}>全不選</button>
+                <button onClick={()=>setAllItems('comps',true)}  style={smallBtn}>{tp.selectAll}</button>
+                <button onClick={()=>setAllItems('comps',false)} style={smallBtn}>{tp.selectNone}</button>
               </div>
               <div style={{ overflowY:'auto', flex:1 }}>
                 {filteredComps.map(comp => (
@@ -1704,7 +1710,7 @@ export default function Preview2D({
                 ))}
                 {filteredComps.length === 0 && (
                   <div style={{ color:'#6e7681', textAlign:'center', padding:16, fontSize:12 }}>
-                    {Object.keys(visibleComps).length === 0 ? '無元件資料' : '無符合結果'}
+                    {Object.keys(visibleComps).length === 0 ? tp.noComponentData : tp.noMatches}
                   </div>
                 )}
               </div>
@@ -1724,9 +1730,9 @@ export default function Preview2D({
                   borderRadius: 6,
                 }}>
                   <div style={{ fontSize:11, color:'#8b949e', marginBottom:6 }}>
-                    已選取網路：
-                    <span style={{ color:'#7ee787', marginLeft:4 }}>訊號 {signalNets.length} 個</span>
-                    <span style={{ color:'#58a6ff', marginLeft:6 }}>參考 {refNets.length} 個</span>
+                    {tp.selectedNets}
+                    <span style={{ color:'#7ee787', marginLeft:4 }}>{tp.signalCount(signalNets.length)}</span>
+                    <span style={{ color:'#58a6ff', marginLeft:6 }}>{tp.refCount(refNets.length)}</span>
                   </div>
                   <div style={{ display:'flex', gap:6 }}>
                     <button
@@ -1737,8 +1743,8 @@ export default function Preview2D({
                         color:'#fff', border:'none', borderRadius:4, cursor:'pointer',
                         fontWeight: 600,
                       }}
-                      title="隱藏其他所有網路，只顯示已選取的訊號與參考網路"
-                    >👁 只顯示選取網路</button>
+                      title={tp.showOnlySelectedTip}
+                    >👁 {tp.showOnlySelected}</button>
                     {showOnlySelected && (
                       <button
                         onClick={restoreAllNets}
@@ -1747,7 +1753,7 @@ export default function Preview2D({
                           background:'#21262d', color:'#c9d1d9',
                           border:'1px solid rgba(255,255,255,0.15)', borderRadius:4, cursor:'pointer',
                         }}
-                      >恢復全部</button>
+                      >{tp.restoreAll}</button>
                     )}
                   </div>
                 </div>
@@ -1756,11 +1762,11 @@ export default function Preview2D({
               {/* 搜尋 + 全選 */}
               <div style={{ padding:'8px 10px', display:'flex', gap:6, alignItems:'center', flexShrink:0 }}>
                 <input
-                  type="text" aria-label="搜尋網路" placeholder="搜尋網路…" value={netFilter}
+                  type="text" aria-label={tp.searchNets} placeholder={tp.searchNetsPlaceholder} value={netFilter}
                   onChange={e=>setNetFilter(e.target.value)} style={searchInput}
                 />
-                <button onClick={()=>setAllItems('nets',true)}  style={smallBtn}>全選</button>
-                <button onClick={()=>setAllItems('nets',false)} style={smallBtn}>全不選</button>
+                <button onClick={()=>setAllItems('nets',true)}  style={smallBtn}>{tp.selectAll}</button>
+                <button onClick={()=>setAllItems('nets',false)} style={smallBtn}>{tp.selectNone}</button>
               </div>
 
               {/* 網路清單 */}
@@ -1781,13 +1787,13 @@ export default function Preview2D({
                       />
                       {/* 訊號/參考網路標記 */}
                       {isSig && (
-                        <span title="訊號網路" style={{
+                        <span title={tp.signalNetTip} style={{
                           width:6, height:6, borderRadius:'50%', flexShrink:0,
                           background:'#7ee787', display:'inline-block',
                         }} />
                       )}
                       {isRef && (
-                        <span title="參考網路" style={{
+                        <span title={tp.refNetTip} style={{
                           width:6, height:6, borderRadius:'50%', flexShrink:0,
                           background:'#58a6ff', display:'inline-block',
                         }} />
@@ -1806,7 +1812,7 @@ export default function Preview2D({
                 })}
                 {filteredNets.length === 0 && (
                   <div style={{ color:'#6e7681', textAlign:'center', padding:16, fontSize:12 }}>
-                    {Object.keys(visibleNets).length === 0 ? '無網路資料' : '無符合結果'}
+                    {Object.keys(visibleNets).length === 0 ? tp.noNetData : tp.noMatches}
                   </div>
                 )}
               </div>

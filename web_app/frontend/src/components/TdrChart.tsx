@@ -8,6 +8,7 @@
 // TDR 分頁因此出現捲軸，報告快照截不完整。
 import { useEffect, useRef, useState } from 'react'
 import { impedanceRange, niceStep, tickDecimals } from './chartScale'
+import { useT } from '../i18n'
 
 export interface TdrChartMarker {
   distance_mm: number
@@ -33,6 +34,7 @@ export default function TdrChart({
   xMaxMm = null, height = 240,
 }: TdrChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const { t } = useT()
   const [width, setWidth] = useState(860)
   useEffect(() => {
     const el = containerRef.current
@@ -50,7 +52,7 @@ export default function TdrChart({
     return (
       <div ref={containerRef}
         style={{ color: '#8fa1b5', fontSize: 12, padding: 12, fontFamily: FONT }}>
-        尚無 TDR 曲線資料。
+        {t.tdrChart.noData}
       </div>
     )
   }
@@ -71,7 +73,7 @@ export default function TdrChart({
     return (
       <div ref={containerRef}
         style={{ color: '#8fa1b5', fontSize: 12, padding: 12, fontFamily: FONT }}>
-        距離資料全為 0，畫不出曲線。
+        {t.tdrChart.allZero}
       </div>
     )
   }
@@ -124,10 +126,10 @@ export default function TdrChart({
           </g>
         ))}
         <text x={width / 2} y={height - 6} textAnchor="middle" fontSize={11.5}
-          fill="#9fb0c3" fontFamily={FONT}>距離（mm）</text>
+          fill="#9fb0c3" fontFamily={FONT}>{t.tdrChart.xAxis}</text>
         <text x={14} y={height / 2} textAnchor="middle" fontSize={11.5}
           fill="#9fb0c3" fontFamily={FONT}
-          transform={`rotate(-90 14 ${height / 2})`}>阻抗（Ω）</text>
+          transform={`rotate(-90 14 ${height / 2})`}>{t.tdrChart.yAxis}</text>
 
         {/* 通道終點界線：右邊的曲線是遠端反射鏡像，不是板上的東西 */}
         {pathLengthMm && pathLengthMm > 0 && pathLengthMm <= xMax && (
@@ -136,7 +138,7 @@ export default function TdrChart({
               y1={pad.top} y2={height - pad.bottom}
               stroke="#4a90d9" strokeWidth={1.4} strokeDasharray="7 4" />
             <text x={sx(pathLengthMm) + 4} y={pad.top + 12} fontSize={10.5}
-              fill="#6ea8dd" fontFamily={FONT}>通道終點</text>
+              fill="#6ea8dd" fontFamily={FONT}>{t.tdrChart.channelEnd}</text>
           </g>
         )}
 

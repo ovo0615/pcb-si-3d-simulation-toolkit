@@ -1,13 +1,22 @@
 // IBIS 模型與眼圖分析：模型管理、通道綁定與眼圖求解整合介面。
 import { useEffect, useMemo, useState } from 'react'
-import AmiChannelPanel from './AmiChannelPanel'
-import MultiLaneWizard from './MultiLaneWizard'
+import EyeWizard from './EyeWizard'
+import { useT, currentLang, messagesFor } from '../i18n'
 import SpisimToolboxPanel from './SpisimToolboxPanel'
 import SerdesCompliancePanel from './SerdesCompliancePanel'
 import { QuickProbeResult, QuickProbeView } from './AmiQuickProbe'
 import { setModelsReportMetadata } from './reportMetadataStore'
 import { LicenseTag, useLicenseBlock } from './LicenseTag'
 import { healthStatusView } from '../healthcheckStatus'
+import { pickText, pickList, errorText } from '../backendFields'
+import {
+  filterTemplates, generateSpecBody, licenseUnavailable, localizedNote, specModelInfo, specStandardLabel,
+} from '../specModel'
+import type { IbisTemplate, LicenseFailure, TemplateFilter } from '../specModel'
+import type { Lang, Messages } from '../i18n'
+
+// 保存訊息所需資料，畫面切換語言時重新產生文字。
+type LibraryNotice = (t: Messages, lang: Lang) => string
 
 type CompatibilityState = 'ready' | 'warning' | 'block'
 
@@ -24,6 +33,8 @@ interface NativeLibrary {
   trusted_at?: string
   scanner?: string
   message?: string
+  /** 這台電腦會不會載入（Windows 上的 Linux .so 不會；#0088 小修 8）。 */
+  required_here?: boolean
 }
 
 interface IbisModel {
@@ -46,6 +57,8 @@ export interface ModelPackage {
     manufacturer: string
     components: string[]
     models: IbisModel[]
+    /** [Model Selector]：底下的變體（#0088 眼圖精靈的變體漏斗）。 */
+    model_selectors?: { name: string; models: { name: string; description: string }[] }[]
     pins: { pin: string; signal: string; model: string }[]
     diff_pins: { pin: string; inverse_pin: string }[]
     algorithmic_models: {
@@ -68,6 +81,9 @@ export interface ModelPackage {
   native_libraries: NativeLibrary[]
   /** 後端讀取時計算：可當 Tx／Rx 的模型各有幾個。配對判定的依據。 */
   capabilities?: { tx_models: number; rx_models: number }
+  /** 來源分類（原廠／自建／範例）。SPISim 產生的另帶 generator、template、
+   *  ccomp_check（#0104，後端 model_library.set_model_source）。 */
+  source_classification?: Record<string, any>
   ibis_checker: {
     available: boolean
     status: string
@@ -147,24 +163,22 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, options)
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`
+    let detail_en = ''
+    // 整份回應也掛上去：SPISim 授權閘門的 409 要讀 code／required_features（#0104）。
+    let body: unknown = null
     try {
-      const body = await response.json()
-      message = body.detail || message
+      body = await response.json()
+      message = pickText(body, 'detail', 'zh-TW') || message
+      detail_en = pickText(body, 'detail', 'en')
     } catch {
       // 保留 HTTP 狀態文字。
     }
-    throw new Error(message)
+    throw Object.assign(new Error(message), { detail_en, body })
   }
   return response.json() as Promise<T>
 }
 
-const statusText: Record<CompatibilityState, string> = {
-  ready: '可使用', warning: '待確認', block: '已阻止',
-}
 
-const kindText: Record<ModelPackage['kind'], string> = {
-  ibis: 'IBIS', ibis_ami: 'IBIS-AMI', ami_fragment: 'AMI 片段',
-}
 
 function shortHash(value: string): string {
   return value ? value.slice(0, 12) : '—'
@@ -176,11 +190,11 @@ function formatBytes(value = 0): string {
   return `${(value / 1024 / 1024).toFixed(1)} MB`
 }
 
-function apiErrorText(reason: unknown): string {
+function apiErrorText(reason: unknown, lang: Lang = currentLang()): string {
   if (reason instanceof TypeError && /failed to fetch|fetch failed/i.test(reason.message)) {
-    return '無法連線到本機後端。請重新執行 web_app\\start.bat，並保持啟動視窗開啟。'
+    return messagesFor(lang).library.backendUnavailable
   }
-  return reason instanceof Error ? reason.message : String(reason)
+  return errorText(reason, lang)
 }
 
 function parseImportPaths(value: string): string[] {
@@ -193,26 +207,39 @@ function parseImportPaths(value: string): string[] {
   })
 }
 
-const scanText: Record<string, string> = {
-  pending: '尚未掃描',
-  clean: '掃描正常',
-  unavailable: '掃描器不可用',
-  error: '掃描失敗',
-}
 
-const trustText: Record<string, string> = {
-  pending: '尚未信任',
-  trusted: '已信任',
-  // 後端在「模型檔換了、原本的信任不再成立」時回 revoked（見 model_library
-  // `_decorate_trust`）。沒有這一條，畫面就直接把英文代碼印出來。
-  revoked: '信任已撤銷',
-}
 
 export default function ModelLibrary() {
-  // 只剩兩個面板。點對點與 AMI 兩條路徑（各自只吃 2／4 埠）已於 2026-08-19
-  // 移除，理由見 ADR-0055。
+  // 模型庫＋三個分析面板。點對點標準 IBIS 面板已於 2026-08-19 移除（ADR-0055）；
+  // AMI 通道之後重新放回。
+  // #0088：眼圖精靈是預設分頁；多埠與 AMI 舊面板收進「進階」。
+  const { t, lang } = useT()
+  const statusText: Record<CompatibilityState, string> = {
+    ready: t.library.ready, warning: t.library.pending, block: t.library.blocked,
+  }
+
+  const kindText: Record<ModelPackage['kind'], string> = {
+    ibis: 'IBIS', ibis_ami: 'IBIS-AMI', ami_fragment: t.library.amiFragment,
+  }
+
+  const scanText: Record<string, string> = {
+    pending: t.library.notScanned,
+    clean: t.library.scanClean,
+    unavailable: t.library.scannerUnavailable,
+    error: t.library.scanFailed,
+  }
+
+  const trustText: Record<string, string> = {
+    pending: t.library.notTrusted,
+    trusted: t.library.trusted,
+    // 後端在「模型檔換了、原本的信任不再成立」時回 revoked（見 model_library
+    // `_decorate_trust`）。沒有這一條，畫面就直接把英文代碼印出來。
+    revoked: t.library.trustRevoked,
+  }
+
+  const tabs = t.eyeWizard.tabs
   const [activePanel, setActivePanel] =
-    useState<'library' | 'multilane' | 'ami' | 'toolbox'>('library')
+    useState<'wizard' | 'library' | 'toolbox'>('wizard')
   const [library, setLibrary] = useState<LibraryResponse | null>(null)
   const [selectedId, setSelectedId] = useState('')
   const [importPathText, setImportPathText] = useState('')
@@ -223,32 +250,94 @@ export default function ModelLibrary() {
     available: boolean
     standards: { name: string; label: string; pam4: boolean }[]
     license_note: string
+    /** #0104：jar 內 126 份一般 IBIS 範本與篩選選項。 */
+    ibis_templates?: { available: boolean; items: IbisTemplate[]; vcc_options?: number[];
+      z_options?: number[]; slew_options?: number[] }
+    /** 路線 A：產生動作本身不 checkout 授權、商用前要先問 Ansys。 */
+    route_note?: string
+    route_note_en?: string
   } | null>(null)
   const [specStandard, setSpecStandard] = useState('PCIeG6')
   const [specBusy, setSpecBusy] = useState(false)
-  const [specMsg, setSpecMsg] = useState('')
+  const [specMsg, setSpecMsg] = useState<LibraryNotice | null>(null)
+  // #0104：AMI 規格模型或一般 IBIS 範本；資料率用來算 C_comp τ/UI。
+  const [specMode, setSpecMode] = useState<'ami' | 'ibis'>('ami')
+  const [specRate, setSpecRate] = useState('')
+  const [tplFilter, setTplFilter] = useState<TemplateFilter>({ kind: 'io', vcc: '', z: '', slew: '' })
+  const [specTemplate, setSpecTemplate] = useState('')
+  /** 被授權閘門擋下（409）的原因與需要的授權；有值就以紅框顯示。 */
+  const [specFailure, setSpecFailure] = useState<LicenseFailure | null>(null)
+  const [spisimLicense, setSpisimLicense] = useState<any | null>(null)
+  const [licenseBusy, setLicenseBusy] = useState(false)
+  // 「重新探測」失敗要講出來；不講的話狀態列退回舊的「探測通過」，看起來像重探成功（審稿 M7）。
+  const [licenseError, setLicenseError] = useState('')
+  // SPISim 規格模型要 SPISim 授權（#0104）；授權伺服器確定沒空位時先擋按鈕。
+  const specBlock = useLicenseBlock(['spisim_model'])
+  /** refresh=0 只讀快取、不占授權；只有使用者按「重新探測」才 refresh=1。 */
+  const loadSpisimLicense = async (refresh: boolean) => {
+    if (refresh) setLicenseBusy(true)
+    try {
+      setSpisimLicense(await api<any>(`/api/spisim/license-status?refresh=${refresh ? 1 : 0}`))
+      setLicenseError('')
+    } catch (exc) {
+      // refresh=0 讀不到：舊後端沒有這個端點，不顯示狀態列，產生時後端照樣會探測。
+      if (refresh) setLicenseError(errorText(exc, lang))
+    }
+    finally { if (refresh) setLicenseBusy(false) }
+  }
   useEffect(() => {
     void (async () => {
       try {
         setSpecTemplates(await api<any>('/api/models/spec-templates'))
       } catch { /* 沒有範本就不顯示區塊 */ }
     })()
+    void loadSpisimLicense(false)
   }, [])
+  const ibisTemplates = specTemplates?.ibis_templates
+  const templateChoices = filterTemplates(ibisTemplates?.items || [], tplFilter)
   const generateSpec = async () => {
-    setSpecBusy(true); setSpecMsg('')
+    const body = generateSpecBody(specMode, specStandard, specTemplate, specRate)
+    if (!body) {
+      setSpecMsg(() => (_t: Messages) => _t.library.specNeedChoice)
+      return
+    }
+    setSpecBusy(true); setSpecMsg(null); setSpecFailure(null)
     try {
       const data = await api<any>('/api/models/generate-spec', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ standard: specStandard }),
+        body: JSON.stringify(body),
       })
-      const names = (data.packages || [])
-        .map((p: any) => p.display_name).join('、')
-      setSpecMsg(`已產生並匯入：${names}。${(data.notes || []).join(' ')}`)
+      const packages: any[] = data.packages || []
+      setSpecMsg(() => (_t: Messages, _lang: Lang) => [
+        _t.library.generatedImported(
+          packages.map((p: any) => p.display_name).join(_t.library.listSeparator),
+          pickList(data, 'notes', _lang).join(' ')),
+        ...packages.map((p: any) => {
+          const info = specModelInfo(p, _lang)
+          return info?.ccomp
+            ? _t.library.spisimGeneratedCcomp(p.display_name, _t.library.ccompLevel[info.ccomp.level])
+            : ''
+        }),
+      ].filter(Boolean).join('\n'))
       await refresh()
     } catch (e) {
-      setSpecMsg('產生失敗：' + String(e))
-    } finally { setSpecBusy(false) }
+      const failure = licenseUnavailable((e as { body?: unknown })?.body)
+      if (failure) setSpecFailure(failure)
+      else setSpecMsg(() => (_t: Messages, _lang: Lang) => (_t.library.generateFailed + apiErrorText(e, _lang)))
+    } finally {
+      setSpecBusy(false)
+      void loadSpisimLicense(false)
+    }
   }
+  const licenseLine = (() => {
+    const s = spisimLicense
+    if (licenseBusy) return t.library.licenseProbing
+    if (!s) return ''
+    if (!s.probed) return t.library.licenseNotProbed
+    if (s.available) return s.expired ? t.library.licenseExpired(s.checked_at || '—')
+      : t.library.licenseOk(s.checked_at || '—')
+    return t.library.licenseFailedAt(pickText(s, 'detail', lang))
+  })()
   // 量測→IBIS 建模（B4，2026-08-30）：示波器／SMU 兩欄 CSV → 合規 .ibs
   // → 匯入模型庫。單 corner（typ），缺的 corner 以 NA 標示不假造。
   const [mb, setMb] = useState({
@@ -259,9 +348,9 @@ export default function ModelLibrary() {
     falling_csv: '', falling_r: '50', falling_v: '',
   })
   const [mbBusy, setMbBusy] = useState(false)
-  const [mbMsg, setMbMsg] = useState('')
+  const [mbMsg, setMbMsg] = useState<LibraryNotice | null>(null)
   const [mbFolder, setMbFolder] = useState('')
-  const [mbScanMsg, setMbScanMsg] = useState('')
+  const [mbScanMsg, setMbScanMsg] = useState<LibraryNotice | null>(null)
   const setMbField = (key: string, value: string) =>
     setMb(prev => ({ ...prev, [key]: value }))
 
@@ -273,17 +362,17 @@ export default function ModelLibrary() {
     } catch (reason) {
       // 只寫 console 的話，對話框開不起來（例如主機沒有 tkinter）跟使用者按
       // 取消長得一模一樣：欄位空著、畫面沒動、沒有任何訊息。
-      setMbMsg(`選擇檔案失敗：${apiErrorText(reason)}`)
+      setMbMsg(() => (_t: Messages, _lang: Lang) => (_t.library.browseFileFailed(apiErrorText(reason, _lang))))
     }
   }
 
   const browseMbFolder = async () => {
     try {
       const data = await api<{ path: string }>(
-        '/api/browse_folder?title=' + encodeURIComponent('選擇放量測 CSV 的資料夾'))
+        '/api/browse_folder?title=' + encodeURIComponent(t.library.measurementFolderTitle))
       if (data.path) { setMbFolder(data.path); await scanMbFolder(data.path) }
     } catch (reason) {
-      setMbMsg(`選擇資料夾失敗：${apiErrorText(reason)}`)
+      setMbMsg(() => (_t: Messages, _lang: Lang) => (_t.library.browseFolderFailed(apiErrorText(reason, _lang))))
     }
   }
 
@@ -293,15 +382,15 @@ export default function ModelLibrary() {
    *  所以不做「選了資料夾就直接建模」。沒認出來的檔案也列出來，
    *  不然使用者會以為工具沒看到那些檔案。 */
   const scanMbFolder = async (folder: string) => {
-    setMbScanMsg('掃描中…')
+    setMbScanMsg(() => (_t: Messages, _lang: Lang) => (_t.library.scanning))
     try {
       const data = await api<{
         matched: Record<string, string>; unmatched: string[]; csv_count: number
       }>(`/api/scan_measurement_folder?folder=${encodeURIComponent(folder)}`)
       const entries = Object.entries(data.matched || {})
       if (!entries.length) {
-        setMbScanMsg(`資料夾裡有 ${data.csv_count} 個 CSV，但檔名認不出來`
-          + '（預期含 pd／pu／rise／fall 之類的字）。請自己指定。')
+        setMbScanMsg(() => (_t: Messages, _lang: Lang) => (_t.library.csvNotRecognized(data.csv_count)
+          + _t.library.csvExpectedNames))
         return
       }
       setMb(prev => ({ ...prev, ...Object.fromEntries(entries) }))
@@ -310,20 +399,20 @@ export default function ModelLibrary() {
         gnd_clamp_csv: 'GND Clamp', power_clamp_csv: 'POWER Clamp',
         rising_csv: 'Rising', falling_csv: 'Falling',
       }
-      const named = entries.map(([key, path]) =>
-        `${labels[key] || key}＝${path.split(/[\\/]/).pop()}`).join('、')
-      setMbScanMsg(`已帶入 ${entries.length} 個：${named}。`
+      setMbScanMsg(() => (_t: Messages, _lang: Lang) => (_t.library.csvAssigned(entries.length,
+        entries.map(([key, path]) => _t.library.fileAssignment(
+          labels[key] || key, path.split(/[\\/]/).pop() || '')).join(_t.library.listSeparator))
         + (data.unmatched.length
-          ? `　另有 ${data.unmatched.length} 個 CSV 沒認出來：`
-            + data.unmatched.map(p => p.split(/[\\/]/).pop()).join('、')
+          ? _t.library.csvUnmatched(data.unmatched.length)
+            + data.unmatched.map(p => p.split(/[\\/]/).pop()).join(_t.library.listSeparator)
           : '')
-        + '　**請核對再建模**——檔名猜錯不會有錯誤訊息，錯的會是模型本身。')
+        + _t.library.verifyCsv))
     } catch (reason) {
-      setMbScanMsg(reason instanceof Error ? reason.message : String(reason))
+      setMbScanMsg(() => (_t: Messages, _lang: Lang) => (apiErrorText(reason, _lang)))
     }
   }
   const buildFromMeasurement = async () => {
-    setMbBusy(true); setMbMsg('')
+    setMbBusy(true); setMbMsg(null)
     try {
       const needsInput = mb.model_type !== 'Output'
       const data = await api<any>('/api/models/build-from-measurement', {
@@ -352,22 +441,25 @@ export default function ModelLibrary() {
           }] : [],
         }),
       })
-      const warnings = (data.warnings || []).join('；')
-      setMbMsg(`已建模並匯入：${data.imported?.display_name || ''}。`
-        + `${data.note || ''}${warnings ? `（整形註記：${warnings}）` : ''}`)
+      setMbMsg(() => (_t: Messages, _lang: Lang) => {
+        const warnings = pickList(data, 'warnings', _lang).join(_t.library.warningSeparator)
+        return _t.library.builtImported(data.imported?.display_name || '')
+          + pickText(data, 'note', _lang)
+          + (warnings ? _t.library.conditioningNotes(warnings) : '')
+      })
       await refresh()
     } catch (e) {
-      setMbMsg('建模失敗：' + String(e))
+      setMbMsg(() => (_t: Messages, _lang: Lang) => (_t.library.buildFailed + apiErrorText(e, _lang)))
     } finally { setMbBusy(false) }
   }
   // 秒測（SPISimAMI 引擎，2026-08-29）：不開 AEDT、免授權，一秒看到
   // 模型等化真的有沒有動作。跟著選取的套件走，換套件就清結果。
   const [probeResult, setProbeResult] = useState<QuickProbeResult | null>(null)
   const [probeBusy, setProbeBusy] = useState(false)
-  const [probeError, setProbeError] = useState('')
+  const [probeError, setProbeError] = useState<LibraryNotice | null>(null)
   const runQuickProbe = async () => {
     if (!selected) return
-    setProbeBusy(true); setProbeError(''); setProbeResult(null)
+    setProbeBusy(true); setProbeError(null); setProbeResult(null)
     try {
       const data = await api<QuickProbeResult>(
         `/api/models/${encodeURIComponent(selected.package_id)}/ami-quick-test`, {
@@ -378,13 +470,13 @@ export default function ModelLibrary() {
       const swing = data.waveforms[0]?.series
         .find(item => item.name === 'Output_AMI_GetWave')?.swing
       setModelsReportMetadata({
-        '秒測_模型': `${data.model}（${data.ami_file}）`,
+        '秒測_模型': t.library.modelAmiFile(data.model, data.ami_file),
         '秒測_耗時(ms)': data.elapsed_ms,
         ...(swing !== undefined
           ? { '秒測_等化後擺幅(V)': swing.toFixed(3) } : {}),
       })
     } catch (reason) {
-      setProbeError(apiErrorText(reason))
+      setProbeError(() => (_t: Messages, _lang: Lang) => (apiErrorText(reason, _lang)))
     } finally { setProbeBusy(false) }
   }
 
@@ -396,14 +488,15 @@ export default function ModelLibrary() {
   const [healthRunning, setHealthRunning] = useState(false)
   // 健檢會開 Circuit 求解（ADR-0062）：沒有空位就變灰並寫原因。
   const healthBlock = useLicenseBlock(['model_check'])
-  const [message, setMessage] = useState('')
-  const [error, setError] = useState('')
+  const [message, setMessage] = useState<LibraryNotice | null>(null)
+  const [error, setError] = useState<LibraryNotice | null>(null)
 
   const selected = useMemo(
     () => library?.packages.find(item => item.package_id === selectedId)
       || library?.packages[0] || null,
     [library, selectedId],
   )
+  const selectedSpec = selected ? specModelInfo(selected, lang) : null
   const importPaths = useMemo(() => parseImportPaths(importPathText), [importPathText])
   // 只有還有 DLL 沒完成掃描或信任時才需要使用者介入；其餘時候把整區收起來。
   const nativeNeedsAttention = useMemo(
@@ -423,7 +516,7 @@ export default function ModelLibrary() {
           ? current : result.packages[0]?.package_id || ''
       ))
     } catch (reason) {
-      setError(`讀取模型庫失敗：${apiErrorText(reason)}`)
+      setError(() => (_t: Messages, _lang: Lang) => (_t.library.loadFailed(apiErrorText(reason, _lang))))
     }
   }
 
@@ -431,7 +524,7 @@ export default function ModelLibrary() {
 
   // 換套件就清秒測結果，避免拿 A 模型的波形對著 B 模型看。
   useEffect(() => {
-    setProbeResult(null); setProbeError('')
+    setProbeResult(null); setProbeError(null)
   }, [selected?.package_id])
 
   // 健檢結果跟著選取的套件走；執行中每 3 秒看一次狀態。
@@ -459,34 +552,34 @@ export default function ModelLibrary() {
 
   const startHealthcheck = async () => {
     if (!selected) return
-    setError('')
+    setError(null)
     try {
       await api(`/api/models/${encodeURIComponent(selected.package_id)}/healthcheck`,
         { method: 'POST' })
       setHealthRunning(true)
-      setMessage('健檢中：用參考通道實際求解一次，約一分鐘…')
+      setMessage(() => (_t: Messages, _lang: Lang) => (_t.library.healthStarted))
     } catch (reason) {
-      setError(`健檢啟動失敗：${apiErrorText(reason)}`)
+      setError(() => (_t: Messages, _lang: Lang) => (_t.library.healthStartFailed(apiErrorText(reason, _lang))))
     }
   }
 
 
   const browse = async () => {
-    setError('')
+    setError(null)
     try {
       const result = await api<{ path: string; paths?: string[] }>('/api/models/browse')
       const paths = result.paths?.length ? result.paths : (result.path ? [result.path] : [])
       if (paths.length) setImportPathText(paths.join('\n'))
     } catch (reason) {
-      setError(`選擇模型失敗：${apiErrorText(reason)}`)
+      setError(() => (_t: Messages, _lang: Lang) => (_t.library.browseModelFailed(apiErrorText(reason, _lang))))
     }
   }
 
   const importModel = async () => {
     if (!importPaths.length) return
     setBusy(true)
-    setError('')
-    setMessage(`正在解析 ${importPaths.length} 個檔案並建立受管模型副本…`)
+    setError(null)
+    setMessage(() => (_t: Messages, _lang: Lang) => (_t.library.importingFiles(importPaths.length)))
     try {
       const result = await api<BatchImportResponse>('/api/models/import-batch', {
         method: 'POST',
@@ -497,18 +590,19 @@ export default function ModelLibrary() {
       if (result.models.length) setSelectedId(result.models[result.models.length - 1].package_id)
       const blocked = result.models.filter(item => item.compatibility.status === 'block').length
       setMessage(
-        `批次匯入完成：成功 ${result.succeeded_count}、失敗 ${result.failed_count}；`
-        + `對應 ${result.model_count} 個受管模型版本。原始檔均未被修改。`
-        + (blocked ? ` 其中 ${blocked} 個版本未通過相容性預檢。` : ''),
+        () => (_t: Messages, _lang: Lang) => (_t.library.importSummary(result.succeeded_count, result.failed_count)
+        + _t.library.importVersions(result.model_count)
+        + (blocked ? _t.library.importBlocked(blocked) : '')),
       )
       const failed = result.items.filter(item => !item.ok)
-      setError(failed.length
-        ? `以下 ${failed.length} 個檔案匯入失敗：\n${failed.map(item => `${item.path}：${item.error || '未知錯誤'}`).join('\n')}`
-        : '')
+      setError(failed.length ? () => (_t: Messages, _lang: Lang) =>
+        _t.library.failedFiles(failed.length, failed.map(item => _t.library.fileError(
+          item.path, pickText(item, 'error', _lang) || _t.library.unknownError)).join('\n'))
+        : null)
       setImportPathText(failed.map(item => item.path).join('\n'))
     } catch (reason) {
-      setError(`模型批次匯入失敗：${apiErrorText(reason)}`)
-      setMessage('')
+      setError(() => (_t: Messages, _lang: Lang) => (_t.library.importFailed(apiErrorText(reason, _lang))))
+      setMessage(null)
     } finally {
       setBusy(false)
     }
@@ -522,8 +616,8 @@ export default function ModelLibrary() {
   const scanPackage = async () => {
     if (!selected) return
     setActionBusy('scan')
-    setError('')
-    setMessage('正在以系統防毒掃描受管副本中的 DLL／SO；模型不會被載入或執行…')
+    setError(null)
+    setMessage(() => (_t: Messages, _lang: Lang) => (_t.library.nativeScanning))
     try {
       const result = await api<{ ok: boolean; model: ModelPackage }>(
         `/api/models/${encodeURIComponent(selected.package_id)}/scan`,
@@ -532,14 +626,14 @@ export default function ModelLibrary() {
       await applyUpdatedModel(result.model)
       const unavailable = result.model.native_libraries.some(item => item.scan_status === 'unavailable')
       const failed = result.model.native_libraries.some(item => item.scan_status === 'error')
-      setMessage(failed
-        ? '掃描未通過，已禁止建立信任。請查看原生程式庫狀態。'
+      setMessage(() => (_t: Messages, _lang: Lang) => (failed
+        ? _t.library.nativeScanBlocked
         : unavailable
-          ? '找不到可用的 Windows Defender 命令列掃描器；仍可由使用者明確確認風險後建立信任。'
-          : '防毒掃描完成。請逐一確認雜湊值後再建立信任。')
+          ? _t.library.defenderUnavailable
+          : _t.library.nativeScanComplete))
     } catch (reason) {
-      setError(`原生模型掃描失敗：${apiErrorText(reason)}`)
-      setMessage('')
+      setError(() => (_t: Messages, _lang: Lang) => (_t.library.nativeScanFailed(apiErrorText(reason, _lang))))
+      setMessage(null)
     } finally {
       setActionBusy('')
     }
@@ -550,16 +644,16 @@ export default function ModelLibrary() {
    *  因為條款講的是「這台機器上要執行誰給的二進位檔」。 */
   const TERMS_KEY = 'pcbsi.native-library-terms.v1'
   const TERMS_TEXT = [
-    '執行第三方原生模型程式庫（.dll／.ami）的條款',
+    t.library.termsTitle,
     '',
-    '1. 本工具會把你提供的 .dll／.ami 交給 Ansys AEDT 在這台機器上執行。',
-    '   檔案的來源、正確性與授權由你負責。',
-    '2. 本工具以 Windows Defender 掃描、記錄 SHA-256、格式認不出就拒絕載入。',
-    '   這是來源追蹤，不是安全保證——本工具不保證模型的行為。',
-    '3. 模型留在本機，不會上傳到任何地方。',
-    '4. 模型庫裡的受管副本不得超出你與模型供應商的授權範圍散布。',
+    t.library.termsExecution,
+    t.library.termsResponsibility,
+    t.library.termsChecks,
+    t.library.termsNoGuarantee,
+    t.library.termsLocal,
+    t.library.termsDistribution,
     '',
-    '按「確定」表示你已閱讀並同意上述條款。',
+    t.library.termsAccept,
   ].join('\n')
 
   const acceptNativeTerms = (): boolean => {
@@ -576,14 +670,14 @@ export default function ModelLibrary() {
     if (!acceptNativeTerms()) return
     const unavailable = item.scan_status === 'unavailable'
     const warning = unavailable
-      ? '\n\n注意：本機未能執行防毒掃描。確認後仍會以此 SHA-256 建立信任。'
+      ? t.library.trustScanWarning
       : ''
     const confirmed = window.confirm(
-      `是否信任此原生模型程式庫？\n\n檔案：${item.file}\nSHA-256：${item.sha256}${warning}\n\n模型內容一旦變更，雜湊會改變，必須重新掃描與信任。`,
+      t.library.trustConfirm(item.file, item.sha256, warning),
     )
     if (!confirmed) return
     setActionBusy(item.sha256)
-    setError('')
+    setError(null)
     try {
       const result = await api<{ ok: boolean; model: ModelPackage }>(
         `/api/models/${encodeURIComponent(selected.package_id)}/trust`,
@@ -594,9 +688,9 @@ export default function ModelLibrary() {
         },
       )
       await applyUpdatedModel(result.model)
-      setMessage(`已信任 ${item.file}；信任紀錄綁定 SHA-256，不會套用到變更後的檔案。`)
+      setMessage(() => (_t: Messages, _lang: Lang) => (_t.library.trustEstablished(item.file)))
     } catch (reason) {
-      setError(`建立模型信任失敗：${apiErrorText(reason)}`)
+      setError(() => (_t: Messages, _lang: Lang) => (_t.library.trustFailed(apiErrorText(reason, _lang))))
     } finally {
       setActionBusy('')
     }
@@ -606,22 +700,18 @@ export default function ModelLibrary() {
     <div className="model-library">
       <header className="model-library__header">
         <div>
-          <h2>IBIS 模型與眼圖分析</h2>
-          <p>管理 IBIS／IBIS-AMI 受管副本，並在同一頁完成通道綁定、Preflight、求解與眼圖檢視。</p>
+          <h2>{t.library.title}</h2>
+          <p>{t.library.subtitle}</p>
         </div>
         <div className="model-library__header-actions">
           <div className="model-library__tabs">
-            <button className={activePanel === 'library' ? 'is-active' : ''}
-              onClick={() => setActivePanel('library')}>模型庫</button>
-            <button className={activePanel === 'multilane' ? 'is-active' : ''}
-              onClick={() => setActivePanel('multilane')}>多埠通道</button>
-            <button className={activePanel === 'ami' ? 'is-active' : ''}
-              onClick={() => setActivePanel('ami')}>AMI 通道</button>
-            <button className={activePanel === 'toolbox' ? 'is-active' : ''}
-              onClick={() => setActivePanel('toolbox')}>S 參數工具箱</button>
+            {(['wizard', 'library', 'toolbox'] as const).map(key => (
+              <button key={key} className={activePanel === key ? 'is-active' : ''}
+                onClick={() => setActivePanel(key)}>{tabs[key]}</button>
+            ))}
           </div>
           <div className="model-library__count">
-            <strong>{library?.count ?? 0}</strong><span>個模型版本</span>
+            <strong>{library?.count ?? 0}</strong><span>{t.library.modelVersions}</span>
           </div>
         </div>
       </header>
@@ -634,151 +724,211 @@ export default function ModelLibrary() {
             value={importPathText}
             onChange={event => setImportPathText(event.target.value)}
             rows={Math.min(4, Math.max(2, importPaths.length))}
-            placeholder="選擇一個或多個 .ibs／.ami；也可每行貼上一個模型路徑"
-            aria-label="IBIS 或 IBIS-AMI 模型路徑清單"
+            placeholder={t.library.importPlaceholder}
+            aria-label={t.library.importLabel}
           />
           <small>
             {importPaths.length
-              ? `已選擇 ${importPaths.length} 個檔案；同一套 IBIS／AMI 相依檔會合併為單一模型版本。`
-              : '可按住 Ctrl 或 Shift 一次選取多個模型檔。'}
+              ? t.library.selectedFiles(importPaths.length)
+              : t.library.multiSelectHint}
           </small>
         </div>
-        <button className="btn" onClick={browse} disabled={busy}>瀏覽多個檔案…</button>
+        <button className="btn" onClick={browse} disabled={busy}>{t.library.browseModels}</button>
         <button className="btn btn--primary model-library__import-btn"
           onClick={importModel} disabled={busy || !importPaths.length}>
-          {busy ? '批次匯入中…' : `匯入${importPaths.length > 1 ? ` ${importPaths.length} 個` : ''}模型`}
+          {busy ? t.library.importBusy : t.library.importButton(importPaths.length > 1 ? t.library.importCount(importPaths.length) : '')}
         </button>
       </section>
 
       {/* 手上沒有模型也能開工：AEDT 內建的 SPISim 規格範本一鍵產生
           （2026-08-29）。素材授權綁 AEDT，只在本機用。 */}
       {specTemplates && specTemplates.available && (
-        <details className="model-library__import" style={{ padding: '8px 12px' }}>
-          <summary>沒有模型？從 AEDT 內建規格產生（SPISim）</summary>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
-            <select className="input" value={specStandard}
-              onChange={e => setSpecStandard(e.target.value)} style={{ flex: 1 }}>
+        <details className="model-library__import model-library__generate" style={{ padding: '8px 12px' }}>
+          <summary>{t.library.specGenerator}</summary>
+          <div className="model-library__spec-modes">
+            {(['ami', 'ibis'] as const).map(mode => (
+              <label key={mode}>
+                <input type="radio" name="spec-mode" checked={specMode === mode}
+                  disabled={mode === 'ibis' && !ibisTemplates?.available}
+                  onChange={() => setSpecMode(mode)} />
+                {mode === 'ami' ? t.library.specModeAmi : t.library.specModeIbis}
+              </label>
+            ))}
+          </div>
+          {specMode === 'ibis' && !ibisTemplates?.available && (
+            <p className="model-library__hint">{t.library.specIbisUnavailable}</p>)}
+          {specMode === 'ami' ? (
+            <select className="input" value={specStandard} aria-label={t.library.specModeAmi}
+              onChange={e => setSpecStandard(e.target.value)}>
               {specTemplates.standards.map(item => (
                 <option key={item.name} value={item.name}>
-                  {item.label}{item.pam4 ? '　·　PAM4' : ''}
+                  {specStandardLabel(item, lang)}{item.pam4 ? t.library.pam4Tag : ''}
                 </option>
               ))}
             </select>
-            <button className="btn btn--primary" disabled={busy || specBusy}
+          ) : (
+            <div className="model-library__spec-filter">
+              <label>{t.library.specKind}
+                <select className="input" value={tplFilter.kind}
+                  onChange={e => { setTplFilter(prev => ({ ...prev, kind: e.target.value })); setSpecTemplate('') }}>
+                  {(['io', 'input'] as const).map(kind => (
+                    <option key={kind} value={kind}>{t.library.specKindNames[kind]}</option>))}
+                </select>
+              </label>
+              {([['vcc', t.library.specVcc, ibisTemplates?.vcc_options],
+                ['z', t.library.specZ, ibisTemplates?.z_options],
+                ['slew', t.library.specSlew, ibisTemplates?.slew_options]] as const).map(([key, label, options]) => (
+                <label key={key}>{label}
+                  <select className="input" value={tplFilter[key]}
+                    onChange={e => { setTplFilter(prev => ({ ...prev, [key]: e.target.value })); setSpecTemplate('') }}>
+                    <option value="">{t.library.specAny}</option>
+                    {(options || []).map(value => <option key={value} value={String(value)}>{value}</option>)}
+                  </select>
+                </label>
+              ))}
+              <label>{t.library.specTemplate(templateChoices.length)}
+                <select className="input" value={specTemplate} onChange={e => setSpecTemplate(e.target.value)}>
+                  <option value="">{t.eyeWizard.pleaseSelect}</option>
+                  {templateChoices.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}
+                </select>
+              </label>
+              {templateChoices.length === 0 && <p className="model-library__hint">{t.library.specNoTemplates}</p>}
+            </div>
+          )}
+          <label className="model-library__spec-rate">{t.library.specRate}
+            <input className="input" type="number" min="0" step="0.1" value={specRate}
+              onChange={e => setSpecRate(e.target.value)} />
+          </label>
+          <p className="model-library__hint">{t.library.specRateHint}</p>
+          <div className="model-library__spec-actions">
+            <button className="btn btn--primary" disabled={busy || specBusy || licenseBusy || Boolean(specBlock)}
+              title={specBlock || undefined}
               onClick={() => void generateSpec()}>
-              {specBusy ? '產生中…' : '產生並匯入'}
+              {specBusy ? t.library.generating : t.library.generateImport}
             </button>
+            <LicenseTag functions={['spisim_model']} />
+            {spisimLicense && <button className="btn" disabled={licenseBusy || specBusy}
+              onClick={() => void loadSpisimLicense(true)}>{t.library.licenseProbe}</button>}
           </div>
+          {licenseLine && <p className={'model-library__hint'
+            + (spisimLicense?.probed && !spisimLicense?.available ? ' is-warning' : '')}>{licenseLine}</p>}
+          {licenseError && <p className="model-library__hint is-warning">{licenseError}</p>}
+          {specFailure && <div className="model-library__notice model-library__notice--error">
+            {specFailure.busy ? t.library.spisimEngineBusy
+              : t.library.spisimLicenseNeeded(specFailure.features.join(t.library.listSeparator) || '—')}
+            {specFailure.reason && t.library.spisimReason[specFailure.reason as keyof typeof t.library.spisimReason]
+              ? `\n${t.library.spisimReason[specFailure.reason as keyof typeof t.library.spisimReason]}` : ''}
+            {/* 後端 detail 與上面那句是同一段說明，只收進「細節」（審稿 L2）。 */}
+            <details><summary>{t.library.spisimDetails}</summary>
+              {lang === 'en' ? specFailure.detail_en || specFailure.detail : specFailure.detail}
+            </details>
+          </div>}
           <p className="model-library__hint" style={{ marginTop: 4 }}>
-            {specTemplates.license_note}
+            {localizedNote(specTemplates, 'license_note', lang)}
           </p>
-          {specMsg && <div className="model-library__notice">{specMsg}</div>}
+          {pickText(specTemplates, 'route_note', lang) && <p className="model-library__hint">
+            {pickText(specTemplates, 'route_note', lang)}</p>}
+          {specMsg && <div className="model-library__notice" style={{ whiteSpace: 'pre-line' }}>{specMsg(t, lang)}</div>}
         </details>
       )}
 
       {/* 量測→IBIS 建模（B4）：客戶只有示波器／SMU 量測時的路。 */}
       <details className="model-library__import" style={{ padding: '8px 12px' }}>
-        <summary>從量測建模（IV／VT 兩欄 CSV → IBIS）</summary>
+        <summary>{t.library.measurementBuilder}</summary>
         <p className="model-library__hint" style={{ marginTop: 4 }}>
-          IV：pad 電壓（V）、pad 電流（A，流入元件為正）。VT：時間（s）、pad 電壓（V）。
-        </p>
+          {t.library.measurementUnits}</p>
         <p className="model-library__hint">
-          Pullup／POWER Clamp 的 Vcc 相對座標轉換由工具做，照量測填就好。
-        </p>
+          {t.library.vccConversion}</p>
         <p className="model-library__hint">
-          單 corner（typ）；建好先按「健檢」證明解得動。
-        </p>
+          {t.library.singleCornerHint}</p>
         {/* 快速帶入：選一個資料夾，依檔名特徵認出哪個 CSV 是哪一條。
             六個路徑一個一個貼太痛苦，而量測輸出通常本來就在同一個資料夾。 */}
         <div className="field-row" style={{ marginTop: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="field-label">量測資料夾（選了會依檔名自動帶入下方路徑）</div>
+            <div className="field-label">{t.library.measurementFolder}</div>
             <input className="input" value={mbFolder}
               onChange={e => setMbFolder(e.target.value)}
-              placeholder="放 pd／pu／rise／fall 等 CSV 的資料夾" />
+              placeholder={t.library.measurementFolderPlaceholder} />
           </div>
           <button className="btn" style={{ marginTop: 14, whiteSpace: 'nowrap' }}
-            onClick={() => void browseMbFolder()}>瀏覽…</button>
+            onClick={() => void browseMbFolder()}>{t.library.browse}</button>
           <button className="btn" style={{ marginTop: 14, whiteSpace: 'nowrap' }}
             disabled={!mbFolder.trim()}
-            onClick={() => void scanMbFolder(mbFolder)}>自動帶入</button>
+            onClick={() => void scanMbFolder(mbFolder)}>{t.library.autoFill}</button>
         </div>
-        {mbScanMsg && <div className="model-library__notice">{mbScanMsg}</div>}
+        {mbScanMsg && <div className="model-library__notice">{mbScanMsg(t, lang)}</div>}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 6, marginTop: 8 }}>
           <label>
-            <div className="field-label">模型名</div>
-            <input className="input" placeholder="英數底線" value={mb.model_name}
+            <div className="field-label">{t.library.modelName}</div>
+            <input className="input" placeholder={t.library.modelNamePlaceholder} value={mb.model_name}
               onChange={e => setMbField('model_name', e.target.value)} />
           </label>
           <label>
-            <div className="field-label">模型類型</div>
+            <div className="field-label">{t.library.modelType}</div>
             <select className="input" value={mb.model_type}
               onChange={e => setMbField('model_type', e.target.value)}>
-              <option value="Output">Output（驅動器）</option>
-              <option value="Input">Input（接收器）</option>
-              <option value="I/O">I/O（雙向）</option>
+              <option value="Output">{t.library.outputType}</option>
+              <option value="Input">{t.library.inputType}</option>
+              <option value="I/O">{t.library.ioType}</option>
             </select>
           </label>
-          <label title="緩衝器的供應電壓。IV／VT 曲線的 Vcc 相對座標由它換算，填錯會讓整條曲線位移。">
-            <div className="field-label">Vcc 供應電壓（V）</div>
-            <input className="input" placeholder="例如 1.2" value={mb.voltage_range_v}
+          <label title={t.library.vccHint}>
+            <div className="field-label">{t.library.vccLabel}</div>
+            <input className="input" placeholder={t.library.vccExample} value={mb.voltage_range_v}
               onChange={e => setMbField('voltage_range_v', e.target.value)} />
           </label>
-          <label title="晶粒的接腳電容（IBIS 的 C_comp）。影響邊緣速率；量不到就用資料手冊值。">
-            <div className="field-label">C_comp 晶粒電容（pF）</div>
-            <input className="input" placeholder="例如 1.0" value={mb.c_comp_pf}
+          <label title={t.library.capacitanceHint}>
+            <div className="field-label">{t.library.capacitanceLabel}</div>
+            <input className="input" placeholder={t.library.capacitanceExample} value={mb.c_comp_pf}
               onChange={e => setMbField('c_comp_pf', e.target.value)} />
           </label>
         </div>
         {mb.model_type !== 'Output' && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 6 }}>
-            <label title="接收端判為邏輯 0 的電壓上限。資料手冊或量測而來，不是從 CSV 推導的。">
-              <div className="field-label">Vinl 輸入低準位門檻（V）</div>
-              <input className="input" placeholder="資料手冊或量測" value={mb.vinl_v}
+            <label title={t.library.vinlHint}>
+              <div className="field-label">{t.library.vinlLabel}</div>
+              <input className="input" placeholder={t.library.thresholdSource} value={mb.vinl_v}
                 onChange={e => setMbField('vinl_v', e.target.value)} />
             </label>
-            <label title="接收端判為邏輯 1 的電壓下限。">
-              <div className="field-label">Vinh 輸入高準位門檻（V）</div>
-              <input className="input" placeholder="資料手冊或量測" value={mb.vinh_v}
+            <label title={t.library.vinhHint}>
+              <div className="field-label">{t.library.vinhLabel}</div>
+              <input className="input" placeholder={t.library.thresholdSource} value={mb.vinh_v}
                 onChange={e => setMbField('vinh_v', e.target.value)} />
             </label>
           </div>
         )}
 
         <div className="field-label" style={{ marginTop: 10 }}>
-          IV 曲線（pad 電壓 V、pad 電流 A）
-        </div>
+          {t.library.ivHeading}</div>
         {([
-          ['pulldown_csv', 'Pulldown IV CSV', '輸出拉低時的 IV 曲線', false],
-          ['pullup_csv', 'Pullup IV CSV', '輸出拉高時的 IV 曲線', false],
-          ['gnd_clamp_csv', 'GND Clamp IV CSV', '對地的靜電保護二極體，沒量就留空', true],
-          ['power_clamp_csv', 'POWER Clamp IV CSV', '對電源的靜電保護二極體，沒量就留空', true],
+          ['pulldown_csv', 'Pulldown IV CSV', t.library.pulldownHint, false],
+          ['pullup_csv', 'Pullup IV CSV', t.library.pullupHint, false],
+          ['gnd_clamp_csv', 'GND Clamp IV CSV', t.library.groundClampHint, true],
+          ['power_clamp_csv', 'POWER Clamp IV CSV', t.library.powerClampHint, true],
         ] as [string, string, string, boolean][]).map(([key, label, hint, optional]) => (
           <div className="field-row" key={key} style={{ marginTop: 4 }}>
             <div style={{ flex: 1, minWidth: 0 }} title={hint}>
-              <div className="field-label">{label}{optional ? '（選填）' : ''}</div>
+              <div className="field-label">{label}{optional ? t.library.optional : ''}</div>
               <input className="input" value={(mb as Record<string, string>)[key]}
                 onChange={e => setMbField(key, e.target.value)} placeholder={hint} />
             </div>
             <button className="btn" style={{ marginTop: 14, whiteSpace: 'nowrap' }}
-              onClick={() => void browseMbCsv(key, `選擇 ${label}`)}>瀏覽…</button>
+              onClick={() => void browseMbCsv(key, t.library.selectCurve(label))}>{t.library.browse}</button>
           </div>
         ))}
 
         <div className="field-label" style={{ marginTop: 10 }}>
-          VT 波形（時間 s、pad 電壓 V）與量測時的治具
-        </div>
+          {t.library.vtHeading}</div>
         <p className="model-library__hint" style={{ marginTop: 2 }}
-          title={'治具是量 VT 波形時掛在 pad 上的負載。R_fixture 是串接電阻'
-            + '（示波器探棒常見 50 Ω）；V_fixture 是那顆電阻的另一端接到哪個'
-            + '電位（接地填 0，接電源就留空表示 Vcc）。IBIS 用這兩個值把量到的'
-            + '波形反推回緩衝器本身，所以填的必須是你實際的量測接法。'}>
-          治具填錯會讓邊緣速率整個偏掉。滑鼠停這裡看說明。
-        </p>
+          title={t.library.fixtureHint1
+            + t.library.fixtureHint2
+            + t.library.fixtureHint3
+            + t.library.fixtureHint4}>
+          {t.library.fixtureWarning}</p>
         {([
-          ['rising_csv', 'rising_r', 'rising_v', 'Rising VT CSV', '上升緣波形', '例如 0（接地）'],
-          ['falling_csv', 'falling_r', 'falling_v', 'Falling VT CSV', '下降緣波形', '留空＝接 Vcc'],
+          ['rising_csv', 'rising_r', 'rising_v', 'Rising VT CSV', t.library.risingWaveform, t.library.groundExample],
+          ['falling_csv', 'falling_r', 'falling_v', 'Falling VT CSV', t.library.fallingWaveform, t.library.vccBlank],
         ] as [string, string, string, string, string, string][]).map(
           ([csvKey, rKey, vKey, label, hint, vHint]) => (
           <div className="field-row" key={csvKey} style={{ marginTop: 4 }}>
@@ -788,14 +938,14 @@ export default function ModelLibrary() {
                 onChange={e => setMbField(csvKey, e.target.value)} placeholder={hint} />
             </div>
             <button className="btn" style={{ marginTop: 14, whiteSpace: 'nowrap' }}
-              onClick={() => void browseMbCsv(csvKey, `選擇 ${label}`)}>瀏覽…</button>
-            <div style={{ flex: 1, minWidth: 0 }} title="量測治具的串接電阻值">
-              <div className="field-label">R_fixture（Ω）</div>
+              onClick={() => void browseMbCsv(csvKey, t.library.selectCurve(label))}>{t.library.browse}</button>
+            <div style={{ flex: 1, minWidth: 0 }} title={t.library.fixtureResistanceHint}>
+              <div className="field-label">{t.library.fixtureResistance}</div>
               <input className="input" value={(mb as Record<string, string>)[rKey]}
-                onChange={e => setMbField(rKey, e.target.value)} placeholder="例如 50" />
+                onChange={e => setMbField(rKey, e.target.value)} placeholder={t.library.resistanceExample} />
             </div>
-            <div style={{ flex: 1, minWidth: 0 }} title="治具電阻另一端接的電位">
-              <div className="field-label">V_fixture（V）</div>
+            <div style={{ flex: 1, minWidth: 0 }} title={t.library.fixtureVoltageHint}>
+              <div className="field-label">{t.library.fixtureVoltage}</div>
               <input className="input" value={(mb as Record<string, string>)[vKey]}
                 onChange={e => setMbField(vKey, e.target.value)} placeholder={vHint} />
             </div>
@@ -805,24 +955,23 @@ export default function ModelLibrary() {
           <button className="btn btn--primary"
             disabled={mbBusy || !mb.model_name.trim() || !Number(mb.voltage_range_v)}
             onClick={() => void buildFromMeasurement()}>
-            {mbBusy ? '建模中…' : '建模並匯入'}
+            {mbBusy ? t.library.building : t.library.buildImport}
           </button>
         </div>
-        {mbMsg && <div className="model-library__notice">{mbMsg}</div>}
+        {mbMsg && <div className="model-library__notice">{mbMsg(t, lang)}</div>}
       </details>
 
-      {message && <div className="model-library__notice">{message}</div>}
-      {error && <div className="model-library__notice model-library__notice--error">{error}</div>}
+      {message && <div className="model-library__notice">{message(t, lang)}</div>}
+      {error && <div className="model-library__notice model-library__notice--error">{error(t, lang)}</div>}
 
       <div className="model-library__body">
         <aside className="model-library__list">
           <div className="model-library__path" title={library?.library_path || ''}>
-            本機位置：{library?.library_path || '讀取中…'}
+            {t.library.localPath}{library?.library_path || t.library.loading}
           </div>
           {!library?.packages.length && (
             <div className="model-library__empty">
-              尚未匯入模型。可先使用 Ansys Signal Integrity Example 的 `.ibs` 測試。
-            </div>
+              {t.library.emptyLibrary}</div>
           )}
           {library?.packages.map(item => (
             <button key={item.package_id}
@@ -833,16 +982,26 @@ export default function ModelLibrary() {
               </span>
               <span className="model-library__card-title">{item.display_name}</span>
               <span className="model-library__card-meta">
-                {kindText[item.kind]}　{item.ibis?.ibis_version ? `IBIS ${item.ibis.ibis_version}` : ''}
+                {kindText[item.kind]} {t.library.spacer}{item.ibis?.ibis_version ? `IBIS ${item.ibis.ibis_version}` : ''}
               </span>
-              <span className="model-library__card-hash">SHA-256：{shortHash(item.package_sha256)}</span>
+              <span className="model-library__card-hash">{t.library.hashLabel}{shortHash(item.package_sha256)}</span>
+              {(() => {
+                // #0104：SPISim 產生的規格模型 [Manufacturer] 寫 ANSYS，清單上就要看得出不是原廠。
+                const info = specModelInfo(item, lang)
+                if (!info?.spisim) return null
+                return <span className="model-library__source-badges">
+                  <span className="model-library__source-badge">{t.library.spisimBadgeShort}</span>
+                  {info.ccomp && <span className={`model-library__ccomp is-${info.ccomp.level}`}>
+                    C_comp {t.library.ccompLevel[info.ccomp.level]}</span>}
+                </span>
+              })()}
             </button>
           ))}
         </aside>
 
         <main className="model-library__detail">
           {!selected ? (
-            <div className="model-library__empty">選擇或匯入模型後，這裡會顯示解析結果。</div>
+            <div className="model-library__empty">{t.library.selectModelHint}</div>
           ) : selected.readable === false ? (
             // 壞掉的那一筆照樣列得出來（後端刻意如此），但它沒有解析結果可看，
             // 只能把讀不出來的原因原樣交代清楚——別假裝它是一份正常的模型。
@@ -850,40 +1009,63 @@ export default function ModelLibrary() {
               <div>
                 <h3>{selected.display_name}</h3>
                 <div className="model-library__issue is-error">
-                  這一份讀不出來：{selected.error || '原因不明'}
+                  {t.library.unreadable}{pickText(selected, 'error', lang) || t.library.unknownReason}
                 </div>
-                <p className="hint">請確認模型庫裡這個套件的 manifest 是否被改動或損毀。</p>
+                <p className="hint">{t.library.manifestHint}</p>
               </div>
             </div>
           ) : <>
             <div className="model-library__detail-title">
               <div>
                 <h3>{selected.display_name}</h3>
-                <div>{kindText[selected.kind]}　·　來源檔 {selected.source_file}</div>
+                <div>{kindText[selected.kind]} {t.library.sourceFile}{selected.source_file}</div>
               </div>
               <span className={`model-library__state model-library__state--${selected.compatibility.status}`}>
                 {statusText[selected.compatibility.status]}
               </span>
             </div>
 
-            {/* AMI 面板 2026-08-28 重建：IBIS-AMI 的分析路徑在「AMI 通道」
-                分頁。多埠通道仍只吃一般 IBIS，所以要指路，不能讓人去那裡找。 */}
-            {selected.kind !== 'ibis' && (
-              <div className="model-library__notice">
-                IBIS-AMI 的分析走「AMI 通道」分頁；DLL 要先在下方掃描並信任。
+            {/* #0104：SPISim 產生的規格模型，非原廠；C_comp 是佔位值，τ/UI 用產生時的資料率算。 */}
+            {selectedSpec?.spisim && (
+              <div className="model-library__spisim">
+                <strong>{t.library.spisimBadge}</strong>
+                {selectedSpec.originNote && <span>{selectedSpec.originNote}</span>}
+                <span>{t.library.spisimMeta(selectedSpec.template, selectedSpec.aedtVersion)}</span>
+                {selectedSpec.ccomp && (
+                  <div className={`model-library__ccomp is-${selectedSpec.ccomp.level}`}>
+                    <strong>{t.library.ccompTitle}{t.apiError.fieldSep}{t.library.ccompLevel[selectedSpec.ccomp.level]}</strong>
+                    <span>{selectedSpec.ccomp.level === 'unknown'
+                      ? (selectedSpec.ccomp.unknownReason === 'placeholder'
+                        ? t.library.ccompZero(selectedSpec.ccomp.cpf || '0')
+                        : selectedSpec.ccomp.unknownReason === 'no_ccomp'
+                          ? t.library.ccompMissing
+                          : t.library.ccompUnknown)
+                      : t.library.ccompSummary(selectedSpec.ccomp.cpf, selectedSpec.ccomp.tau,
+                        selectedSpec.ccomp.ratio, selectedSpec.ccomp.rate)}</span>
+                    {selectedSpec.ccomp.note && <span>{selectedSpec.ccomp.note}</span>}
+                    <span>{t.library.ccompPlaceholder}</span>
+                  </div>
+                )}
               </div>
             )}
 
+            {/* IBIS-AMI 的分析路徑在眼圖精靈（ADR-0067 收掉舊 AMI 頁籤）；多埠分支
+                只吃一般 IBIS，所以要指路，不能讓人去那裡找。 */}
+            {selected.kind !== 'ibis' && (
+              <div className="model-library__notice">
+                {t.library.amiRouteHint}</div>
+            )}
+
             <div className="model-library__metrics">
-              <div><span>IBIS 版本</span><strong>{selected.ibis?.ibis_version || '—'}</strong></div>
-              <div><span>AMI 版本</span><strong>{Object.values(selected.ami)[0]?.ami_version || '—'}</strong></div>
+              <div><span>{t.library.ibisVersion}</span><strong>{selected.ibis?.ibis_version || '—'}</strong></div>
+              <div><span>{t.library.amiVersion}</span><strong>{Object.values(selected.ami)[0]?.ami_version || '—'}</strong></div>
               <div><span>Component</span><strong>{selected.ibis?.components.length ?? 0}</strong></div>
               <div><span>Model</span><strong>{selected.ibis?.models.length ?? 0}</strong></div>
               <div><span>Pin</span><strong>{selected.ibis?.pins.length ?? 0}</strong></div>
               {/* 純文字模型沒有原生程式庫，就不要在摘要列提示它的存在——
                   一般電路模擬本來就不該看到這套機制。 */}
               {selected.native_libraries.length > 0 && (
-                <div><span>原生程式庫</span><strong>{selected.native_libraries.length}</strong></div>
+                <div><span>{t.library.nativeLibraries}</span><strong>{selected.native_libraries.length}</strong></div>
               )}
             </div>
 
@@ -892,19 +1074,19 @@ export default function ModelLibrary() {
                 秒測是「等化真的有沒有動作」，兩者互補。 */}
             {selected.kind === 'ibis_ami' && selected.native_libraries.length > 0 && (
               <section className="model-library__section">
-                <h4>秒測（不開 AEDT）</h4>
+                <h4>{t.library.quickProbeTitle}</h4>
                 <div className="model-library__health">
-                  <span>用 AEDT 內建 SPISim 引擎驅動 DLL，一秒看等化前後波形。</span>
+                  <span>{t.library.quickProbeHint}</span>
                   <button className="btn" onClick={() => void runQuickProbe()}
                     disabled={probeBusy
                       || selected.native_libraries.some(item => item.trust_status !== 'trusted')}
                     title={selected.native_libraries.some(item => item.trust_status !== 'trusted')
-                      ? '秒測會實際執行 DLL；先在下方掃描並建立信任' : ''}>
-                    {probeBusy ? '秒測中…' : '秒測'}
+                      ? t.library.quickProbeTrust : ''}>
+                    {probeBusy ? t.library.probing : t.library.quickProbe}
                   </button>
                 </div>
                 {probeError && (
-                  <div className="model-library__issue is-error">{probeError}</div>
+                  <div className="model-library__issue is-error">{probeError(t, lang)}</div>
                 )}
                 {probeResult && <QuickProbeView result={probeResult} />}
               </section>
@@ -913,12 +1095,12 @@ export default function ModelLibrary() {
             {/* 健檢：唯二靜態檢查抓不到的失敗（AMI_Init 拒絕、步階響應算不出）
                 只有真的開 AEDT 才現形。一顆按鈕、零設定，結果以 SHA-256 快取。 */}
             <section className="model-library__section">
-              <h4>健檢</h4>
+              <h4>{t.library.healthCheck}</h4>
               <div className="model-library__health">
-                {healthRunning ? <span>健檢中…（約一分鐘）</span>
+                {healthRunning ? <span>{t.library.healthMinute}</span>
                   : health?.record ? (() => {
                     // 授權不足、結果無效都不是模型的問題：黃字，不用紅字「失敗」。
-                    const view = healthStatusView(health.record)
+                    const view = healthStatusView(health.record, lang)
                     return (
                       <span className={view.tone === 'pass' ? 'is-pass' : view.tone === 'fail' ? 'is-fail' : undefined}
                         style={view.tone === 'warn' ? { color: '#ffd28a' } : undefined}
@@ -926,32 +1108,31 @@ export default function ModelLibrary() {
                         {view.text}
                       </span>
                     )
-                  })() : <span>尚未健檢。</span>}
+                  })() : <span>{t.library.healthNotRun}</span>}
                 <button className="btn" onClick={() => void startHealthcheck()}
                   disabled={healthRunning || Boolean(health && !health.applicable) || Boolean(healthBlock)}
-                  title={healthBlock || health?.blocker || '用參考通道實際求解一次'}>
-                  {healthRunning ? '健檢中…' : '用參考通道健檢'}
+                  title={healthBlock || pickText(health, 'blocker', lang) || t.library.healthSolveHint}>
+                  {healthRunning ? t.library.healthBusy : t.library.healthReference}
                 </button>
                 <LicenseTag functions={['model_check']} />
               </div>
-              <p className="hint">健檢過、真通道失敗＝通道問題；健檢不過＝模型問題。</p>
+              <p className="hint">{t.library.healthInterpretation}</p>
             </section>
 
             {(selected.compatibility.errors.length > 0 || selected.compatibility.warnings.length > 0) && (
               <section className="model-library__section">
-                <h4>相容性預檢</h4>
+                <h4>{t.library.compatibilityPreflight}</h4>
                 {/* 錯誤不再擋分析（帶錯誤放行，AEDT 是最終裁判），所以字眼
                     不能再寫「阻止」——那會讓人以為這份模型選不下去。 */}
-                {selected.compatibility.errors.map(item => (
-                  <div className="model-library__issue is-error" key={item}>錯誤：{item}</div>
+                {pickList(selected.compatibility, 'errors', lang).map(item => (
+                  <div className="model-library__issue is-error" key={item}>{t.library.errorPrefix}{item}</div>
                 ))}
                 {selected.compatibility.errors.length > 0 && (
                   <p className="hint">
-                    分析不會被這些錯誤擋下（帶錯誤放行）；AEDT 若拒收會如實回報。
-                  </p>
+                    {t.library.acceptedErrorsHint}</p>
                 )}
-                {selected.compatibility.warnings.map(item => (
-                  <div className="model-library__issue is-warning" key={item}>注意：{item}</div>
+                {pickList(selected.compatibility, 'warnings', lang).map(item => (
+                  <div className="model-library__issue is-warning" key={item}>{t.library.warningPrefix}{item}</div>
                 ))}
               </section>
             )}
@@ -963,26 +1144,24 @@ export default function ModelLibrary() {
               return (<>
                 {auto.length > 0 && (
                   <section className="model-library__section">
-                    <h4>自動修正（{auto.length} 處）</h4>
-                    <p className="hint">修的是模型庫裡的受管副本；你的來源檔一個位元都沒動。
-                      標明「依推測」的項目不是量測結果，交付前請確認。</p>
+                    <h4>{t.library.autoRepairsPrefix}{auto.length} {t.library.itemsSuffix}</h4>
+                    <p className="hint">{t.library.autoRepairsHint}</p>
                     {auto.map((item, index) => (
                       <div className="model-library__issue is-warning" key={index}>
-                        <strong>{item.detail}</strong>
-                        <div>{item.impact}</div>
+                        <strong>{pickText(item, 'detail', lang)}</strong>
+                        <div>{pickText(item, 'impact', lang)}</div>
                       </div>
                     ))}
                   </section>
                 )}
                 {choices.length > 0 && (
                   <section className="model-library__section">
-                    <h4>需要你決定（{choices.length} 處）</h4>
-                    <p className="hint">工具沒有把握該綁哪一個，所以什麼都沒改。
-                      這幾項要你在模型檔裡自行處理，否則分析會用到不確定的模型。</p>
+                    <h4>{t.library.userChoicesPrefix}{choices.length} {t.library.itemsSuffix}</h4>
+                    <p className="hint">{t.library.userChoicesHint}</p>
                     {choices.map((item, index) => (
                       <div className="model-library__issue is-error" key={index}>
-                        <strong>{item.detail}</strong>
-                        <div>{item.impact}</div>
+                        <strong>{pickText(item, 'detail', lang)}</strong>
+                        <div>{pickText(item, 'impact', lang)}</div>
                       </div>
                     ))}
                   </section>
@@ -991,14 +1170,14 @@ export default function ModelLibrary() {
             })()}
 
             <section className="model-library__section">
-              <h4>模型與 Pin</h4>
+              <h4>{t.library.modelsPins}</h4>
               <div className="model-library__table-wrap">
                 <table className="model-library__table">
-                  <thead><tr><th>角色候選</th><th>Model</th><th>Model Type</th><th>Pin 數</th></tr></thead>
+                  <thead><tr><th>{t.library.roleCandidate}</th><th>Model</th><th>Model Type</th><th>{t.library.pinCount}</th></tr></thead>
                   <tbody>
                     {(selected.ibis?.models || []).map(model => {
                       const type = model.model_type.toLowerCase()
-                      const role = /output|3-state|i\/o/.test(type) ? 'Tx' : /input/.test(type) ? 'Rx' : '待確認'
+                      const role = /output|3-state|i\/o/.test(type) ? 'Tx' : /input/.test(type) ? 'Rx' : t.library.pending
                       const pins = selected.ibis?.pins.filter(pin => pin.model === model.name).length || 0
                       return <tr key={model.name}><td>{role}</td><td>{model.name}</td><td>{model.model_type || '—'}</td><td>{pins}</td></tr>
                     })}
@@ -1014,26 +1193,26 @@ export default function ModelLibrary() {
               <details className="model-library__section" open={nativeNeedsAttention}>
                 <summary>
                   {nativeNeedsAttention
-                    ? `原生程式庫需要確認（${selected.native_libraries.filter(
-                        item => item.trust_status !== 'trusted').length} 個待確認）`
-                    : `原生程式庫已確認（${selected.native_libraries.length} 個）`}
+                    ? t.library.nativePending(selected.native_libraries.filter(
+                        item => item.trust_status !== 'trusted').length)
+                    : t.library.nativeConfirmed(selected.native_libraries.length)}
                 </summary>
                 <div className="model-library__section-heading">
                   <div>
-                    <p>原生 DLL 會實際執行，首次使用需確認一次。信任綁定 SHA-256，模型一變就要重新確認。</p>
+                    <p>{t.library.nativeTrustHint}</p>
                   </div>
                   <button className="btn" onClick={scanPackage} disabled={Boolean(actionBusy)}>
-                    {actionBusy === 'scan' ? '掃描中…' : '掃描全部 DLL／SO'}
+                    {actionBusy === 'scan' ? t.library.scanning : t.library.scanAll}
                   </button>
                 </div>
                 <div className="model-library__table-wrap">
                   <table className="model-library__table">
-                    <thead><tr><th>檔案</th><th>格式</th><th>架構</th><th>大小</th><th>掃描</th><th>信任</th><th>SHA-256</th><th>操作</th></tr></thead>
+                    <thead><tr><th>{t.library.file}</th><th>{t.library.format}</th><th>{t.library.architecture}</th><th>{t.library.size}</th><th>{t.library.scan}</th><th>{t.library.trust}</th><th>SHA-256</th><th>{t.library.action}</th></tr></thead>
                     <tbody>{selected.native_libraries.map(item => (
                       <tr key={item.sha256}>
                         <td>{item.file}</td><td>{item.format}</td><td>{item.architecture}</td>
                         <td>{formatBytes(item.size_bytes)}</td>
-                        <td title={item.message || item.scanner || ''}>
+                        <td title={pickText(item, 'message', lang) || item.scanner || ''}>
                           <span className={`model-library__native-state is-${item.scan_status}`}>
                             {scanText[item.scan_status] || item.scan_status}
                           </span>
@@ -1052,7 +1231,7 @@ export default function ModelLibrary() {
                           <button className="btn model-library__trust-btn"
                             disabled={Boolean(actionBusy) || !['clean', 'unavailable'].includes(item.scan_status)}
                             onClick={() => void trustNative(item)}>
-                            {actionBusy === item.sha256 ? '處理中…' : '確認信任'}
+                            {actionBusy === item.sha256 ? t.library.processing : t.library.confirmTrust}
                           </button>
                         )}</td>
                       </tr>
@@ -1065,22 +1244,26 @@ export default function ModelLibrary() {
             {/* 雜湊值平常不必看，但要重現某次分析或核對模型是否被改過時必須查得到，
                 因此收進摺疊區而不是移除。 */}
             <details className="model-library__section model-library__manifest">
-              <summary>可重現性資訊（受管位置、SHA-256）</summary>
-              <div><span>套件 SHA-256</span><code>{selected.package_sha256}</code></div>
-              <div><span>受管位置</span><code>{selected.managed_path}</code></div>
+              <summary>{t.library.reproducibility}</summary>
+              <div><span>{t.library.packageHash}</span><code>{selected.package_sha256}</code></div>
+              <div><span>{t.library.managedPath}</span><code>{selected.managed_path}</code></div>
               <div><span>IBIS Checker</span><code>{selected.ibis_checker.available
-                ? `${selected.ibis_checker.version}／${selected.ibis_checker.status}` : '未找到'}</code></div>
+                ? t.library.checkerStatus(selected.ibis_checker.version, selected.ibis_checker.status) : t.library.notFound}</code></div>
             </details>
           </>}
         </main>
       </div>
-      </> : activePanel === 'multilane'
-        ? <MultiLaneWizard packages={library?.packages || []}
-            onLibraryChanged={refresh} />
-        : activePanel === 'ami'
-          ? <AmiChannelPanel packages={library?.packages || []}
-              onLibraryChanged={refresh} />
-          : <><SpisimToolboxPanel /><SerdesCompliancePanel /></>}
+      </> : null}
+      {/* 分析面板切走時只隱藏、不卸載：AMI 要回「模型庫」信任 DLL，
+          卸載會把已填的模型、Touchstone 與預檢結果整份清掉（#0088 實機走查）。
+          display: contents 讓面板仍是 .model-library 這個 flex 容器的直接子項。
+          多埠與 AMI 的舊進階頁籤已收進精靈（ADR-0067）。 */}
+      <div style={{ display: activePanel === 'wizard' ? 'contents' : 'none' }}>
+        <EyeWizard packages={library?.packages || []} onLibraryChanged={refresh} />
+      </div>
+      <div style={{ display: activePanel === 'toolbox' ? 'contents' : 'none' }}>
+        <SpisimToolboxPanel active={activePanel === 'toolbox'} /><SerdesCompliancePanel />
+      </div>
     </div>
   )
 }

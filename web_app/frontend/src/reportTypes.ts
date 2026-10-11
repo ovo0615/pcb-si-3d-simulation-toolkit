@@ -1,4 +1,5 @@
 // 一鍵 HTML 報告共用型別。
+import type { Messages } from './i18n/zh-TW'
 
 export type SnapshotStatus = 'pass' | 'attention' | 'fail' | 'display'
 export type ReportLocale = 'zh-TW' | 'en' | 'bilingual'
@@ -24,6 +25,8 @@ export interface ReportSnapshot {
   active: boolean
   external: boolean
   sha256: string
+  /** 拍攝時的介面語言（卡 0087；舊快照沒有）。 */
+  ui_locale?: string | null
 }
 
 export interface ReportBrand {
@@ -89,20 +92,29 @@ export interface ReportWorkspaceResponse {
   brand_profile: Partial<ReportBrand> & { logo_data_url?: string }
 }
 
-export const REPORT_SECTION_LABELS: Record<string, string> = {
-  board: '原始電路板與目標通道',
-  cutout: '裁切後 Layout',
-  cleanup: 'Layout 清理比較',
-  segments: 'N 段分割',
-  solver: '求解狀態與設定',
-  schematic: '電路串接',
-  sparam: 'S 參數結果',
-  models: 'IBIS 模型與眼圖分析',
-  eye: '眼圖結果',
-  tdr: 'TDR 阻抗定位',
-  crosssection: '截面阻抗（Q2D）',
-  results: '模擬結果',
-  external: '補充證據',
+type SectionLabel = (t: Messages) => string
+
+/** 章節鍵 → 顯示名稱（卡 0087：名稱在語言檔 `report.sections`）。
+ *  這裡的順序就是勾選清單的順序，要和後端 reporting.DEFAULT_SECTION_ORDER 逐項相同。 */
+export const REPORT_SECTION_LABELS: Record<string, SectionLabel> = {
+  board: t => t.report.sections.board,
+  cutout: t => t.report.sections.cutout,
+  cleanup: t => t.report.sections.cleanup,
+  segments: t => t.report.sections.segments,
+  solver: t => t.report.sections.solver,
+  schematic: t => t.report.sections.schematic,
+  sparam: t => t.report.sections.sparam,
+  models: t => t.report.sections.models,
+  eye: t => t.report.sections.eye,
+  tdr: t => t.report.sections.tdr,
+  crosssection: t => t.report.sections.crosssection,
+  results: t => t.report.sections.results,
+  external: t => t.report.sections.external,
+}
+
+/** 章節的顯示名稱；認不得的鍵（之後新增、外部匯入）顯示鍵本身。 */
+export function reportSectionLabel(t: Messages, section: string): string {
+  return REPORT_SECTION_LABELS[section]?.(t) ?? section
 }
 
 export const REPORT_SECTION_ORDER = Object.keys(REPORT_SECTION_LABELS)
@@ -111,6 +123,8 @@ export const DEFAULT_WATERMARK: WatermarkSettings = {
   enabled: false,
   mode: 'text',
   scope: 'all',
+  // 出廠預設字：後端認得這兩個中文值，產生時依報告語言換成 Confidential（卡 0087）。
+  // 前端若改成英文，中文報告就會印英文——所以不翻，畫面上另有說明。
   text: '機密文件',
   opacity: 0.12,
   angle: -30,

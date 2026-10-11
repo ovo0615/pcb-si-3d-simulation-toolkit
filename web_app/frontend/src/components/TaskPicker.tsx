@@ -3,11 +3,14 @@
 //
 // 版面刻意壓在一個視窗內、不要求捲動：入口的作用是「一眼看完所有選項再決定」，
 // 需要捲動才看得到的項目等於沒被看見。因此分兩欄、行高壓縮，說明文字放小。
+import { useT } from '../i18n'
+import type { Messages } from '../i18n'
 import {
-  ALL_TASKS,
+  ALL_TASK_SELECTION,
   DEFAULT_TASKS,
-  TASK_GROUPS,
+  allTasks,
   missingPrerequisites,
+  taskGroups,
   type TaskDef,
   type TaskFlags,
   type TaskKey,
@@ -31,9 +34,10 @@ const FONT = '"Calibri", "Microsoft JhengHei", sans-serif'
 type TaskIconKind =
   | 'board' | 'cutout' | 'stackup' | 'backdrill' | 'cleanup' | 'ports'
   | 'segment' | 'schedule' | 'remotepack' | 'cascade' | 'sparam' | 'eye' | 'tdr' | 'report'
-  | 'models'
+  | 'models' | 'crosssection'
 
-const TASK_ICON_KIND: Partial<Record<TaskKey, TaskIconKind>> = {
+// 用完整的 Record：新增功能卡卻沒給圖示時，型別檢查就會擋下（#0083，截面阻抗曾漏掉）。
+const TASK_ICON_KIND: Record<TaskKey, TaskIconKind> = {
   load: 'board',
   cutout: 'cutout',
   stackup: 'stackup',
@@ -48,6 +52,7 @@ const TASK_ICON_KIND: Partial<Record<TaskKey, TaskIconKind>> = {
   eye: 'eye',
   models: 'models',
   tdr: 'tdr',
+  crosssection: 'crosssection',
   report: 'report',
 }
 
@@ -56,17 +61,10 @@ const TASK_ICON_KIND: Partial<Record<TaskKey, TaskIconKind>> = {
  * SVG 直接隨畫面輸出，不需要額外圖片檔，也不會因縮放失真。
  */
 function TaskIcon({ kind }: { kind: TaskIconKind }) {
-  const labels: Record<TaskIconKind, string> = {
-    board: '電路板圖示', cutout: '局部裁切圖示', stackup: '疊構圖示',
-    backdrill: '背鑽圖示', cleanup: 'Layout 清理圖示', ports: 'Port 圖示',
-    segment: 'N 段分割圖示', schedule: '排程求解圖示', remotepack: '遠端求解包圖示',
-    cascade: '電路串接圖示', sparam: 'S 參數圖示', eye: '眼圖圖示',
-    tdr: 'TDR 圖示', report: 'HTML 報告圖示',
-    models: 'IBIS 模型與眼圖分析圖示',
-  }
+  const { t } = useT()
 
   return (
-    <svg className="task-picker-icon" viewBox="0 0 64 64" role="img" aria-label={labels[kind]}>
+    <svg className="task-picker-icon" viewBox="0 0 64 64" role="img" aria-label={t.tasks.icons[kind]}>
       {kind === 'board' && <>
         <rect x="7" y="11" width="43" height="42" rx="5" fill="#132b3b" stroke="#63c5f2" strokeWidth="2" />
         <path d="M13 21h13v8h9v-8h10M13 40h10v-8h12v13h10" fill="none" stroke="#73d6ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -161,6 +159,14 @@ function TaskIcon({ kind }: { kind: TaskIconKind }) {
         <circle cx="32" cy="44" r="4" fill="#ffbd5a" />
         <path d="M48 41h10m-5-5 5 5-5 5" fill="none" stroke="#8fe3aa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
       </>}
+      {kind === 'crosssection' && <>
+        {/* 帶狀線截面：介電層＋上下參考平面＋一對梯形走線，旁邊標 Ω（阻抗）。 */}
+        <rect x="5" y="11" width="42" height="42" rx="5" fill="#18394b" stroke="#73d6ff" strokeWidth="2" />
+        <path d="M9 18h34M9 46h34" stroke="#8fe3aa" strokeWidth="3" strokeLinecap="round" />
+        <path d="M11 36l3-7h9l3 7zM28 36l3-7h9l3 7z" fill="#ffbd5a" stroke="#ffe0a3" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M15 29c-2-3-2-6-2-9M39 29c2-3 2-6 2-9M15 36c-2 3-2 5-2 8M39 36c2 3 2 5 2 8" fill="none" stroke="#b3ebff" strokeWidth="1.5" strokeDasharray="2 2" opacity=".85" />
+        <text x="48" y="40" fill="#ffca75" fontSize="19" fontWeight="700">Ω</text>
+      </>}
     </svg>
   )
 }
@@ -170,6 +176,7 @@ function renderTask(
   task: TaskDef,
   flags: TaskFlags,
   onToggle: (key: TaskKey, checked: boolean) => void,
+  t: Messages['tasks'],
   depth = 0,
 ) {
   const on = flags[task.key]
@@ -204,7 +211,7 @@ function renderTask(
               波浪號斷行，看起來就像兩個不相干的數字。 */}
           {task.eta && (
             <span
-              title="預估耗時（靜態估計，實際依板子大小與機器而定）"
+              title={t.etaTip}
               style={{
                 marginLeft: 7, fontSize: 10, fontWeight: 400,
                 color: '#8d9db0', whiteSpace: 'nowrap',
@@ -240,9 +247,9 @@ function renderTask(
           display: 'grid', gap: 5,
         }}>
           <div style={{ fontSize: 13, color: '#9eafc3' }}>
-            這次要對這片板子做什麼：
+            {t.childrenLead}
           </div>
-          {task.children.map(child => renderTask(child, flags, onToggle, depth + 1))}
+          {task.children.map(child => renderTask(child, flags, onToggle, t, depth + 1))}
         </div>
       )}
     </div>
@@ -252,8 +259,10 @@ function renderTask(
 export default function TaskPicker(
   { flags, onToggle, onSetAll, onStart, returning, closing, onClosed }: Props,
 ) {
-  const chosen = ALL_TASKS.filter(task => flags[task.key])
-  const gaps = missingPrerequisites(flags)
+  const { t: messages } = useT()
+  const t = messages.tasks
+  const chosen = allTasks(t).filter(task => flags[task.key])
+  const gaps = missingPrerequisites(flags, t)
 
   return (
     <div
@@ -272,10 +281,10 @@ export default function TaskPicker(
     }}>
       <div style={{ flexShrink: 0, marginBottom: 10 }}>
         <div style={{ fontSize: 36, lineHeight: 1.15, fontWeight: 800, letterSpacing: 0.4, color: '#f1f7ff' }}>
-          PCB SI 3D 模擬分析工具
+          {messages.app.title}
         </div>
         <div style={{ fontSize: 16, color: '#a8b8ca', marginTop: 8 }}>
-          勾選這次要用的項目，介面只會顯示這些；之後可從左上角「調整項目」隨時改。
+          {t.subtitle}
         </div>
       </div>
 
@@ -288,7 +297,7 @@ export default function TaskPicker(
         // 讓每組只佔自己內容的高度。
         alignItems: 'start',
       }}>
-        {TASK_GROUPS.map(group => (
+        {taskGroups(t).map(group => (
           <div key={group.title} className="task-picker-group">
             <div style={{
               fontSize: 16, fontWeight: 700, color: '#7fd1ff',
@@ -297,7 +306,7 @@ export default function TaskPicker(
               {group.title}
             </div>
             <div style={{ display: 'grid', gap: 6 }}>
-              {group.tasks.map(task => renderTask(task, flags, onToggle))}
+              {group.tasks.map(task => renderTask(task, flags, onToggle, t))}
             </div>
           </div>
         ))}
@@ -311,11 +320,11 @@ export default function TaskPicker(
             fontSize: 14, lineHeight: 1.7, color: '#ffd98a',
           maxHeight: 90, overflowY: 'auto',
         }}>
-          <b>以下項目缺少前置，仍可繼續，但流程可能接不起來：</b>
+          <b>{t.gapsLead}</b>
           {gaps.map(({ task, missing }) => (
             <div key={task.key}>
-              「{task.label}」需要：{missing.map(m => m.label).join('、')}
-              {task.requiresNote ? `　（${task.requiresNote}）` : ''}
+              {t.gapLine(task.label, missing.map(m => m.label).join(t.listSep))}
+              {task.requiresNote ? t.requiresNote(task.requiresNote) : ''}
             </div>
           ))}
         </div>
@@ -339,28 +348,28 @@ export default function TaskPicker(
             whiteSpace: 'nowrap',
           }}
         >
-          {returning ? '回到工具' : '開始'}
+          {returning ? t.back : t.start}
         </button>
         <button
           className="btn"
           style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }}
-          onClick={() => onSetAll(ALL_TASKS.map(task => task.key))}
+          onClick={() => onSetAll(ALL_TASK_SELECTION)}
         >
-          全選
+          {t.selectAll}
         </button>
         <button
           className="btn"
           style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }}
           onClick={() => onSetAll(DEFAULT_TASKS)}
         >
-          還原預設組
+          {t.reset}
         </button>
         <span style={{
           flex: '0 1 auto', marginLeft: 'auto', textAlign: 'right',
           fontSize: 11.5, color: '#8d9db0', lineHeight: 1.5,
         }}>
-          {chosen.length === 0 ? '請至少勾選一項' : `已選 ${chosen.length} 項`}
-          　·　勾選記在這台瀏覽器
+          {chosen.length === 0 ? t.noneChosen : t.chosenCount(chosen.length)}
+          {t.rememberedHere}
         </span>
       </div>
     </div>

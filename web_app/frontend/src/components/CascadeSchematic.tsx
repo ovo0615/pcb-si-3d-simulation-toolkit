@@ -1,6 +1,7 @@
 // 串接電路示意圖（純 SVG）— 功能3：解算前即可預覽 N 段接線
 // 資料契約與後端 /api/cascade/preview 一致；外部檔案模式由前端自組相同結構。
 import { useEffect, useRef, useState } from 'react'
+import { useT } from '../i18n'
 
 export interface CascadeGraph {
   blocks: {
@@ -100,6 +101,7 @@ export default function CascadeSchematic({ graph }: Props) {
   const svgW = Math.max(100, MARGIN.x * 2 + blocks.length * BLOCK_W + (blocks.length - 1) * GAP_X)
   const svgH = blockY + blockH + MARGIN.bottom
   const initialView = { x: 0, y: 0, w: svgW, h: svgH }
+  const { t } = useT()
   const [view, setView] = useState(initialView)
   const [drag, setDrag] = useState<{ x: number; y: number; viewX: number; viewY: number } | null>(null)
 
@@ -140,7 +142,7 @@ export default function CascadeSchematic({ graph }: Props) {
   }
   wheelRef.current = handleWheel
   if (blocks.length === 0) {
-    return <div style={{ padding: 40, color: 'var(--faint)', textAlign: 'center' }}>尚無串接資料</div>
+    return <div style={{ padding: 40, color: 'var(--faint)', textAlign: 'center' }}>{t.cascadeSchematic.noData}</div>
   }
 
   return (
@@ -180,7 +182,7 @@ export default function CascadeSchematic({ graph }: Props) {
               <path d={d} fill="none" stroke={color} strokeWidth={c.stripline ? 2.4 : 1.6} />
               {c.net && (
                 <text x={midX} y={(pa.y + pb.y) / 2 - 5} fill={color} fontSize={9}
-                  textAnchor="middle">{c.net}{c.stripline ? '（T+B 短路）' : ''}</text>
+                  textAnchor="middle">{c.net}{c.stripline ? t.cascadeSchematic.striplineShorted : ''}</text>
               )}
             </g>
           )
@@ -209,13 +211,13 @@ export default function CascadeSchematic({ graph }: Props) {
               {b.sub_label && (
                 <text x={x0 + BLOCK_W / 2} y={blockY + blockH - 8} fill="#5c677d"
                   fontSize={8} textAnchor="middle">{b.sub_label}
-                  {b.solved === false ? '（未解）' : ''}</text>
+                  {b.solved === false ? t.cascadeSchematic.unsolved : ''}</text>
               )}
               {groupsPerBlock[bi].map(g => {
                 const pin = pinPos[`${bi}|${g.key}`]
                 if (!pin) return null
                 const isBus = g.ports.length > 1
-                const labelText = isBus ? `${g.ports.length} 短路` : g.ports[0]
+                const labelText = isBus ? t.cascadeSchematic.busShorted(g.ports.length) : g.ports[0]
                 return (
                   <g key={g.key}>
                     <circle cx={pin.x} cy={pin.y} r={isBus ? 4 : 3}

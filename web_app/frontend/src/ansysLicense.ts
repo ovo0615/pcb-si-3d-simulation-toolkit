@@ -6,7 +6,12 @@
 //
 // 這裡只負責「按鈕變灰、旁邊寫需要什麼」。真正的關卡在後端：前端沒擋到、
 // 或檢查之後授權被別人拿走，後端仍會回「需要 X 授權，目前沒有可用的」。
+//
+// 卡 0087：store 只存原始資料（錯誤也只存原文），畫面文字由呼叫端依語言組，
+// 切換語言不必重新查詢。後端欄位的英文（label_en、message_en…）缺席時顯示原文。
 import { useSyncExternalStore } from 'react'
+import type { Lang } from './i18n/lang'
+import type { Messages } from './i18n/zh-TW'
 
 export type LicenseState = 'available' | 'unavailable' | 'unknown'
 
@@ -21,9 +26,12 @@ export interface FeatureRow {
 export interface FunctionStatus {
   function: string
   label: string
+  label_en?: string
   product: string
+  product_en?: string
   state: LicenseState
   message: string
+  message_en?: string
   required: string[]
   optional_features: string[]
   features: FeatureRow[]
@@ -35,8 +43,9 @@ export interface LicenseStatus {
   query: {
     status: 'ok' | 'unknown'
     reason: string
+    reason_en?: string
     partial?: boolean
-    servers: { server: string; up: boolean; error: string }[]
+    servers: { server: string; up: boolean; error: string; error_en?: string }[]
     checked_at: number
   }
   cache_seconds: number
@@ -48,7 +57,8 @@ export interface LicenseStatus {
 export type AnsysFunction =
   | 'siwave_solve' | 'hfss3dlayout_solve' | 'hfss3dlayout_export' | 'q2d_solve'
   | 'circuit_tdr' | 'circuit_export' | 'circuit_quickeye' | 'model_check'
-  | 'ami_channel' | 'multi_lane' | 'spisim_com' | 'odbpp_import'
+  | 'ami_channel' | 'ibis_channel' | 'multi_lane' | 'spisim_com' | 'odbpp_import'
+  | 'spisim_model'
 
 type Snapshot = { status: LicenseStatus | null; error: string; loading: boolean }
 
@@ -72,7 +82,8 @@ export async function refreshLicenseStatus(force = false): Promise<void> {
     // 連授權狀態都拿不到：不能當成有，也不能當成沒有——按鈕不擋，提示看不到狀態。
     // 舊的 status 一起丟掉：留著的話，上一次的「沒有空位」會繼續把按鈕擋住
     // （repo 審查第 9 輪）。
-    emit({ status: null, error: `讀不到授權狀態：${String(error)}`, loading: false })
+    // error 只存原文；畫面用 t.license.statusUnreadable(error) 包成一句。
+    emit({ status: null, error: String(error), loading: false })
   }
 }
 
@@ -95,33 +106,44 @@ export function useAnsysLicense(): Snapshot {
   return useSyncExternalStore(subscribe, () => snapshot)
 }
 
-/** 這些功能有沒有被授權擋住。擋住時回傳要顯示的原因，否則回 null。 */
-export function licenseBlock(status: LicenseStatus | null, functions: AnsysFunction[]): string | null {
+/** 英文介面優先用 `<key>_en`，沒有就原文。 */
+export function licenseText(item: object | null | undefined, key: string, lang: Lang): string {
+  const fields = (item || {}) as Record<string, unknown>
+  const english = fields[`${key}_en`]
+  if (lang === 'en' && typeof english === 'string' && english) return english
+  return typeof fields[key] === 'string' ? fields[key] as string : ''
+}
+
+/** 這些功能有沒有被授權擋住。擋住時回傳要顯示的原因，否則回 null。
+ *  `lang` 不傳就是原文（App.tsx 在批 3 之前都這樣呼叫）。 */
+export function licenseBlock(status: LicenseStatus | null, functions: AnsysFunction[],
+  lang: Lang = 'zh-TW'): string | null {
   if (!status) return null
   for (const key of functions) {
     const item = status.functions[key]
-    if (item && item.state === 'unavailable') return item.message
+    if (item && item.state === 'unavailable') return licenseText(item, 'message', lang)
   }
   return null
 }
 
-/** 按鈕旁邊的一行字：需要哪些授權、現在狀況。 */
-export function licenseSummary(status: LicenseStatus | null, functions: AnsysFunction[]): {
+/** 按鈕旁邊的一行字：需要哪些授權、現在狀況。字典由呼叫端傳入（`t.license`）。 */
+export function licenseSummary(status: LicenseStatus | null, functions: AnsysFunction[],
+  t: Messages['license']): {
   text: string
   state: LicenseState | 'loading'
 } {
-  if (!status) return { text: '需要 Ansys 授權（讀取中）', state: 'loading' }
+  if (!status) return { text: t.loading, state: 'loading' }
   const items = functions.map(key => status.functions[key]).filter(Boolean)
   const features = Array.from(new Set(items.flatMap(item => item.required)))
   const state: LicenseState = items.some(item => item.state === 'unavailable') ? 'unavailable'
     : items.some(item => item.state === 'unknown') ? 'unknown' : 'available'
   const counts = features.map(name => {
     const c = status.feature_counts[name]
-    return c && c.free !== null ? `${name}（可用 ${c.free}/${c.issued}）` : name
+    return c && c.free !== null ? t.featureCount(name, c.free, c.issued) : name
   })
-  const lead = state === 'unavailable' ? '授權不足'
-    : state === 'unknown' ? '無法確認授權' : '需要授權'
-  return { text: `${lead}：${counts.join('、')}`, state }
+  const lead = state === 'unavailable' ? t.leadUnavailable
+    : state === 'unknown' ? t.leadUnknown : t.leadRequired
+  return { text: t.summary(lead, counts.join(t.featureSep)), state }
 }
 
 export const LICENSE_COLORS: Record<LicenseState | 'loading', string> = {

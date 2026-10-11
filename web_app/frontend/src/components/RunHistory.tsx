@@ -11,7 +11,12 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import { errorText, pickText } from '../backendFields'
+import { useT } from '../i18n'
+import type { Messages } from '../i18n'
 import { revealPath } from '../revealPath'
+
+type RunHistoryText = Messages['runHistory']
 
 /** 能從紀錄還原回表單的欄位。**不含**沒有把握對得上的東西——
  *  半套還原比不還原更危險，使用者會以為表單已經回到那一版。 */
@@ -51,37 +56,28 @@ const RELATION_STYLE: Record<string, string> = {
   unknown: '',
 }
 
-/** 狀態字串取自 `analysis_runs` 的 `_SUCCESS_STATUS` 與 `_NON_REUSABLE_STATUS`。
+/** 狀態字串取自 `analysis_runs` 的 `_SUCCESS_STATUS` 與 `_NON_REUSABLE_STATUS`
+ *  （顯示文字在語言檔 `runHistory.status`）。
  *  對不到的直接顯示原文——編一個好看的中文會蓋掉真正的狀態。 */
-const STATUS_LABEL: Record<string, string> = {
-  done: '成功',
-  completed: '成功',
-  success: '成功',
-  running: '執行中',
-  reuse_available: '可重用',
-  reused: '沿用先前結果',
-  error: '錯誤',
-  failed: '失敗',
-  cancelled: '取消',
-  aborted: '中止',
-  timeout: '逾時',
-  crashed: '崩潰',
-  partial: '部分輸出',
+function statusLabel(status: string | undefined, tx: RunHistoryText): string {
+  const labels: Record<string, string> = tx.status
+  const key = String(status)
+  return (Object.prototype.hasOwnProperty.call(labels, key) ? labels[key] : '') || status || '—'
 }
 
-function restorableOf(manifest: any): RestorableRun {
+function restorableOf(manifest: any, tx: RunHistoryText): RestorableRun {
   const channel = manifest?.channel || {}
   const binding = manifest?.binding || {}
   const stimulus = manifest?.stimulus || {}
   const unrestored: string[] = []
   // 這幾項紀錄裡有，但填回表單需要重新對照模型庫或重新綁 Port，
   // 這個面板做不到——說出來，不要假裝已經還原。
-  if (binding.ports?.length) unrestored.push('Port 綁定')
-  if (binding.lanes?.length) unrestored.push('道的配對')
-  if (binding.tx?.model || binding.rx?.model) unrestored.push('緩衝器型號')
+  if (binding.ports?.length) unrestored.push(tx.unrestoredPorts)
+  if (binding.lanes?.length) unrestored.push(tx.unrestoredLanes)
+  if (binding.tx?.model || binding.rx?.model) unrestored.push(tx.unrestoredBuffers)
   // `!= null` 而不是 `!== undefined`：種子 0 是合法值要算進來，但 JSON `null`
   // （Python `None`）代表這一輪根本沒種子，講成「有種子還原不了」是假的。
-  if (stimulus.random_seed != null) unrestored.push('亂數種子')
+  if (stimulus.random_seed != null) unrestored.push(tx.unrestoredSeed)
   return {
     touchstonePath: String(channel.source_path || ''),
     txPackageId: String(binding.tx?.package_id || ''),
@@ -96,43 +92,42 @@ function restorableOf(manifest: any): RestorableRun {
 /** 明細列。**依種類給不同的欄位**——把 IBIS 的「資料率／Corner／通道」
  *  套在串接或 TDR 紀錄上會全部顯示「—」，讀起來像資料掉了，
  *  而不是「這一類分析本來就沒有這些欄位」。 */
-function detailLines(run: RunRow): string[] {
+function detailLines(run: RunRow, tx: RunHistoryText): string[] {
   const m = run.manifest || {}
   const kind = run.run_kind || 'ibis_channel'
   if (kind === 'cascade') {
     const c = m.cascade || {}
     const sources = c.sources || []
     return [
-      `來源 ${sources.length} 檔｜接線 ${(c.connections || []).length} 條`
-      + `｜短路群組 ${(c.shorts || []).length} 個`,
+      tx.cascadeSummary(sources.length, (c.connections || []).length, (c.shorts || []).length),
       ...sources.slice(0, 4).map((item: any, i: number) =>
-        `  #${i + 1} ${String(item.path || '').split(/[\\/]/).pop()}`
-        + `（${item.n_ports ?? '?'} 埠）`),
-      sources.length > 4 ? `  …還有 ${sources.length - 4} 個` : '',
-      `輸出 ${m.outputs?.touchstone || '—'}`,
+        tx.cascadeSource(i + 1, String(String(item.path || '').split(/[\\/]/).pop()),
+          item.n_ports ?? '?')),
+      sources.length > 4 ? tx.cascadeMore(sources.length - 4) : '',
+      tx.output(m.outputs?.touchstone || '—'),
     ].filter(Boolean)
   }
   if (kind === 'tdr') {
     const t = m.tdr || {}
-    const source = t.source_kind === 'measured_waveform' ? '示波器量測波形'
-      : t.source_kind === 'touchstone' ? '求解出的 Touchstone' : (t.source_kind || '—')
+    const source = t.source_kind === 'measured_waveform' ? tx.tdrSourceMeasured
+      : t.source_kind === 'touchstone' ? tx.tdrSourceTouchstone : (t.source_kind || '—')
     return [
-      `來源：${source}`,
-      `檔案 ${String(t.source_path || '—').split(/[\\/]/).pop()}`,
-      `等效 Dk ${t.effective_dk ?? '—'}｜上升時間 ${
-        t.rise_time_ps ? Number(t.rise_time_ps).toFixed(2) + ' ps' : '—'}`,
+      tx.tdrSource(source),
+      tx.tdrFile(String(String(t.source_path || '—').split(/[\\/]/).pop())),
+      tx.tdrDkRise(t.effective_dk ?? '—',
+        t.rise_time_ps ? Number(t.rise_time_ps).toFixed(2) + ' ps' : '—'),
       t.t0_ns != null ? `t0 ${t.t0_ns} ns${
-        t.t_end_ns != null ? `｜線尾 ${t.t_end_ns} ns` : ''}` : '',
-      `劇變 ${m.results?.[0]?.discontinuity_count ?? '—'} 處`,
+        t.t_end_ns != null ? tx.tdrLineEnd(t.t_end_ns) : ''}` : '',
+      tx.tdrDiscontinuities(m.results?.[0]?.discontinuity_count ?? '—'),
     ].filter(Boolean)
   }
   // IBIS 通道與多道共用同一個形狀
-  const r = restorableOf(m)
+  const r = restorableOf(m, tx)
   const lanes = m.binding?.multi_lane?.lanes || []
   return [
-    `資料率 ${r.dataRateGbps || '—'} Gbps｜Corner ${r.corner || '—'}`
-    + (lanes.length ? `｜${lanes.length} 道` : ''),
-    `通道 ${r.touchstonePath || '—'}`,
+    tx.ibisRateCorner(r.dataRateGbps || '—', r.corner || '—')
+    + (lanes.length ? tx.ibisLanes(lanes.length) : ''),
+    tx.ibisChannel(r.touchstonePath || '—'),
   ]
 }
 
@@ -150,10 +145,15 @@ export default function RunHistory(
     title?: string
   },
 ) {
+  const { t, lang } = useT()
+  const tx = t.runHistory
   const [runs, setRuns] = useState<RunRow[]>([])
   const [showAll, setShowAll] = useState(false)
-  const [note, setNote] = useState('')
-  const [error, setError] = useState('')
+  // 後端回的說明（note／fingerprint_error，英文介面優先 *_en）留原物件，
+  // 切語言時才換得過去；開資料夾失敗的訊息已照語言產生，另外存。
+  const [listing, setListing] = useState<Record<string, unknown> | null>(null)
+  const [revealNote, setRevealNote] = useState('')
+  const [error, setError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState('')
 
@@ -165,8 +165,10 @@ export default function RunHistory(
   const refresh = useCallback(async () => {
     // IBIS 那條路要有 Touchstone 才比得了指紋；其餘種類讀的是固定位置，
     // 沒有 Touchstone 也該列得出來。
-    if (!kind && !touchstonePath) { setRuns([]); setNote(''); return }
-    setBusy(true); setError('')
+    if (!kind && !touchstonePath) {
+      setRuns([]); setListing(null); setRevealNote(''); return
+    }
+    setBusy(true); setError(null)
     try {
       const res = kind
         ? await fetch('/api/runs', {
@@ -180,11 +182,15 @@ export default function RunHistory(
           }),
         })
       const data = await res.json()
-      if (!res.ok) throw new Error(data?.detail || `HTTP ${res.status}`)
+      if (!res.ok) {
+        throw Object.assign(new Error(data?.detail || `HTTP ${res.status}`),
+          { detail_en: data?.detail_en })
+      }
       setRuns(data.runs || [])
-      setNote(String(data.note || data.fingerprint_error || ''))
+      setListing(data && typeof data === 'object' ? data : null)
+      setRevealNote('')
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : String(exc))
+      setError(exc)
     } finally { setBusy(false) }
   }, [kind, touchstonePath, requestKey])
 
@@ -196,58 +202,62 @@ export default function RunHistory(
   // 這裡就是全部。實測一個輸出位置底下有 104 筆。
   const visible = showAll ? runs : runs.slice(0, PREVIEW_COUNT)
   const hidden = runs.length - visible.length
+  const note = revealNote
+    || pickText(listing, 'note', lang) || pickText(listing, 'fingerprint_error', lang)
 
   return (
     <div className="run-history">
       <div className="run-history__head">
-        <b>{title || '執行歷史'}</b>
+        <b>{title || tx.title}</b>
         <button className="btn" style={{ fontSize: 10, padding: '0 7px' }}
-          onClick={() => void refresh()} disabled={busy}>重新整理</button>
+          onClick={() => void refresh()} disabled={busy}>{tx.refresh}</button>
       </div>
-      {error && <div className="run-history__note">讀不到：{error}</div>}
+      {error != null && (
+        <div className="run-history__note">{tx.readFailed(errorText(error, lang))}</div>
+      )}
       {note && <div className="run-history__note">{note}</div>}
-      {!error && !runs.length && (
-        <div className="run-history__note">這個位置還沒有執行紀錄。</div>
+      {error == null && !runs.length && (
+        <div className="run-history__note">{tx.empty}</div>
       )}
       {visible.map(run => {
-        const restorable = run.readable ? restorableOf(run.manifest) : null
+        const restorable = run.readable ? restorableOf(run.manifest, tx) : null
+        const runError = pickText(run, 'error', lang)
         return (
           <div key={run.run_id}
             className={`run-history__row ${RELATION_STYLE[run.relation] || ''}`}>
             <div className="run-history__line">
               <span>{(run.created_at || '').replace('T', ' ').slice(0, 19) || run.run_id}</span>
-              <span>{STATUS_LABEL[String(run.status)] || run.status || '—'}</span>
+              <span>{statusLabel(run.status, tx)}</span>
             </div>
-            <div className="run-history__relation">{run.relation_label}</div>
-            {run.error && <div className="run-history__note">{run.error}</div>}
+            <div className="run-history__relation">{pickText(run, 'relation_label', lang)}</div>
+            {runError && <div className="run-history__note">{runError}</div>}
             <div className="run-history__actions">
               <button className="btn" style={{ fontSize: 10, padding: '0 7px' }}
                 onClick={() => void (async () => {
                   // `revealPath` 回傳錯誤字串而不是丟例外，丟掉它就變成
                   // 「按了沒反應」——舊後端回 405 的那句提示也一起消失。
-                  const failure = await revealPath(run.run_dir)
+                  const failure = await revealPath(run.run_dir, lang)
                   // 用 note 不用 error：error 前面掛著「讀不到：」的字樣。
-                  if (failure) setNote(failure)
-                })()}>開啟資料夾</button>
+                  if (failure) setRevealNote(failure)
+                })()}>{tx.openFolder}</button>
               {restorable && onRestore && (
                 <button className="btn" style={{ fontSize: 10, padding: '0 7px' }}
-                  onClick={() => onRestore(restorable)}>回到這一版設定</button>
+                  onClick={() => onRestore(restorable)}>{tx.restore}</button>
               )}
               {restorable && (
                 <button className="btn" style={{ fontSize: 10, padding: '0 7px' }}
                   onClick={() => setOpen(open === run.run_id ? '' : run.run_id)}>
-                  {open === run.run_id ? '收合' : '這一版的設定'}
+                  {open === run.run_id ? tx.collapse : tx.showSettings}
                 </button>
               )}
             </div>
             {open === run.run_id && (
               <div className="run-history__detail">
-                {detailLines(run).map((line, index) => (
+                {detailLines(run, tx).map((line, index) => (
                   <div key={index} style={{ wordBreak: 'break-all' }}>{line}</div>
                 ))}
                 {restorable && restorable.unrestored.length > 0 && onRestore && (
-                  <div>還原不了：{restorable.unrestored.join('、')}
-                    ——這幾項要自己重設。</div>
+                  <div>{tx.unrestored(restorable.unrestored.join(tx.listSep))}</div>
                 )}
               </div>
             )}
@@ -257,11 +267,11 @@ export default function RunHistory(
       {hidden > 0 && (
         <button className="btn" style={{ fontSize: 10, marginTop: 6 }}
           onClick={() => setShowAll(true)}>
-          還有 {hidden} 筆較舊的紀錄，全部顯示
+          {tx.showAll(hidden)}
         </button>
       )}
       <div className="run-history__note">
-        「設定不一致」不是求解失敗。還原只填回表單，不刪也不覆寫任何紀錄。
+        {tx.footer}
       </div>
     </div>
   )

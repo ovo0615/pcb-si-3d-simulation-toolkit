@@ -194,6 +194,22 @@ pre {
   margin: 4px 8px;
 }
 
+.menubar__heading {
+  padding: 4px 12px 2px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.menubar__entry--checked {
+  font-weight: 600;
+}
+
+.menubar__entry--checked::before {
+  content: '\2713';
+  margin-left: -4px;
+  margin-right: 6px;
+}
+
 /* ── 檢視分頁（完整 / 裁切後 / N 段分割） ───────────── */
 /* 分頁列會被擠。圖層面板一展開，右側可用寬度就少了兩百多 px，十一個分頁的
    標籤全部折成兩行——「清理對比」變成「清理對／比」、「S 參數」變成
@@ -936,18 +952,22 @@ select.input {
   background: #eef3f9;
 }
 
+.segment-analysis__row--warning td,
 .segment-analysis__row--警告 td {
   background: rgba(255, 183, 77, 0.08);
 }
 
+.segment-analysis__row--warning td:first-child,
 .segment-analysis__row--警告 td:first-child {
   background: #fff8ec;
 }
 
+.segment-analysis__row--blocked td,
 .segment-analysis__row--禁止 td {
   background: rgba(230, 57, 70, 0.07);
 }
 
+.segment-analysis__row--blocked td:first-child,
 .segment-analysis__row--禁止 td:first-child {
   background: #fff1f2;
 }
@@ -1079,6 +1099,7 @@ select.input {
 
 .segment-grade--a,
 .segment-grade--m,
+.segment-state--passed,
 .segment-state--通過 {
   color: #147568;
   background: rgba(42, 157, 143, 0.16);
@@ -1091,12 +1112,14 @@ select.input {
 
 .segment-grade--c,
 .segment-grade--d,
+.segment-state--warning,
 .segment-state--警告 {
   color: #a65311;
   background: rgba(255, 166, 0, 0.2);
 }
 
 .segment-grade--f,
+.segment-state--blocked,
 .segment-state--禁止 {
   color: var(--danger);
   background: var(--danger-soft);
@@ -1300,6 +1323,24 @@ select.input {
 .model-library__card-title { align-self: center; font-size: 14px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-library__card-meta,
 .model-library__card-hash { grid-column: 1 / -1; color: #8da0b5; font-size: 10.5px; }
+/* #0104 SPISim 規格模型：非原廠標記與 C_comp τ/UI */
+.model-library__source-badges { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; }
+.model-library__source-badge { padding: 1px 7px; border-radius: 999px; color: #ffd28a; border: 1px solid rgba(245, 158, 11, .45); background: rgba(245, 158, 11, .1); font-size: 11px; }
+.model-library__ccomp { padding: 1px 7px; border-radius: 999px; font-size: 11px; border: 1px solid #3b4654; color: #b5c1cf; }
+.model-library__ccomp.is-ok { color: #8ef0b6; border-color: rgba(46, 204, 113, .42); }
+.model-library__ccomp.is-warn { color: #ffd28a; border-color: rgba(245, 158, 11, .45); }
+.model-library__ccomp.is-error { color: #ff9b9b; border-color: rgba(230, 57, 70, .45); }
+.model-library__spisim { margin: 8px 0; padding: 9px 11px; display: flex; flex-direction: column; gap: 4px; border: 1px solid rgba(245, 158, 11, .45); border-radius: 8px; background: rgba(245, 158, 11, .08); color: #e6d6b5; font-size: 13px; }
+.model-library__spisim > strong { color: #ffd28a; }
+.model-library__spisim .model-library__ccomp { margin-top: 4px; padding: 7px 9px; display: flex; flex-direction: column; gap: 3px; border-radius: 7px; font-size: 13px; }
+.model-library__spec-modes { display: flex; flex-wrap: wrap; gap: 14px; margin: 6px 0; font-size: 13px; }
+.model-library__spec-modes label { display: inline-flex; align-items: center; gap: 5px; }
+.model-library__spec-modes input { width: auto; }
+.model-library__spec-filter { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; font-size: 12px; }
+.model-library__spec-filter label, .model-library__spec-rate { display: flex; flex-direction: column; gap: 3px; font-size: 12px; margin-top: 6px; }
+.model-library__spec-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.model-library__spec-actions .btn { width: auto; }
+.model-library__hint.is-warning { color: #ffd28a; }
 
 .model-library__state { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; padding: 3px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; }
 .model-library__state--ready { color: #8ef0b6; background: rgba(46, 204, 113, .15); border: 1px solid rgba(46, 204, 113, .35); }
@@ -1325,11 +1366,11 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .model-library__section-heading h4 { margin-bottom: 2px; }
 .model-library__section-heading p { margin: 0; color: #7f92a7; font-size: 10.5px; line-height: 1.4; }
 .model-library__section-heading .btn { width: auto; flex: 0 0 auto; }
-.model-library__issue { margin: 4px 0; padding: 6px 8px; border-radius: 6px; font-size: 11.5px; }
+.model-library__issue { margin: 4px 0; padding: 6px 8px; border-radius: 6px; font-size: 13px; line-height: 1.5; }
 .model-library__issue.is-error { color: #ff9b9b; background: rgba(230, 57, 70, .1); }
 .model-library__issue.is-warning { color: #ffd28a; background: rgba(245, 158, 11, .1); }
 .model-library__table-wrap { overflow: auto; border: 1px solid #293441; border-radius: 7px; }
-.model-library__table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.model-library__table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .model-library__table th,
 .model-library__table td { padding: 7px 8px; text-align: left; border-bottom: 1px solid #27313d; white-space: nowrap; }
 .model-library__table th { color: #9fb0c3; background: #19212b; }
@@ -1362,6 +1403,68 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .ibis-wizard__content section { max-width: 1080px; margin: 0 auto; }
 .ibis-wizard__content h3 { margin: 0 0 5px; color: #e6f1fb; font-size: 20px; }
 .ibis-wizard__content section > p { margin: 0 0 15px; color: #8fa1b5; font-size: 12px; line-height: 1.55; }
+/* 眼圖精靈（#0088）：五步、兩端並排、漏斗逐層、Tx → 通道 → Rx 示意圖。 */
+/* 精靈內層捲動時標題與步驟列固定在上緣，不被切掉一半（畫面驗收 V7）。 */
+.eye-wizard__header { position: sticky; top: 0; z-index: 3; padding: 6px 0 8px; background: #11161d; }
+.eye-wizard__header h3 { margin: 0 0 4px; }
+.eye-wizard__header p { margin: 0 0 4px; }
+.eye-wizard__steps { grid-template-columns: repeat(5, minmax(90px, 1fr)); margin: 8px 0 0; padding: 0; list-style: none; }
+.eye-wizard__steps button { width: 100%; cursor: pointer; font-size: 12px; }
+.eye-wizard section { display: flex; flex-direction: column; gap: 8px; }
+.eye-wizard label { display: flex; flex-direction: column; gap: 3px; }
+.eye-wizard__row { display: flex; gap: 6px; align-items: center; }
+.eye-wizard__sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.eye-wizard__side { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #2b3643; border-radius: 8px; }
+.eye-wizard__side h4 { margin: 0; }
+.eye-wizard__trust { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.eye-wizard__trust > div { display: flex; gap: 6px; align-items: center; }
+.eye-wizard__trust .is-trusted { color: #88d9ad; }
+.eye-wizard__trust .is-pending, .eye-wizard__trust .is-scanned { color: #ffd28a; }
+.eye-wizard__trust .is-scanError { color: #ff9b9b; }
+.eye-wizard__trust .is-notHere { color: #8fa1b5; }
+.eye-wizard__funnel ol { margin: 6px 0; padding-left: 20px; }
+.eye-wizard__funnel li { display: grid; grid-template-columns: 7em 8em minmax(8em, 1fr) 5em; gap: 6px; align-items: center; margin: 3px 0; font-size: 12px; }
+.eye-wizard__funnel li.is-user .eye-wizard__funnel-by { color: #ffd28a; }
+.eye-wizard__funnel li.is-tool .eye-wizard__funnel-by { color: #8fa1b5; }
+.eye-wizard__funnel li em { grid-column: 1 / -1; }
+.eye-wizard__funnel-count { text-align: right; font-weight: 700; }
+.eye-wizard__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.eye-wizard__chips .btn.is-active { border-color: #4eaddd; color: #eaf6ff; background: #173246; }
+.eye-wizard__override { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px dashed #c47a00; border-radius: 6px; }
+.eye-wizard__diagram { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 0; align-items: stretch; margin: 6px 0; }
+.eye-wizard__box, .eye-wizard__wire { display: flex; flex-direction: column; gap: 3px; padding: 10px; font-size: 12px; }
+.eye-wizard__box { border: 1px solid #4eaddd; border-radius: 8px; background: #132433; }
+.eye-wizard__wire { justify-content: center; align-items: center; text-align: center; border-top: 2px solid #4eaddd; border-bottom: 2px solid #4eaddd; margin: 18px 0; }
+.eye-wizard__box em { color: #8fa1b5; }
+.eye-wizard__confirm { flex-direction: row !important; align-items: center; gap: 6px !important; }
+.eye-wizard__confirm.is-stale { color: #ffd28a; }
+.eye-wizard__checklist ul { margin: 4px 0; padding-left: 18px; }
+.eye-wizard__checklist li { margin: 2px 0; }
+.eye-wizard__checklist li .btn--mini { margin-left: 8px; }
+.eye-wizard__reuse { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.eye-wizard__nav { display: flex; justify-content: space-between; gap: 8px; padding-top: 6px; }
+/* 深色面板裡：一般按鈕不要撐滿整列；小按鈕（改用其他模型、到第 N 步）要看得見。 */
+.eye-wizard section > .btn, .eye-wizard__side > .btn, .eye-wizard__override > .btn { width: auto; align-self: flex-start; padding: 6px 14px; }
+.eye-wizard .btn--mini { width: auto; align-self: flex-start; padding: 2px 10px; color: #9fd3f5; border-color: #3b5b74; background: transparent; }
+.eye-wizard .btn--mini:hover { color: #eaf6ff; border-color: #4eaddd; }
+.eye-wizard__nav .btn { width: auto; padding: 6px 18px; }
+/* #0104：快速檢驗、AMI 進階、註記（搬自舊 AMI 面板） */
+.eye-wizard__quick, .eye-wizard__advanced { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid #2b3643; border-radius: 8px; }
+.eye-wizard__quick h4, .eye-wizard__advanced h4 { margin: 4px 0 0; }
+.eye-wizard__advanced > summary { cursor: pointer; color: #b8c7d8; font-weight: 600; }
+/* 按鈕不縮、不換行：輸入框 flex 撐滿時「瀏覽…」會被擠成兩行（#0111 複查截圖 01）。 */
+.eye-wizard__row .btn { width: auto; padding: 6px 14px; white-space: nowrap; flex: 0 0 auto; }
+.eye-wizard label.eye-wizard__inline { flex-direction: row; align-items: center; gap: 6px; }
+.eye-wizard label.eye-wizard__inline input { width: auto; }
+.eye-wizard__notes ul { margin: 4px 0; padding-left: 18px; }
+.eye-wizard tr.is-best td { font-weight: 700; color: #eaf6ff; }
+/* #0104 常見規範預設 */
+.eye-wizard__preset { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid #2f4d63; border-radius: 8px; background: rgba(38, 117, 160, .08); }
+.eye-wizard__preset-info { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: #c5d9eb; }
+.eye-wizard__preset-info .hint { font-size: 13px; }
+.eye-wizard__preset-tag { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 2px 8px; border-radius: 999px; font-size: 12px; color: #9fd3f5; border: 1px solid #3b5b74; }
+.eye-wizard__preset-tag.is-overridden { color: #ffd28a; border-color: rgba(245, 158, 11, .5); }
+.eye-wizard__row > label { flex: 0 1 auto; }
 .ibis-wizard__path-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .ibis-wizard__path-row .btn { width: auto; min-width: 90px; }
 .ibis-wizard__form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
@@ -1439,6 +1542,38 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .ibis-eye-modal__panel > header span { color: #8bdcff; font-size: 11px; text-transform: uppercase; }
 .ibis-eye-modal__panel > img { flex: 1; min-height: 0; width: 100%; object-fit: contain; border-radius: 7px; background: #fff; }
 .ibis-eye-modal__panel > code { overflow: hidden; color: #8295a9; text-align: center; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+/* 結果頁共用畫廊（#0104，EyeImageGallery.tsx）：兩欄 16:9 縮圖，點開燈箱。
+   原圖 1600×900 照原尺寸放會一張佔滿一個畫面；縮圖約 520px 寬，報告快照匯出倍率 3
+   約 1560px，畫質與原圖相當。 */
+.eye-gallery { margin-top: 8px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 1100px; }
+.eye-gallery article { min-width: 0; padding: 10px; border: 1px solid #303d4b; border-radius: 9px; background: #0d131a; }
+.eye-gallery article > header { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.eye-gallery article > header > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.eye-gallery article > header strong { color: #8bdcff; font-size: 14px; overflow-wrap: anywhere; }
+.eye-gallery article > header span { color: #8fa3b8; font-size: 12px; }
+.eye-gallery__thumb { width: 100%; aspect-ratio: 16 / 9; padding: 4px; display: block; overflow: hidden; border: 1px solid #344253; border-radius: 7px; background: #fff; cursor: zoom-in; }
+.eye-gallery__thumb:hover, .eye-gallery__thumb:focus-visible { border-color: #4eaddd; outline: none; box-shadow: 0 0 0 2px rgba(78, 173, 221, .35); }
+.eye-gallery__thumb img { width: 100%; height: 100%; display: block; object-fit: contain; }
+.ibis-eye-modal__panel > header > div:last-child { display: flex; align-items: center; gap: 10px; }
+.ibis-eye-modal__panel > header .btn { width: auto; }
+/* 眼圖量測表：數字要一眼讀得出來，表不必撐滿整個寬度。 */
+.eye-metrics { max-width: 440px; font-size: 14px; }
+/* 第 5 步：寬螢幕量測表在左、眼圖在右（畫面驗收 V5）；窄螢幕回到上下排。 */
+.eye-wizard__results { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
+@media (min-width: 1280px) {
+  .eye-wizard__results { grid-template-columns: minmax(360px, 440px) minmax(0, 1fr); }
+}
+/* AMI 參數表 Tx、Rx 兩張欄寬一致（畫面驗收 V6）。 */
+.eye-wizard__params { table-layout: fixed; width: 100%; }
+.eye-wizard__params th:nth-child(1) { width: 40%; }
+.eye-wizard__params th:nth-child(2) { width: 32%; }
+/* 「從 AEDT 內建規格產生」：summary 一行、內容在下面，不跟匯入列一樣左右排（畫面驗收 V1）。 */
+.model-library__import.model-library__generate { display: block; }
+.eye-metrics td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.eye-metrics th:last-child { text-align: right; }
+@media (max-width: 760px) {
+  .eye-gallery { grid-template-columns: 1fr; }
+}
 .ibis-wizard__footer { display: grid; grid-template-columns: 130px 1fr 180px; align-items: center; gap: 10px; }
 .ibis-wizard__footer span { color: #8294a8; text-align: center; font-size: 11px; }
 
@@ -1562,14 +1697,15 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 /* 多埠通道面板。沿用 IBIS 向導的深色版面，但不分步驟——多道的決定彼此相依
    （道數影響哪些 Port 需要處置、碼型影響涵蓋率），拆成步驟反而看不到全貌。 */
 .multi-lane-wizard { gap: 0; padding: 18px; overflow: auto; border: 1px solid #2b3643; border-radius: 9px; background: #11161d; }
-.multi-lane-wizard section { max-width: 1080px; margin: 0 auto 22px; }
+/* 撐滿精靈寬度；原本 margin auto 在 flex 欄裡把表單縮成中間一條窄欄（畫面驗收 V2）。 */
+.multi-lane-wizard section { width: 100%; max-width: 1080px; margin: 0 0 22px; }
 .multi-lane-wizard h3 { margin: 0 0 6px; color: #e6f1fb; font-size: 18px; }
 .multi-lane-wizard h4 { margin: 12px 0 4px; color: #cfe0f0; font-size: 13px; }
-.multi-lane-wizard label { margin: 0 14px 10px 0; display: inline-flex; flex-direction: column; gap: 4px; color: #9eb0c3; font-size: 11.5px; }
+.multi-lane-wizard label { margin: 0 14px 10px 0; display: inline-flex; flex-direction: column; gap: 4px; color: #9eb0c3; font-size: 13px; }
 .multi-lane-wizard .input { color: #e2edf8; border-color: #344253; background: #0d1117; }
 .multi-lane-wizard .input.is-wide { min-width: 460px; }
-.multi-lane-wizard p { margin: 0 0 8px; color: #b9c8d8; font-size: 12px; line-height: 1.6; }
-.multi-lane-wizard .hint { color: #8fa1b5; font-size: 11.5px; }
+.multi-lane-wizard p { margin: 0 0 8px; color: #b9c8d8; font-size: 13px; line-height: 1.6; }
+.multi-lane-wizard .hint { color: #8fa1b5; font-size: 12.5px; }
 .multi-lane-wizard .error { padding: 8px 11px; color: #ffc9c9; border-left: 3px solid #d05353; border-radius: 5px; background: rgba(190, 60, 60, .14); }
 /* 涵蓋率不足與處置未填都用同一種顯著樣式：它們都是「跑得動但結果會被誤讀」
    的情況，比擋下來更需要看得見。 */
@@ -1948,7 +2084,8 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 /* ── 模型庫與報告：卡片、圖片浮上來 ─────────────────── */
 
 .model-library__card,
-.ibis-eye-gallery article {
+.ibis-eye-gallery article,
+.eye-gallery article {
   animation: rise-in var(--dur-2) var(--ease-out) both;
 }
 
