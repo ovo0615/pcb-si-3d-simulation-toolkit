@@ -1,5 +1,84 @@
 # 版本更新說明
 
+## v1.2.0（草稿，尚未發布）：眼圖精靈、中英介面、SPISim 規格模型
+
+| 項目 | 內容 |
+|---|---|
+| 公開版 | 前端同步到 `fd1ce55`，dist 與完整工具逐檔相同 |
+| 前後端介面版號 | 9（舊版前端是 8，前後端要一起換） |
+| 狀態 | 草稿；尚未建立 tag、尚未發 Release |
+
+### 新功能
+
+| 功能 | 說明 |
+|---|---|
+| [眼圖精靈](docs/manual/06-IBIS與眼圖.md#眼圖精靈五步) | 通道 → 速率 → 兩端晶片 → 接線確認 → 執行，五步做完單通道、多埠／DDR 與 IBIS-AMI；`[Model Selector]` 變體依驅動強度／ODT 篩選 |
+| 常見規範預設 | DDR4／5、LPDDR4／4X／5／5X、PCIe Gen3～6、USB 3.2 Gen1／Gen2、USB4 Gen2／Gen3、UCIe 1.1；只帶資料率、調變、bit 數下限，改過的欄位標「已覆寫」可還原 |
+| [SPISim 規格模型](docs/manual/06-IBIS與眼圖.md#沒有模型從-aedt-內建規格產生spisim) | 沒有原廠模型時，從本機 AEDT 範本產生 IBIS／IBIS-AMI 規格模型；產生前探測授權，自動標「非原廠」並檢查 C_comp τ／UI |
+| [中英介面切換](docs/manual/01-開始使用.md#選單與工作狀態) | 「檢視 → Language／語言」；第一次開啟依 Windows 顯示語言；HTML 報告語言可另選 |
+| 眼圖結果畫廊 | 量測表與兩欄縮圖並排，點開放大，Esc／左右鍵操作 |
+| 多埠預檢提示 | 沒有選通時提示補 DQS 埠與 `[Diff_Pin]`；兩側都像顆粒模型時警告「模型可能選錯了」 |
+| 工具視窗 | 視窗開好後黑色主控台自動隱藏，出錯才出現；新的軟體圖示 |
+
+### 改進
+
+- 標準 IBIS 眼圖電壓量測帶單位（V／mV），讀不到寫「單位未知」。
+- 快速檢驗依兩端模型宣告的調變執行，PAM4 以符號率計算。
+- 打開模型庫不再探測 SPISim、不占授權；按「重新探測」或「產生並匯入」才探測。
+- 秒級預覽與等化掃描的結果過期會標示，且不能套用。
+- 規範出處改為官方來源（PCI-SIG、JEDEC）。
+
+### 修正
+
+- PAM4（例如 PCIe Gen6）曾以兩倍速率求解；資料率一律改為位元率。
+- AMI 眼圖沒有資料時誤判「眼圖閉合」，改判「結果無效」；`Ignore_Bits` 超過模擬位元數時自動加長。
+- 兩個分頁同時產生規格模型時，失敗的一方會刪掉另一方成功的模型；改為整段排隊、只回滾自己新建的。
+- 模型庫「產生規格模型」區塊無法顯示。
+- 多埠預檢把對側腳位湊成選通。
+- Windows 上不再要求信任 Linux `.so`。
+- USB4 v2 預設資料率改為每 lane 40 Gb/s。
+
+### 移除
+
+- 「多埠通道」「AMI 通道」兩個分頁：功能全部移入眼圖精靈，手冊與截圖已改。
+- 練習包附的活動示範設定檔。
+
+### 升級注意
+
+| 變更 | 影響 |
+|---|---|
+| 資料率一律是位元率；PAM4 的 UI＝2／位元率 | 舊 PAM4 紀錄不會被重用；曾把符號率填進資料率欄的（例如 PCIe Gen6 填 32），改填 64。NRZ 不受影響 |
+| 前後端介面版號 8 → 9 | 前端與後端要一起更新；版號不符時依提示用 `start.bat` 重開 |
+| 舊分頁移除 | 依 [06 章](docs/manual/06-IBIS與眼圖.md) 改走眼圖精靈 |
+| 黑色主控台自動隱藏 | 關工具視窗即停止服務 |
+
+### 已知限制
+
+- SPISim 規格模型需要 Ansys Electronics Enterprise 授權；產生的是規格模型，不是原廠模型，不能代替晶片廠模型簽核。商業使用前請先向 Ansys 確認此用法。
+- 沒有授權時，SPISim 回報的錯誤訊息尚未實機驗證。
+- 位址命令（CA）群的結果畫廊尚未實拍驗證；多埠預檢的新提示尚未在 AEDT 實跑驗證。
+- 產生規格模型時模型庫清單會排隊，最壞約 4 分鐘只顯示轉圈。
+- 眼圖精靈第 5 步結果圖待拍（需占用求解授權）；舊分頁的結果截圖已移除。
+- 乾淨 Windows 機器的完整工具包驗收尚未完成。
+- 工具「關於」顯示的版本字串仍是 `1.0.0-rc.1`：公開展示版的 tag 與工具版本分開編號。
+
+### 需要預先安裝
+
+| 項目 | 需求 |
+|---|---|
+| Windows | 64 位元 Windows 10／11 |
+| Ansys Electronics Desktop | 2026 R1（2026.1） |
+| Ansys 授權 | 依功能：HFSS 3D Layout、SIwave、Circuit；SPISim 規格模型另需 Electronics Enterprise |
+| Python | 64 位元 3.10 或 3.12（原生出貨包只收 3.12） |
+| Windows PowerShell | 5.1（`start.bat` 呼叫） |
+| Microsoft Edge WebView2 Runtime | 選用；沒有就改開瀏覽器 |
+| 後端與視窗套件 | 第一次啟動自動安裝（pyedb、pyaedt、fastapi、scikit-rf、Pillow、pywebview 等） |
+| Node.js | 一般使用者不需要；只有修改前端才需要 |
+
+### English summary
+
+v1.2.0 (draft) replaces the separate Multi-lane and AMI tabs with a five-step **Eye Wizard** (channel → rate → buffer models → wiring check → run) covering single-channel, multi-lane/DDR and IBIS-AMI analysis. It adds protocol presets (DDR4/5, LPDDR4/4X/5/5X, PCIe Gen3–6, USB 3.2, USB4, UCIe 1.1), an English/Traditional Chinese UI switch, a result gallery, and SPISim-generated **spec models** for users without vendor models. Data rate is now always the bit rate (PAM4 UI = 2 / bit rate), so earlier PAM4 records are not reused. SPISim spec models require an Ansys Electronics Enterprise licence, are not vendor models, and their commercial use should be confirmed with Ansys first.
+
 ## 2026-10-10：操作說明改版、前端同步到 `a19eda7`
 
 | 項目 | 內容 |
