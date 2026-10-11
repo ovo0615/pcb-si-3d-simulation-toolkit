@@ -14,7 +14,7 @@ Extract and solve a PCB signal channel, cascade its segments, and inspect eye di
 | Endpoint ports, profiles and frequency sweeps | [03](docs/manual/03-Port與求解設定.md) |
 | Whole-board or segmented analysis, HFSS/SIwave assignment | [04](docs/manual/04-分段與混合求解.md) |
 | Scheduling, stopping, export retries and Touchstone cascading | [05](docs/manual/05-排程與串接.md) |
-| Model import, SPISim spec models, Eye Wizard (single, multi-port, AMI) | [06](docs/manual/06-IBIS與眼圖.md) |
+| Model import, spec models (SPISim or toolkit-synthesized), Eye Wizard (single, multi-port, AMI) | [06](docs/manual/06-IBIS與眼圖.md) |
 | Simulated or measured TDR mapped to Layout | [07](docs/manual/07-TDR定位.md) |
 | 2D cross-section impedance and lateral convergence | [08](docs/manual/08-截面阻抗.md) |
 | Snapshots, watermarks and a single-file HTML report | [09](docs/manual/09-報告與輸出.md) |

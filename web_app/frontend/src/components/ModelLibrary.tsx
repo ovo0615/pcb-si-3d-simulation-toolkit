@@ -4,6 +4,7 @@ import EyeWizard from './EyeWizard'
 import { useT, currentLang, messagesFor } from '../i18n'
 import SpisimToolboxPanel from './SpisimToolboxPanel'
 import SerdesCompliancePanel from './SerdesCompliancePanel'
+import SpecSynthPanel from './SpecSynthPanel'
 import { QuickProbeResult, QuickProbeView } from './AmiQuickProbe'
 import { setModelsReportMetadata } from './reportMetadataStore'
 import { LicenseTag, useLicenseBlock } from './LicenseTag'
@@ -11,6 +12,7 @@ import { healthStatusView } from '../healthcheckStatus'
 import { pickText, pickList, errorText } from '../backendFields'
 import {
   filterTemplates, generateSpecBody, licenseUnavailable, localizedNote, specModelInfo, specStandardLabel,
+  spisimFilterForFamily,
 } from '../specModel'
 import type { IbisTemplate, LicenseFailure, TemplateFilter } from '../specModel'
 import type { Lang, Messages } from '../i18n'
@@ -285,11 +287,19 @@ export default function ModelLibrary() {
     }
     finally { if (refresh) setLicenseBusy(false) }
   }
+  // #0116：規範表（同一份給「本工具合成」與 SPISim 範本的「依規範帶入」）。
+  const [specFamilies, setSpecFamilies] = useState<any[]>([])
+  const [tplFamily, setTplFamily] = useState('')
   useEffect(() => {
     void (async () => {
       try {
         setSpecTemplates(await api<any>('/api/models/spec-templates'))
       } catch { /* 沒有範本就不顯示區塊 */ }
+    })()
+    void (async () => {
+      try {
+        setSpecFamilies((await api<any>('/api/models/synth-specs')).families || [])
+      } catch { /* 舊後端沒有規範表：不顯示「依規範帶入」 */ }
     })()
     void loadSpisimLicense(false)
   }, [])
@@ -740,11 +750,20 @@ export default function ModelLibrary() {
         </button>
       </section>
 
-      {/* 手上沒有模型也能開工：AEDT 內建的 SPISim 規格範本一鍵產生
-          （2026-08-29）。素材授權綁 AEDT，只在本機用。 */}
-      {specTemplates && specTemplates.available && (
-        <details className="model-library__import model-library__generate" style={{ padding: '8px 12px' }}>
-          <summary>{t.library.specGenerator}</summary>
+      {/* 手上沒有模型也能開工：兩種方法並列、使用者自己選（#0116，ADR-0069）。
+          左：SPISim 產生（AEDT 內建範本，素材授權綁 AEDT、只在本機用）；
+          右：本工具合成（依規範參數，不用 Ansys 授權）。 */}
+      <details className="model-library__import model-library__generate" style={{ padding: '8px 12px' }}>
+        <summary>{t.library.specGenerator}</summary>
+        <div className="model-library__gen-methods">
+        <div className="model-library__gen-card model-library__gen-card--spisim">
+          <strong className="model-library__gen-title">{t.library.specMethodSpisim}</strong>
+          <p className="model-library__hint">{t.library.specMethodSpisimHint}</p>
+          {/* 實機比對（#0116）：SPISim 規格模型的 Rx 終端不是 POD，DDR5 眼高少約一半。 */}
+          <p className="model-library__hint is-warning">{t.library.specSpisimRxHint}</p>
+          {!(specTemplates && specTemplates.available)
+            ? <p className="model-library__hint is-warning">{t.library.specMethodSpisimUnavailable}</p>
+            : <>
           <div className="model-library__spec-modes">
             {(['ami', 'ibis'] as const).map(mode => (
               <label key={mode}>
@@ -760,7 +779,7 @@ export default function ModelLibrary() {
           {specMode === 'ami' ? (
             <select className="input" value={specStandard} aria-label={t.library.specModeAmi}
               onChange={e => setSpecStandard(e.target.value)}>
-              {specTemplates.standards.map(item => (
+              {specTemplates!.standards.map(item => (
                 <option key={item.name} value={item.name}>
                   {specStandardLabel(item, lang)}{item.pam4 ? t.library.pam4Tag : ''}
                 </option>
@@ -768,6 +787,19 @@ export default function ModelLibrary() {
             </select>
           ) : (
             <div className="model-library__spec-filter">
+              {/* 同一個規範兩種方法都能做時兩邊都給（Jeff 2026-10-11）：依規範表帶入 Vcc 與預設阻抗。 */}
+              {specFamilies.length > 0 && <label>{t.library.specByFamily}
+                <select className="input" value={tplFamily} onChange={e => {
+                  const picked = specFamilies.find(item => item.id === e.target.value)
+                  setTplFamily(e.target.value)
+                  setSpecTemplate('')
+                  if (picked) setTplFilter(prev => ({ ...prev, ...spisimFilterForFamily(picked, prev.kind) }))
+                }}>
+                  <option value="">{t.library.specByFamilyNone}</option>
+                  {specFamilies.filter(item => item.spisim_template_vcc).map(item => (
+                    <option key={item.id} value={item.id}>{lang === 'en' ? item.label_en : item.label}</option>))}
+                </select>
+              </label>}
               <label>{t.library.specKind}
                 <select className="input" value={tplFilter.kind}
                   onChange={e => { setTplFilter(prev => ({ ...prev, kind: e.target.value })); setSpecTemplate('') }}>
@@ -829,8 +861,11 @@ export default function ModelLibrary() {
           {pickText(specTemplates, 'route_note', lang) && <p className="model-library__hint">
             {pickText(specTemplates, 'route_note', lang)}</p>}
           {specMsg && <div className="model-library__notice" style={{ whiteSpace: 'pre-line' }}>{specMsg(t, lang)}</div>}
-        </details>
-      )}
+          </>}
+        </div>
+        <SpecSynthPanel request={api} errorOf={apiErrorText} disabled={busy} onImported={refresh} />
+        </div>
+      </details>
 
       {/* 量測→IBIS 建模（B4）：客戶只有示波器／SMU 量測時的路。 */}
       <details className="model-library__import" style={{ padding: '8px 12px' }}>
@@ -987,10 +1022,12 @@ export default function ModelLibrary() {
               <span className="model-library__card-hash">{t.library.hashLabel}{shortHash(item.package_sha256)}</span>
               {(() => {
                 // #0104：SPISim 產生的規格模型 [Manufacturer] 寫 ANSYS，清單上就要看得出不是原廠。
+                // #0116：本工具合成的另一種顏色、另一句話，和 SPISim 產生的分得開。
                 const info = specModelInfo(item, lang)
-                if (!info?.spisim) return null
+                if (!info?.spisim && !info?.synth) return null
                 return <span className="model-library__source-badges">
-                  <span className="model-library__source-badge">{t.library.spisimBadgeShort}</span>
+                  <span className={'model-library__source-badge' + (info.synth ? ' is-synth' : '')}>
+                    {info.synth ? t.library.synthBadgeShort : t.library.spisimBadgeShort}</span>
                   {info.ccomp && <span className={`model-library__ccomp is-${info.ccomp.level}`}>
                     C_comp {t.library.ccompLevel[info.ccomp.level]}</span>}
                 </span>
@@ -1026,11 +1063,32 @@ export default function ModelLibrary() {
             </div>
 
             {/* #0104：SPISim 產生的規格模型，非原廠；C_comp 是佔位值，τ/UI 用產生時的資料率算。 */}
-            {selectedSpec?.spisim && (
-              <div className="model-library__spisim">
-                <strong>{t.library.spisimBadge}</strong>
+            {/* #0116：本工具合成的規格模型，非原廠、非 SPISim；參數逐項附出處。 */}
+            {(selectedSpec?.spisim || selectedSpec?.synth) && (
+              <div className={'model-library__spisim' + (selectedSpec.synth ? ' is-synth' : '')}>
+                <strong>{selectedSpec.synth ? t.library.synthBadge : t.library.spisimBadge}</strong>
                 {selectedSpec.originNote && <span>{selectedSpec.originNote}</span>}
-                <span>{t.library.spisimMeta(selectedSpec.template, selectedSpec.aedtVersion)}</span>
+                <span>{selectedSpec.synth
+                  ? t.library.synthMeta(selectedSpec.familyLabel, selectedSpec.role.toUpperCase(),
+                    String(selected?.source_classification?.spec_table_version || ''))
+                  : t.library.spisimMeta(selectedSpec.template, selectedSpec.aedtVersion)}</span>
+                {selectedSpec.noDfe && <span className="is-warning">{t.library.synthNoDfe}</span>}
+                {selectedSpec.synth && selectedSpec.parameters.length > 0 && (
+                  <details className="model-library__synth-params">
+                    <summary>{t.library.synthParamsTitle}</summary>
+                    <table className="model-library__table">
+                      <thead><tr><th>{t.library.synthColParam}</th><th>{t.library.synthColValue}</th>
+                        <th>{t.library.synthColSource}</th></tr></thead>
+                      <tbody>{selectedSpec.parameters.map(row => (
+                        <tr key={row.key}>
+                          <td>{t.library.synthParamNames[row.key] || row.key}</td>
+                          <td>{row.value}</td>
+                          <td>{row.status === 'user' ? t.library.synthUser : row.source || t.library.synthUnconfirmed}</td>
+                        </tr>))}
+                      </tbody>
+                    </table>
+                  </details>
+                )}
                 {selectedSpec.ccomp && (
                   <div className={`model-library__ccomp is-${selectedSpec.ccomp.level}`}>
                     <strong>{t.library.ccompTitle}{t.apiError.fieldSep}{t.library.ccompLevel[selectedSpec.ccomp.level]}</strong>
@@ -1043,7 +1101,7 @@ export default function ModelLibrary() {
                       : t.library.ccompSummary(selectedSpec.ccomp.cpf, selectedSpec.ccomp.tau,
                         selectedSpec.ccomp.ratio, selectedSpec.ccomp.rate)}</span>
                     {selectedSpec.ccomp.note && <span>{selectedSpec.ccomp.note}</span>}
-                    <span>{t.library.ccompPlaceholder}</span>
+                    <span>{selectedSpec.synth ? t.library.synthCcompNote : t.library.ccompPlaceholder}</span>
                   </div>
                 )}
               </div>

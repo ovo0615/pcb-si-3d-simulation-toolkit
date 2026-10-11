@@ -12,6 +12,7 @@ import {
 import type { ReportQuality, SnapshotStatus } from '../reportTypes'
 import { isSnapshotSafeNode, sanitizeReportMetadata, sanitizeReportText } from '../reportPrivacy'
 import { collectReportTables } from '../reportTables'
+import { resolveReportMetadata, type ReportMetadataSource } from './reportMetadataStore'
 
 interface Props {
   basePath: string
@@ -21,7 +22,8 @@ interface Props {
   title: string
   section: string
   sourceRevision?: string
-  sourceMetadata?: Record<string, unknown>
+  /** 函式在按下快照時才呼叫：結果元件寫進 store 的數字才不會是舊值（#0116）。 */
+  sourceMetadata?: ReportMetadataSource
   onSaved?: (workspace: string) => void
 }
 
@@ -105,7 +107,7 @@ export default function ReportSnapshotButton({
         engineering_status: status,
         section,
         source_revision: sourceRevision,
-        source_metadata: sanitizeReportMetadata({ ...sourceMetadata, quality: SNAPSHOT_QUALITY }),
+        source_metadata: sanitizeReportMetadata({ ...resolveReportMetadata(sourceMetadata), quality: SNAPSHOT_QUALITY }),
         // 截圖拍不到的量測表（眼圖參數抽屜，#0115）以文字一起送，報告印在這張圖下。
         tables: collectReportTables(target, s.tableColumns),
       }
