@@ -10,6 +10,7 @@ import type { Lang, Messages } from '../i18n'
 import { pickList, pickText } from '../backendFields'
 import { generateSynthBody, specModelInfo, synthMissingInputs } from '../specModel'
 import type { SynthForm, SynthRoleChoice } from '../specModel'
+import BetaBadge from './BetaBadge'
 
 type AnyRecord = Record<string, any>
 type Notice = (t: Messages, lang: Lang) => string
@@ -46,7 +47,12 @@ export default function SpecSynthPanel({ request, errorOf, disabled, onImported 
   const family = useMemo(() => specs?.families?.find((item: AnyRecord) => item.id === form.family) || null,
     [specs, form.family])
   const missing = synthMissingInputs(family, form)
-  const paramName = (key: string) => t.synthParamNames[key] || key
+  // 差動 SerDes（#0116 第二輪）：沒有 DDR 的斜率捷徑；C_comp 捷徑對應 pad 電容。
+  const isSerdes = family?.kind === 'serdes'
+  const ccompKey = isSerdes ? 'c_pad_pf' : 'c_io_pf'
+  // SerDes 的容差是每腳阻抗的容差，不叫 Ron／ODT。
+  const paramName = (key: string) =>
+    (family?.kind === 'serdes' && t.synthParamNames[`${key}_serdes`]) || t.synthParamNames[key] || key
 
   if (!specs?.families?.length) return null
 
@@ -83,11 +89,11 @@ export default function SpecSynthPanel({ request, errorOf, disabled, onImported 
 
   return (
     <div className="model-library__gen-card model-library__gen-card--synth">
-      <strong className="model-library__gen-title">{t.specMethodSynth}</strong>
+      <strong className="model-library__gen-title">{t.specMethodSynth}<BetaBadge feature="B13" /></strong>
       <p className="model-library__hint">{t.specMethodSynthHint}</p>
       <div className="model-library__spec-filter">
         <label>{t.synthFamily}
-          <select className="input" value={form.family} onChange={e => setForm(prev => ({ ...prev, family: e.target.value, overrides: {} }))}>
+          <select className="input" value={form.family} onChange={e => setForm(prev => ({ ...prev, family: e.target.value, overrides: {}, slewMin: '', slewMax: '' }))}>
             {specs.families.map((item: AnyRecord) => (
               <option key={item.id} value={item.id}>
                 {t.synthFamilyOption(lang === 'en' ? item.label_en : item.label, item.io_standard || '')}
@@ -105,11 +111,11 @@ export default function SpecSynthPanel({ request, errorOf, disabled, onImported 
           <input className="input" type="number" min="0" step="0.1" value={form.rate}
             placeholder={family?.preset_rate_gbps ? String(family.preset_rate_gbps) : ''} onChange={set('rate')} />
         </label>
-        <label className={missing.includes('c_io_pf') ? 'is-missing' : ''}>{t.synthCcomp}
+        <label className={missing.includes(ccompKey) ? 'is-missing' : ''}>{t.synthCcomp}
           <input className="input" type="number" min="0" step="0.05" value={form.ccomp}
-            placeholder={placeholder('c_io_pf')} onChange={set('ccomp')} />
+            placeholder={placeholder(ccompKey)} onChange={set('ccomp')} />
         </label>
-        {form.roles !== 'rx' && <>
+        {form.roles !== 'rx' && !isSerdes && <>
           <label className={missing.includes('slew_v_per_ns') ? 'is-missing' : ''}>{t.synthSlewMin}
             <input className="input" type="number" min="0" step="0.5" value={form.slewMin}
               placeholder={placeholder('slew_v_per_ns')} onChange={set('slewMin')} />
@@ -121,14 +127,17 @@ export default function SpecSynthPanel({ request, errorOf, disabled, onImported 
         </>}
       </div>
       {family && <p className="model-library__hint">
-        {t.synthModels(listText(params.ron_options?.value), listText(params.odt_options?.value))}</p>}
+        {isSerdes ? t.synthSerdesModels(listText(params.r_se_ohm?.value))
+          : t.synthModels(listText(params.ron_options?.value), listText(params.odt_options?.value))}</p>}
       {family?.no_dfe_rx && form.roles !== 'tx' && <p className="model-library__hint is-warning">{t.synthNoDfe}</p>}
+      {family?.no_eq && <p className="model-library__hint is-warning">{t.synthNoEq}</p>}
       {family?.spisim_template_vcc && <p className="model-library__hint">
         {t.synthAlsoSpisim(String(family.spisim_template_vcc))}</p>}
       {missing.length > 0 && <p className="model-library__hint is-warning">
         {t.synthMissing(missing.map(paramName).join(t.listSeparator))}</p>}
       {family && <details className="model-library__synth-params" open={missing.length > 0}>
-        <summary>{family.jedec_doc ? t.synthParamsTitleDoc(family.jedec_doc) : t.synthParamsTitle}</summary>
+        <summary>{!family.jedec_doc ? t.synthParamsTitle
+          : isSerdes ? t.synthParamsTitleSerdes(family.jedec_doc) : t.synthParamsTitleDoc(family.jedec_doc)}</summary>
         <table className="model-library__table">
           <thead><tr><th>{t.synthColParam}</th><th>{t.synthColValue}</th><th>{t.synthColSource}</th></tr></thead>
           <tbody>{Object.entries(params).map(([key, item]: [string, AnyRecord]) => (

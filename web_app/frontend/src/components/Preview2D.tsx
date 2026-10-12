@@ -3,6 +3,9 @@
 //   Layers 欄位由左至右：Fill/Unfill All、Show/Hide All、Planes、Traces、Pads、Vias、Circuit Elements
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useT } from '../i18n'
+import {
+  forbiddenIntervalRects, segmentOverlayLayers, type ForbiddenInterval,
+} from '../segmentOverlay'
 
 export interface PreviewData {
   layers: Record<string, any[]>
@@ -40,14 +43,19 @@ export interface SegmentCutsInfo {
     feature_count: number
   }[]
   valids?: boolean[]
+  /** 不分割（卡 0121）：整塊板一個區域，沒有切面線；求解器取 region_solvers[0]。 */
+  whole_board?: boolean
   region_solvers?: ('hfss' | 'siwave')[]
   region_scores?: number[]
   ideal_positions_mm?: number[]
+  /** 切點診斷（本次 N）：理想等分位置附近被硬擋的候選，隨 N 改變。 */
   rejected_candidates?: {
     position_mm: number
     hard_blocked: boolean
     reasons: string[]
   }[]
+  /** 板子禁切區間（#0130）：沿切割軸所有硬擋取樣面合併而成，與 N 無關。 */
+  forbidden_intervals?: ForbiddenInterval[]
   safety_overlay?: {
     items: {
       kind: string
@@ -125,10 +133,15 @@ interface Preview2DProps {
   expansionMm?: number      // 裁切擴張距離預覽（mm）
   extentType?: string       // 'ConvexHull' | 'Bounding' — 裁切形狀
   segmentCuts?: SegmentCutsInfo | null  // 功能2：N 段分割切割線
-  showSegmentSafetyOverlay?: boolean // 功能2：是否顯示禁切區與被拒絕候選
+  showSegmentSafetyOverlay?: boolean // 板子禁切／風險層：禁切區間、硬擋框、斜走線（與 N 無關）
   onSegmentSafetyOverlayChange?: (visible: boolean) => void
+  showSegmentCutDiagnostics?: boolean // 切點診斷層：被拒絕候選、理想等分位置（本次 N）
+  onSegmentCutDiagnosticsChange?: (visible: boolean) => void
   showSolverRegionOverlay?: boolean // 混合求解：是否顯示每段 HFSS／SIwave 色塊
   onSolverRegionOverlayChange?: (visible: boolean) => void
+  /** 禁切區／求解區域兩顆切換鈕的起始高度（px）。外層在同一個角落另外疊了
+   *  分段選擇列（整體視圖／第 N 段）時要往下讓，否則兩排按鈕疊在一起。 */
+  overlayToggleTop?: number
   onSegmentRegionClick?: (zeroBasedIndex: number) => void
   /** 依複雜度分段：使用者把某把刀拖到新位置後回報（放開滑鼠才觸發一次）。
    *  給了這個 callback 才開放拖曳。 */
@@ -214,7 +227,10 @@ export default function Preview2D({
   segmentCuts = null,
   showSegmentSafetyOverlay = true,
   onSegmentSafetyOverlayChange,
+  showSegmentCutDiagnostics = true,
+  onSegmentCutDiagnosticsChange,
   showSolverRegionOverlay = true,
+  overlayToggleTop = 38,
   onSolverRegionOverlayChange,
   onSegmentRegionClick,
   onCutDrag,
@@ -683,6 +699,7 @@ export default function Preview2D({
     // 但複雜區與分段矩形還在——那正是「為什麼刀下不去」的唯一圖示，
     // 偏偏就在這個情況下整組疊圖消失，畫面只剩一塊乾淨的板子。
     if (segmentCuts && (segmentCuts.positions_mm.length > 0
+      || segmentCuts.whole_board
       || segmentCuts.cuts?.length
       || segmentCuts.segment_boxes?.length
       || segmentCuts.complexity_regions?.length)) {
@@ -755,6 +772,32 @@ export default function Preview2D({
         })
       }
 
+      // 板子禁切區間（#0130）：斜線填色，畫在板子層最底下，硬擋框與斜走線疊在
+      // 它上面才不會被蓋住。區間與 N 無關，取代原本隨 N 移動的 250 條紅色虛線。
+      if (showSegmentSafetyOverlay && segmentCuts.forbidden_intervals?.length) {
+        forbiddenIntervalRects(
+          segmentCuts.forbidden_intervals, segmentCuts.direction, contentBounds,
+        ).forEach(([x, y, w, h]) => {
+          ctx.save()
+          ctx.fillStyle = 'rgba(255, 55, 75, 0.10)'
+          ctx.fillRect(x, y, w, h)
+          ctx.beginPath()
+          ctx.rect(x, y, w, h)
+          ctx.clip()
+          // 放大很多時每格斜線的 mm 間距會很小，限制條數免得一次畫上萬條。
+          const gap = Math.max(px2(7), (w + h) / 2000)
+          ctx.strokeStyle = 'rgba(255, 82, 82, 0.42)'
+          ctx.lineWidth = px2(1)
+          ctx.beginPath()
+          for (let d = -h; d < w; d += gap) {
+            ctx.moveTo(x + d, y)
+            ctx.lineTo(x + d + h, y + h)
+          }
+          ctx.stroke()
+          ctx.restore()
+        })
+      }
+
       if (showSegmentSafetyOverlay && segmentCuts.safety_overlay) {
         segmentCuts.safety_overlay.items.forEach(item => {
           if (item.kind === 'angled_trace' && item.points_mm && item.points_mm.length >= 2) {
@@ -787,40 +830,44 @@ export default function Preview2D({
           ctx.fillRect(x, y, width, height)
           ctx.strokeRect(x, y, width, height)
         })
+      }
 
-        ctx.lineWidth = px2(1)
-        ctx.setLineDash([px2(3), px2(5)])
-        ctx.strokeStyle = 'rgba(255, 82, 82, 0.22)'
+      if (showSegmentCutDiagnostics) {
+        // 切點診斷（本次 N）：理想位置附近被硬擋的候選，只在板子上下緣畫短刻度。
+        // 原本每條貫穿整片板，250 條疊起來就像一塊會跟著 N 搬家的禁切區。
+        const tick = px2(14)
+        ctx.lineWidth = px2(1.2)
+        ctx.strokeStyle = 'rgba(255, 82, 82, 0.75)'
+        ctx.beginPath()
         ;(segmentCuts.rejected_candidates || []).forEach(candidate => {
+          const p = candidate.position_mm
+          if (axis === 0) {
+            ctx.moveTo(p, contentBounds.min[1]); ctx.lineTo(p, contentBounds.min[1] + tick)
+            ctx.moveTo(p, contentBounds.max[1]); ctx.lineTo(p, contentBounds.max[1] - tick)
+          } else {
+            ctx.moveTo(contentBounds.min[0], p); ctx.lineTo(contentBounds.min[0] + tick, p)
+            ctx.moveTo(contentBounds.max[0], p); ctx.lineTo(contentBounds.max[0] - tick, p)
+          }
+        })
+        ctx.stroke()
+
+        // 灰色虛線＝未考慮障礙時的理想等分位置。
+        ctx.strokeStyle = 'rgba(180, 190, 204, 0.58)'
+        ctx.lineWidth = px2(1.1)
+        ctx.setLineDash([px2(5), px2(5)])
+        ;(segmentCuts.ideal_positions_mm || []).forEach(position => {
           ctx.beginPath()
           if (axis === 0) {
-            ctx.moveTo(candidate.position_mm, contentBounds.min[1])
-            ctx.lineTo(candidate.position_mm, contentBounds.max[1])
+            ctx.moveTo(position, contentBounds.min[1])
+            ctx.lineTo(position, contentBounds.max[1])
           } else {
-            ctx.moveTo(contentBounds.min[0], candidate.position_mm)
-            ctx.lineTo(contentBounds.max[0], candidate.position_mm)
+            ctx.moveTo(contentBounds.min[0], position)
+            ctx.lineTo(contentBounds.max[0], position)
           }
           ctx.stroke()
         })
         ctx.setLineDash([])
       }
-
-      // 灰色虛線＝未考慮障礙時的理想等分位置。
-      ctx.strokeStyle = 'rgba(180, 190, 204, 0.58)'
-      ctx.lineWidth = px2(1.1)
-      ctx.setLineDash([px2(5), px2(5)])
-      ;(segmentCuts.ideal_positions_mm || []).forEach(position => {
-        ctx.beginPath()
-        if (axis === 0) {
-          ctx.moveTo(position, contentBounds.min[1])
-          ctx.lineTo(position, contentBounds.max[1])
-        } else {
-          ctx.moveTo(contentBounds.min[0], position)
-          ctx.lineTo(contentBounds.max[0], position)
-        }
-        ctx.stroke()
-      })
-      ctx.setLineDash([])
 
       // 3D 複雜區：橘色虛線框，標出「為什麼刀下在這裡」
       ;(segmentCuts.complexity_regions || []).forEach(region => {
@@ -913,7 +960,10 @@ export default function Preview2D({
         // 截面切線與外框比對都不畫。實際上只是「矩形分段已經標好了，不必再
         // 標帶狀分段」——跳過這一段就好，不要順手把其他疊圖一起帶走。
         // 一刀都沒有時整片板子就是「第 1 段」，標一個 S1 只是雜訊。
-        const edges = segmentCuts.positions_mm.length ? regionEdges : []
+        // 例外是整片求解：那一塊就是要送去求解的整片，標出求解器才看得出
+        // 它跟著表格的「指定」走（卡 0121）。
+        const edges = segmentCuts.positions_mm.length || segmentCuts.whole_board
+          ? regionEdges : []
         for (let index = 0; index + 1 < edges.length; index++) {
           const center = (edges[index] + edges[index + 1]) / 2
           const labelX = axis === 0 ? center : contentBounds.max[0]
@@ -932,7 +982,8 @@ export default function Preview2D({
           const suffix = regionSolver
             ? ` ${regionSolver.toUpperCase()}${Number.isFinite(regionScore) ? ` · ${regionScore}` : ''}`
             : ''
-          ctx.fillText(`S${index + 1}${suffix}`, -8, -8)
+          ctx.fillText(
+            `${segmentCuts.whole_board ? tp.wholeBoardRegion : `S${index + 1}`}${suffix}`, -8, -8)
           ctx.restore()
         }
       }
@@ -1094,7 +1145,7 @@ export default function Preview2D({
       }
     }
   // tp：畫布上的字（上面的預估外框標籤）跟著語言，切換語言時要重畫。
-  }, [tp, data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, segmentCuts, draggingCut, showSegmentSafetyOverlay, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, tdrMarkers, crossSectionRegion, crossSectionCut, drawingRegion, getLayerColor, getStackupLayers, computeContentBounds])
+  }, [tp, data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, segmentCuts, draggingCut, showSegmentSafetyOverlay, showSegmentCutDiagnostics, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, tdrMarkers, crossSectionRegion, crossSectionCut, drawingRegion, getLayerColor, getStackupLayers, computeContentBounds])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
@@ -1306,6 +1357,16 @@ export default function Preview2D({
     const screenY = e.clientY - canvasRect.top
     const worldX = (screenX - transform.x) / transform.scale
     const worldY = (canvasRect.height + transform.y - screenY) / transform.scale
+    // 每段是矩形（依複雜度分段、載入的檔案）時直接比對矩形：混合軸向的刀
+    // 不能用單一軸的帶狀去換算是第幾段（卡 0121）。
+    if (segmentCuts.segment_boxes?.length) {
+      const hit = segmentCuts.segment_boxes.findIndex(({ bounds_mm: [x0, y0, x1, y1] }) => (
+        worldX >= Math.min(x0, x1) && worldX <= Math.max(x0, x1)
+        && worldY >= Math.min(y0, y1) && worldY <= Math.max(y0, y1)
+      ))
+      if (hit >= 0) onSegmentRegionClick(hit)
+      return
+    }
     const bounds = computeContentBounds() || data.bounds
     const axis = segmentCuts.direction === 'x' ? 0 : 1
     const coordinate = axis === 0 ? worldX : worldY
@@ -1418,7 +1479,11 @@ export default function Preview2D({
 
   // ─────────────────────────────────────────────────────────
   const hasPanel = !!(layerPanelEnabled && data && data.layers && Object.keys(data.layers).length > 0)
-
+  // 分段疊圖兩顆開關（#0130）：板子禁切／風險、切點診斷，各自有東西可畫才出現。
+  const overlayLayers = segmentCuts
+    ? segmentOverlayLayers(segmentCuts) : { board: false, diagnostics: false }
+  const showBoardToggle = overlayLayers.board && !!onSegmentSafetyOverlayChange
+  const showDiagnosticsToggle = overlayLayers.diagnostics && !!onSegmentCutDiagnosticsChange
 
   return (
     // 外層：flex 橫排，讓畫布和面板並排，互不遮擋
@@ -1477,9 +1542,9 @@ export default function Preview2D({
           </div>
         )}
 
-        {segmentCuts?.safety_overlay && onSegmentSafetyOverlayChange && (
+        {showBoardToggle && (
           <div
-            style={{ position: 'absolute', left: 16, top: 38, zIndex: 20 }}
+            style={{ position: 'absolute', left: 16, top: overlayToggleTop, zIndex: 20 }}
             onMouseDown={event => event.stopPropagation()}
           >
             <button
@@ -1491,10 +1556,36 @@ export default function Preview2D({
                 : tp.safetyOverlayShowTip}
               onClick={event => {
                 event.stopPropagation()
-                onSegmentSafetyOverlayChange(!showSegmentSafetyOverlay)
+                onSegmentSafetyOverlayChange?.(!showSegmentSafetyOverlay)
               }}
             >
               {tp.safetyOverlay(showSegmentSafetyOverlay)}
+            </button>
+          </div>
+        )}
+
+        {showDiagnosticsToggle && (
+          <div
+            style={{
+              position: 'absolute', left: 16,
+              top: overlayToggleTop + (showBoardToggle ? 38 : 0),
+              zIndex: 20,
+            }}
+            onMouseDown={event => event.stopPropagation()}
+          >
+            <button
+              className={'boundary-fill-toggle' + (showSegmentCutDiagnostics ? ' boundary-fill-toggle--active' : '')}
+              type="button"
+              aria-pressed={showSegmentCutDiagnostics}
+              title={showSegmentCutDiagnostics
+                ? tp.cutDiagnosticsOverlayHideTip
+                : tp.cutDiagnosticsOverlayShowTip}
+              onClick={event => {
+                event.stopPropagation()
+                onSegmentCutDiagnosticsChange?.(!showSegmentCutDiagnostics)
+              }}
+            >
+              {tp.cutDiagnosticsOverlay(showSegmentCutDiagnostics)}
             </button>
           </div>
         )}
@@ -1505,7 +1596,8 @@ export default function Preview2D({
           <div
             style={{
               position: 'absolute', left: 16,
-              top: segmentCuts?.safety_overlay ? 76 : 38,
+              top: overlayToggleTop
+                + (showBoardToggle ? 38 : 0) + (showDiagnosticsToggle ? 38 : 0),
               zIndex: 20,
             }}
             onMouseDown={event => event.stopPropagation()}

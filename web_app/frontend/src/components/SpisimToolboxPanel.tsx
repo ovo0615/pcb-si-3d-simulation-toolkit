@@ -10,6 +10,7 @@ import { LicenseTag, useLicenseBlock } from './LicenseTag'
 import { revealPath, commonFolderOf } from '../revealPath'
 import { useT } from '../i18n'
 import { errorText, pickText } from '../backendFields'
+import BetaBadge from './BetaBadge'
 
 interface ToolboxOperation { name: string; description: string; description_en?: string }
 interface BatchStatus {
@@ -412,7 +413,7 @@ export default function SpisimToolboxPanel({ active = true }: { active?: boolean
   return (
     <div className="ibis-wizard">
       <section>
-        <h3>{t.toolboxTitle}</h3>
+        <h3>{t.toolboxTitle}<BetaBadge feature="B15" /></h3>
         <p className="hint">{t.toolboxHint}</p>
         <label>{t.sourceLabel}
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -481,7 +482,7 @@ export default function SpisimToolboxPanel({ active = true }: { active?: boolean
 
       {comStandards.length > 0 && (
         <section>
-          <h3>{t.comTitle}</h3>
+          <h3>{t.comTitle}<BetaBadge feature="B16" /></h3>
           <p className="hint">{t.comHintClause}</p>
           <p className="hint">{t.comHintStandards(comStandards.length)}</p>
           <p className="hint">{t.comHintPorts}</p>

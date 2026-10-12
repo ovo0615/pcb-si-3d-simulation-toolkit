@@ -1238,10 +1238,14 @@ select.input {
 [hidden] { display: none !important; }
 
 /* ── IBIS／IBIS-AMI 本機模型庫 ────────────────────────────── */
+/* 容器本身要能直向捲動（#0116 第二輪）：上方的匯入列與「產生規格模型」「量測建模」
+   兩個摺疊區展開後可能比視窗高，原本的 overflow: hidden 會把超出的部分直接裁掉、
+   捲不到。下方清單／詳細資料區與精靈仍各自內捲，平常不會出現外層捲軸。 */
 .model-library {
   height: 100%;
   padding: 16px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1284,9 +1288,10 @@ select.input {
 .model-library__notice { padding: 7px 10px; border-radius: 7px; color: #9ff0c4; background: rgba(39, 174, 96, .12); border: 1px solid rgba(71, 207, 128, .3); font-size: 12px; }
 .model-library__notice--error { color: #ff9b9b; background: rgba(230, 57, 70, .12); border-color: rgba(255, 90, 100, .35); white-space: pre-line; }
 
+/* 保底高度：摺疊區展開時外層改成捲動，這一區不能被擠成 0。 */
 .model-library__body {
   flex: 1;
-  min-height: 0;
+  min-height: 360px;
   display: grid;
   grid-template-columns: minmax(240px, 31%) minmax(0, 1fr);
   gap: 10px;
@@ -1386,7 +1391,8 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 
 /* ── 標準 IBIS 點對點通道七步向導 ─────────────────────────── */
 /* `overflow-y: auto` 是這裡的必要條件，不是選配：父層 `.model-library` 是
-   `overflow: hidden` 的 flex 直排，本層拿 `flex: 1` 吃掉剩餘高度。少了它，
+   固定高度的 flex 直排（原本 `overflow: hidden`，#0116 第二輪改成外層也能捲，
+   但精靈仍要自己內捲），本層拿 `flex: 1` 吃掉剩餘高度。少了它，
    超出的內容不會長出捲軸、也捲不到，而是**直接被父層裁掉且無法到達**——
    沒有任何錯誤，畫面看起來只是「下面沒東西了」。`min-height: 0` 本來就是
    為了讓這層能內捲才加的，先前只有 `.multi-lane-wizard` 變體補上了 overflow，

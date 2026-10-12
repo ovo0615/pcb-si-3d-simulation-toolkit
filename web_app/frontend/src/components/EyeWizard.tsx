@@ -31,6 +31,7 @@ import {
 } from '../eyeWizard'
 import type { Funnel, PortMap, QuickCheckMark, WizardLane } from '../eyeWizard'
 import { useT } from '../i18n'
+import BetaBadge from './BetaBadge'
 
 type Side = 'tx' | 'rx'
 
@@ -880,6 +881,7 @@ export default function EyeWizard(
             && <p className="warning">{t.lowConfidence}</p>}
 
           <label>{t.analysisRoute}
+            {runEngine === 'ami' ? <BetaBadge feature="B10" /> : <BetaBadge feature="B08" />}
             <select className="input" value={route} onChange={e => setAnalysisRoute(e.target.value)}>
               {analysisRoutes(runEngine).map(code => (
                 <option key={code} value={code}>

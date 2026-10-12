@@ -15,6 +15,8 @@ import { errorText, pickText } from '../backendFields'
 import { useT } from '../i18n'
 import type { Messages } from '../i18n'
 import { revealPath } from '../revealPath'
+import { describeRecordedTier, featureName } from '../featureTiers'
+import BetaBadge from './BetaBadge'
 
 type RunHistoryText = Messages['runHistory']
 
@@ -147,6 +149,7 @@ export default function RunHistory(
 ) {
   const { t, lang } = useT()
   const tx = t.runHistory
+  const ft = t.featureTier
   const [runs, setRuns] = useState<RunRow[]>([])
   const [showAll, setShowAll] = useState(false)
   // 後端回的說明（note／fingerprint_error，英文介面優先 *_en）留原物件，
@@ -222,6 +225,8 @@ export default function RunHistory(
       {visible.map(run => {
         const restorable = run.readable ? restorableOf(run.manifest, tx) : null
         const runError = pickText(run, 'error', lang)
+        // 當時記下的分級（#0131）。沒有欄位＝未記錄，不當成沒用 Beta；主要不另標。
+        const tier = describeRecordedTier(run.readable ? run.manifest?.feature_tier : undefined)
         return (
           <div key={run.run_id}
             className={`run-history__row ${RELATION_STYLE[run.relation] || ''}`}>
@@ -230,6 +235,16 @@ export default function RunHistory(
               <span>{statusLabel(run.status, tx)}</span>
             </div>
             <div className="run-history__relation">{pickText(run, 'relation_label', lang)}</div>
+            {tier.state === 'unrecorded' && (
+              <div className="run-history__relation run-history__tier">{ft.unrecorded}</div>
+            )}
+            {tier.state === 'beta' && (
+              <div className="run-history__note run-history__tier" title={ft.resultNote}>
+                {ft.recordedBeta(tier.ids.map(id => featureName(id, ft)).join(ft.listSep))}
+                {tier.olderPolicy && ft.olderPolicy(tier.policyVersion || '?')}
+                <BetaBadge feature={tier.ids[0]} />
+              </div>
+            )}
             {runError && <div className="run-history__note">{runError}</div>}
             <div className="run-history__actions">
               <button className="btn" style={{ fontSize: 10, padding: '0 7px' }}

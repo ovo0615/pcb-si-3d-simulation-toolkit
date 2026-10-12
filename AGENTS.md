@@ -55,10 +55,11 @@ public repository separate from any private implementation repository. Before pu
 no backend files were accidentally staged:
 
 ```bash
-git ls-files | grep -iE "backend|\.py$|pyedb|aedt|start\.(bat|ps1)"
+git ls-files | grep -v '^\.github/' | grep -iE "backend|\.py$|pyedb|aedt|start\.(bat|ps1)"
 ```
 
-The command above should produce no output.
+The command above should produce no output. CI helper scripts under `.github/scripts/` (for
+example `check_dist_assets.py`) are expected and excluded.
 
 ## Technical note
 

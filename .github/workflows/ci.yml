@@ -153,6 +153,10 @@ jobs:
             exit 1
           fi
           echo "OK: frontend/dist is tracked."
+      # 前端 bundle 從私有版整包同步。多帶一個已被取代的舊 bundle、或漏帶
+      # index.html 引用的檔案，上面的 build job 都看不出來（它重建自己的 dist）。
+      - name: Tracked dist/assets must match dist/index.html
+        run: python3 .github/scripts/check_dist_assets.py
 
   python-compile-check:
     name: Python compile check (skips if no .py files are tracked)
