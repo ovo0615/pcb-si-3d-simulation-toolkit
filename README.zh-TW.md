@@ -1,6 +1,6 @@
 # PCB SI 3D 模擬分析工具
 
-![現行任務入口（工具視窗，未載入板子）](graph/gui-01-task-picker.png)
+![現行任務入口（未載入板子，Beta 選項收合）](graph/gui-01-task-picker.png)
 
 將 PCB 訊號通道裁切、分段求解，再串回完整通道；依需求做眼圖、TDR 與截面阻抗分析。
 
@@ -10,15 +10,17 @@
 
 | 你要做什麼 | 操作章節 |
 |---|---|
-| 選網路、裁切、疊構、背鑽、Layout 清理 | [02 載入與裁切](docs/manual/02-載入與裁切.md) |
+| 選網路、裁切、疊構（Beta）、背鑽（Beta）、Layout 清理（Beta） | [02 載入與裁切](docs/manual/02-載入與裁切.md) |
 | 建端點 Port、套用規格與掃頻 | [03 Port 與求解設定](docs/manual/03-Port與求解設定.md) |
 | 選整片或分段、逐段指定 HFSS／SIwave | [04 分段與混合求解](docs/manual/04-分段與混合求解.md) |
 | 排程、停止、重試匯出、Touchstone 串接 | [05 排程與串接](docs/manual/05-排程與串接.md) |
-| 模型匯入、規格模型（SPISim 產生／本工具合成）、眼圖精靈（單通道、多埠、AMI） | [06 IBIS 與眼圖](docs/manual/06-IBIS與眼圖.md) |
-| 模擬／量測 TDR 回標 Layout | [07 TDR 定位](docs/manual/07-TDR定位.md) |
+| 模型匯入、規格模型（SPISim 產生／本工具合成，Beta）、眼圖精靈；眼圖分析（單通道、多埠、AMI，Beta） | [06 IBIS 與眼圖](docs/manual/06-IBIS與眼圖.md) |
+| 模擬／量測（Beta）TDR 回標 Layout | [07 TDR 定位](docs/manual/07-TDR定位.md) |
 | 二維截面阻抗、側向收斂 | [08 截面阻抗](docs/manual/08-截面阻抗.md) |
 | 更新快照、浮水印、單檔 HTML | [09 報告與輸出](docs/manual/09-報告與輸出.md) |
-| 外部通道、遠端求解包、S 參數工具箱、COM | [10 其他工作模式](docs/manual/10-其他工作模式.md) |
+| 外部通道、遠端求解包（Beta）、S 參數工具箱（Beta）、COM（Beta） | [10 其他工作模式](docs/manual/10-其他工作模式.md) |
+
+標「Beta」的功能可以使用，但驗證案例較少；同嚴重度的問題先處理主要功能，Beta 不代表結果無效。分級以 [`featureTiers.json`](web_app/frontend/src/featureTiers.json) 為準，介面上的標示與確認方式見 [01 Beta 選項](docs/manual/01-開始使用.md#beta-選項)。
 
 ## 完整工具前置需求
 
@@ -50,6 +52,6 @@
 | 報告／支援包 | 送出前檢查路徑、模型、日誌與識別資料；浮水印不是 DRM |
 | 二維 Q2D | 不涵蓋 Via、轉角與參考層破口的完整三維效應 |
 
-文件適用 `1.0.0`／功能基準 `92d8b10`。35 張主圖狀態已盤點，仍有 3 項缺圖；5 張條件圖與工具包驗收尚未完成。[版本說明](CHANGELOG.md)｜[圖片帳冊](docs/visual-assets.md)｜[驗證資料](validation/README.md)｜[疑難排解](docs/manual/11-疑難排解.md)。歷史驗證只支持其記錄的版本、資料與條件。
+文件適用 `1.0.0`／功能基準 `65fa265`。35 張主圖狀態已盤點，仍有 3 項缺圖；5 張條件圖與工具包驗收尚未完成。[版本說明](CHANGELOG.md)｜[圖片帳冊](docs/visual-assets.md)｜[驗證資料](validation/README.md)｜[疑難排解](docs/manual/11-疑難排解.md)。歷史驗證只支持其記錄的版本、資料與條件。
 
 商用授權與技術支援由虎門科技股份有限公司（Taiwan Auto-Design Co., Ltd.，TADC）提供。此為獨立公開展示，與 Ansys, Inc. 無隸屬或背書關係；相關商標屬原權利人，工具不含、不提供亦不繞過 Ansys 授權。

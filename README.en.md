@@ -1,6 +1,6 @@
 # PCB SI 3D Simulation Toolkit
 
-![Current task picker in the tool window, with no board loaded](graph/gui-01-task-picker.png)
+![Current task picker with no board loaded; Beta options collapsed](graph/gui-01-task-picker.png)
 
 Extract and solve a PCB signal channel, cascade its segments, and inspect eye diagrams, TDR locations and cross-section impedance as needed.
 
@@ -10,15 +10,17 @@ Extract and solve a PCB signal channel, cascade its segments, and inspect eye di
 
 | Task | Chapter |
 |---|---|
-| Net selection, cutout, stackup, backdrill and Layout cleanup | [02](docs/manual/02-載入與裁切.md) |
+| Net selection, cutout, stackup (Beta), backdrill (Beta) and Layout cleanup (Beta) | [02](docs/manual/02-載入與裁切.md) |
 | Endpoint ports, profiles and frequency sweeps | [03](docs/manual/03-Port與求解設定.md) |
 | Whole-board or segmented analysis, HFSS/SIwave assignment | [04](docs/manual/04-分段與混合求解.md) |
 | Scheduling, stopping, export retries and Touchstone cascading | [05](docs/manual/05-排程與串接.md) |
-| Model import, spec models (SPISim or toolkit-synthesized), Eye Wizard (single, multi-port, AMI) | [06](docs/manual/06-IBIS與眼圖.md) |
-| Simulated or measured TDR mapped to Layout | [07](docs/manual/07-TDR定位.md) |
+| Model import, spec models (SPISim or toolkit-synthesized, Beta), Eye Wizard; eye analysis (single, multi-port, AMI, Beta) | [06](docs/manual/06-IBIS與眼圖.md) |
+| Simulated or measured (Beta) TDR mapped to Layout | [07](docs/manual/07-TDR定位.md) |
 | 2D cross-section impedance and lateral convergence | [08](docs/manual/08-截面阻抗.md) |
 | Snapshots, watermarks and a single-file HTML report | [09](docs/manual/09-報告與輸出.md) |
-| External channels, remote solve packages, S-parameter tools and COM | [10](docs/manual/10-其他工作模式.md) |
+| External channels, remote solve packages (Beta), S-parameter tools (Beta) and COM (Beta) | [10](docs/manual/10-其他工作模式.md) |
+
+Features marked Beta are usable but have fewer validation cases; at equal severity, main features are fixed first. Beta does not mean the result is invalid. Tiers follow [`featureTiers.json`](web_app/frontend/src/featureTiers.json); the in-app labels and the one-time confirmation are described in [chapter 01](docs/manual/01-開始使用.md#beta-選項).
 
 ## Complete-tool prerequisites
 
@@ -50,6 +52,6 @@ Follow [00 First run](docs/manual/00-第一次跑.md). Eye analysis has a separa
 | Reports/support bundles | Check paths, models, logs and identifiers before sending. Watermarks are not DRM |
 | 2D Q2D | Does not cover the complete 3D effects of vias, corners or reference-plane gaps |
 
-Documentation targets `1.0.0`, feature baseline `92d8b10`. The status of all 35 main screenshots has been recorded, with 3 missing items. 5 conditional screenshots and distribution-package acceptance remain pending. [Release notes](CHANGELOG.md) · [Image register](docs/visual-assets.md) · [Validation](validation/README.md) · [Troubleshooting](docs/manual/11-疑難排解.md). Historical validation supports only its recorded versions, data and conditions.
+Documentation targets `1.0.0`, feature baseline `65fa265`. The status of all 35 main screenshots has been recorded, with 3 missing items. 5 conditional screenshots and distribution-package acceptance remain pending. [Release notes](CHANGELOG.md) · [Image register](docs/visual-assets.md) · [Validation](validation/README.md) · [Troubleshooting](docs/manual/11-疑難排解.md). Historical validation supports only its recorded versions, data and conditions.
 
 Commercial licensing and support are provided by Taiwan Auto-Design Co., Ltd. (TADC). This independent showcase is not affiliated with or endorsed by Ansys, Inc. Trademarks belong to their respective owners. The tool does not include, provide or bypass Ansys licensing.
