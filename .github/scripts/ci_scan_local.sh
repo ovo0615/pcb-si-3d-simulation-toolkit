@@ -53,8 +53,13 @@ check "憑證形狀檔案與報告工作區" \
   "$(git ls-files | grep -E '(^|/)\.env(\..*)?$|\.pem$|\.key$|id_rsa|(^|/)report_workspace/|(^|/)report_manifest\.json$' || true)"
 
 # 不屬於上面的關鍵字掃描，但同樣是 CI 會擋、只看已追蹤檔案的規則（frontend-dist-tracked）。
-check "dist/assets 與 index.html 一致" \
-  "$(python .github/scripts/check_dist_assets.py | grep -v '^OK:' || true)"
+# 和 CI 一樣看結束碼：只看輸出的話，找不到 python 或腳本丟例外時會被當成通過。
+if dist_out=$(python .github/scripts/check_dist_assets.py 2>&1); then
+  dist_out=""
+elif [ -z "$dist_out" ]; then
+  dist_out="check_dist_assets.py 執行失敗（結束碼非 0，沒有輸出）"
+fi
+check "dist/assets 與 index.html 一致" "$dist_out"
 
 echo
 if [ "$fail" -eq 0 ]; then
