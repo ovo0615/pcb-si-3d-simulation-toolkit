@@ -20,7 +20,7 @@ Extract and solve a PCB signal channel, cascade its segments, and inspect eye di
 | Snapshots, watermarks and a single-file HTML report | [09](docs/manual/09-報告與輸出.md) |
 | External channels, remote solve packages (Beta), S-parameter tools (Beta) and COM (Beta) | [10](docs/manual/10-其他工作模式.md) |
 
-Features marked Beta are usable but have fewer validation cases; at equal severity, main features are fixed first. Beta does not mean the result is invalid. Tiers follow [`featureTiers.json`](web_app/frontend/src/featureTiers.json); the in-app labels and the one-time confirmation are described in [chapter 01](docs/manual/01-開始使用.md#beta-選項).
+Features marked Beta are usable but have fewer validation cases; at equal severity, main features are fixed first (except issues affecting data, privacy or result validity). Beta does not mean the result is invalid. Tiers follow [`featureTiers.json`](web_app/frontend/src/featureTiers.json); the in-app labels and the one-time confirmation are described in [chapter 01](docs/manual/01-開始使用.md#beta-選項).
 
 ## Complete-tool prerequisites
 

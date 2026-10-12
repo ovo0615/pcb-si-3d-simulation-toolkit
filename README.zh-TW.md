@@ -20,7 +20,7 @@
 | 更新快照、浮水印、單檔 HTML | [09 報告與輸出](docs/manual/09-報告與輸出.md) |
 | 外部通道、遠端求解包（Beta）、S 參數工具箱（Beta）、COM（Beta） | [10 其他工作模式](docs/manual/10-其他工作模式.md) |
 
-標「Beta」的功能可以使用，但驗證案例較少；同嚴重度的問題先處理主要功能，Beta 不代表結果無效。分級以 [`featureTiers.json`](web_app/frontend/src/featureTiers.json) 為準，介面上的標示與確認方式見 [01 Beta 選項](docs/manual/01-開始使用.md#beta-選項)。
+標「Beta」的功能可以使用，但驗證案例較少；同嚴重度的問題先處理主要功能（影響資料、隱私或結果有效性的除外），Beta 不代表結果無效。分級以 [`featureTiers.json`](web_app/frontend/src/featureTiers.json) 為準，介面上的標示與確認方式見 [01 Beta 選項](docs/manual/01-開始使用.md#beta-選項)。
 
 ## 完整工具前置需求
 

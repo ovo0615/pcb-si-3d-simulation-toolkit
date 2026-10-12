@@ -2,7 +2,7 @@
 
 ![現行任務入口（未載入板子，Beta 選項收合）](graph/gui-01-task-picker.png)
 
-PCB 通道裁切、分段、HFSS／SIwave 混合求解、Touchstone 串接、IBIS／AMI 眼圖（Beta）、TDR 定位與 Q2D 截面阻抗。標「Beta」的功能可以使用但驗證案例較少，分級以 [`featureTiers.json`](web_app/frontend/src/featureTiers.json) 為準，功能清單見[繁體中文說明](README.zh-TW.md)。
+PCB 通道裁切、分段、HFSS／SIwave 混合求解、Touchstone 串接、IBIS／AMI 眼圖（Beta）、TDR 定位與 Q2D 截面阻抗。哪些功能是 Beta 見[繁體中文說明](README.zh-TW.md)。
 
 **本 Repo 是公開展示版，沒有後端與啟動器。下載 Source ZIP 無法執行完整模擬。** 完整工具與商用支援請洽 [TADC](https://www.cadmen.com/)／[jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com)。
 
