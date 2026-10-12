@@ -1073,6 +1073,7 @@ export default function ModelLibrary() {
                     String(selected?.source_classification?.spec_table_version || ''))
                   : t.library.spisimMeta(selectedSpec.template, selectedSpec.aedtVersion)}</span>
                 {selectedSpec.noDfe && <span className="is-warning">{t.library.synthNoDfe}</span>}
+                {selectedSpec.noEq && <span className="is-warning">{t.library.synthNoEq}</span>}
                 {selectedSpec.synth && selectedSpec.parameters.length > 0 && (
                   <details className="model-library__synth-params">
                     <summary>{t.library.synthParamsTitle}</summary>
@@ -1081,7 +1082,8 @@ export default function ModelLibrary() {
                         <th>{t.library.synthColSource}</th></tr></thead>
                       <tbody>{selectedSpec.parameters.map(row => (
                         <tr key={row.key}>
-                          <td>{t.library.synthParamNames[row.key] || row.key}</td>
+                          <td>{(selectedSpec.noEq && t.library.synthParamNames[`${row.key}_serdes`])
+                            || t.library.synthParamNames[row.key] || row.key}</td>
                           <td>{row.value}</td>
                           <td>{row.status === 'user' ? t.library.synthUser : row.source || t.library.synthUnconfirmed}</td>
                         </tr>))}

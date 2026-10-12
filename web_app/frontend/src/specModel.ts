@@ -52,6 +52,8 @@ export interface SpecModelInfo {
   familyLabel: string
   role: string
   noDfe: boolean
+  /** 合成的 SerDes：只有 IBIS、沒有 AMI 等化（#0116 第二輪）。 */
+  noEq: boolean
   parameters: SynthParameterView[]
   originNote: string
   template: string
@@ -113,6 +115,7 @@ export function specModelInfo(pkg: AnyRecord | null | undefined, lang: Lang): Sp
     familyLabel: String(source.family_label || source.family || '').toUpperCase(),
     role: String(source.role || ''),
     noDfe: Boolean(source.no_dfe),
+    noEq: Boolean(source.no_eq),
     parameters: synthParameters(source.parameters, lang),
     originNote: pickText(source, 'origin_note', lang),
     template: String(source.template || ''),
@@ -251,6 +254,19 @@ export function synthMissingInputs(family: AnyRecord | null | undefined, form: S
   const unconfirmed = (key: string) => !filled(key) && (family.params[key]?.status !== 'confirmed'
     || family.params[key]?.value === null || family.params[key]?.value === undefined)
   const missing: string[] = []
+  if (family.kind === 'serdes') {
+    // 差動 SerDes（#0116 第二輪）：和後端 _resolve_serdes 一致。
+    // Rx 的擺幅只用來定共模，沒有也不擋。
+    if (form.roles !== 'rx' && unconfirmed('vdiff_pp_v')) missing.push('vdiff_pp_v')
+    if (unconfirmed('r_se_ohm')) missing.push('r_se_ohm')
+    if (form.roles !== 'rx' && unconfirmed('rise_2080_ps')) missing.push('rise_2080_ps')
+    // Tx、Rx 的 pad 電容各一列（USB 的上限不同）；C_comp 捷徑兩邊都適用。
+    if (positive(form.ccomp) === null) {
+      if (form.roles !== 'rx' && unconfirmed('c_pad_pf')) missing.push('c_pad_pf')
+      if (form.roles !== 'tx' && unconfirmed('c_pad_rx_pf')) missing.push('c_pad_rx_pf')
+    }
+    return missing
+  }
   if (unconfirmed('vddq')) missing.push('vddq')
   // Rx 的 Ron 只用來推接收門檻：CTT／無端接的 Rx 用不到（後端同一條規則）。
   const needRon = form.roles !== 'rx' || family.termination === 'pod' || family.termination === 'lvstl'
@@ -277,12 +293,14 @@ export type SpisimRxKind = 'split' | 'template'
 
 /** 眼圖結果的模型來源（執行紀錄頂層 model_origin）；原廠模型不列。 */
 export function runModelOrigin(result: AnyRecord | null | undefined, lang: Lang):
-  { lines: RunOriginLine[]; noDfe: string; spisimRx: { name: string; kind: SpisimRxKind } | null } {
+  { lines: RunOriginLine[]; noDfe: string; noEq: string[]; spisimRx: { name: string; kind: SpisimRxKind } | null } {
   // 一般結果在頂層、重用結果在 manifest、Corner 掃描取第一筆（各筆模型相同）。
   const origin = result?.model_origin || result?.manifest?.model_origin
     || result?.runs?.[0]?.result?.model_origin
   const lines: RunOriginLine[] = []
   let noDfe = ''
+  // 合成的 SerDes 沒有 AMI 等化：Tx、Rx 都列（#0116 第二輪）。
+  const noEq: string[] = []
   let spisimRx: { name: string; kind: SpisimRxKind } | null = null
   for (const role of ['tx', 'rx'] as const) {
     const item = origin?.[role]
@@ -291,11 +309,12 @@ export function runModelOrigin(result: AnyRecord | null | undefined, lang: Lang)
     lines.push({ role: role === 'tx' ? 'Tx' : 'Rx', generator: item.generator, name,
       label: pickText(item, 'label', lang) })
     if (role === 'rx' && item.no_dfe) noDfe = name
+    if (item.no_eq) noEq.push(name)
     if (role === 'rx' && (item.spisim_rx === 'split' || item.spisim_rx === 'template')) {
       spisimRx = { name, kind: item.spisim_rx }
     }
   }
-  return { lines, noDfe, spisimRx }
+  return { lines, noDfe, noEq, spisimRx }
 }
 
 /** SPISim 一般 IBIS 範本的「依規範帶入」：規範表的 VDDQ 與預設阻抗

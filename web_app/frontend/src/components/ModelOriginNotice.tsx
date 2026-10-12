@@ -29,6 +29,8 @@ export default function ModelOriginNotice({ result }: { result: AnyRecord | null
       [`${key}_Tx`]: text('Tx'),
       [`${key}_Rx`]: text('Rx'),
       [`${key}_DFE`]: view.noDfe ? t.originNoDfe(view.noDfe) : '',
+      // 合成的 SerDes 沒有 AMI 等化（#0116 第二輪）：Tx、Rx 一起寫一行。
+      [`${key}_EQ`]: view.noEq.length ? t.originNoEq(view.noEq.join(t.listSeparator)) : '',
       // SPISim 規格模型當 Rx：終端不是 POD，眼高偏低（實機比對報告 2.2 節）。
       [`${key}_SPISim_Rx`]: view.spisimRx ? t.originSpisimRx[view.spisimRx.kind](view.spisimRx.name) : '',
     })
@@ -40,6 +42,8 @@ export default function ModelOriginNotice({ result }: { result: AnyRecord | null
       <strong>{t.originTitle}</strong>
       {view.lines.map(line => <span key={line.role}>{t.originLine(line.role, line.name, line.label)}</span>)}
       {view.noDfe && <span className="is-warning">{t.originNoDfe(view.noDfe)}</span>}
+      {view.noEq.length > 0 && <span className="is-warning">
+        {t.originNoEq(view.noEq.join(t.listSeparator))}</span>}
       {view.spisimRx && <span className="is-warning">
         {t.originSpisimRx[view.spisimRx.kind](view.spisimRx.name)}</span>}
     </div>

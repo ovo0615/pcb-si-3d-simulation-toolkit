@@ -52,6 +52,10 @@ check "豁免檔中的絕對路徑" \
 check "憑證形狀檔案與報告工作區" \
   "$(git ls-files | grep -E '(^|/)\.env(\..*)?$|\.pem$|\.key$|id_rsa|(^|/)report_workspace/|(^|/)report_manifest\.json$' || true)"
 
+# 不屬於上面的關鍵字掃描，但同樣是 CI 會擋、只看已追蹤檔案的規則（frontend-dist-tracked）。
+check "dist/assets 與 index.html 一致" \
+  "$(python .github/scripts/check_dist_assets.py | grep -v '^OK:' || true)"
+
 echo
 if [ "$fail" -eq 0 ]; then
   echo "全部通過。注意：圖片是二進位，任何規則都掃不到，"
