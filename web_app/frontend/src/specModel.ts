@@ -42,11 +42,43 @@ function ccompUnknownReason(check: AnyRecord, level: CcompLevel): CcompUnknownRe
 export interface SpecModelInfo {
   /** SPISim 產生的規格模型（非原廠）。 */
   spisim: boolean
+  /** 本工具合成的規格模型（非原廠、非 SPISim；#0116，ADR-0069）。 */
+  synth: boolean
+  /** manifest 的 generator：spisim／toolkit_synth；其他自建模型是空字串。 */
+  generator: ModelGenerator
+  /** 合成模型：規範代號、角色、各參數的值與出處；DDR5 Rx 未含 DFE。 */
+  family: string
+  /** 規範的顯示名稱（DDR5、LPDDR4X）；family 是小寫代號。 */
+  familyLabel: string
+  role: string
+  noDfe: boolean
+  parameters: SynthParameterView[]
   originNote: string
   template: string
   templateKind: string
   aedtVersion: string
   ccomp: CcompView | null
+}
+
+export type ModelGenerator = 'spisim' | 'toolkit_synth' | ''
+
+export interface SynthParameterView {
+  key: string
+  value: string
+  source: string
+  /** confirmed／user（使用者輸入）／待確認。 */
+  status: string
+}
+
+/** 合成參數（manifest 的 parameters）→ 顯示列；值是陣列就以「／」相接。 */
+export function synthParameters(raw: unknown, lang: Lang): SynthParameterView[] {
+  if (!raw || typeof raw !== 'object') return []
+  return Object.entries(raw as AnyRecord).map(([key, item]) => {
+    const value = Array.isArray(item?.value)
+      ? item.value.map((v: unknown) => num(v)).join(' / ')
+      : num(item?.value)
+    return { key, value, source: pickText(item || {}, 'source', lang), status: String(item?.status || '') }
+  })
 }
 
 const num = (value: unknown, digits?: number): string => {
@@ -74,6 +106,14 @@ export function specModelInfo(pkg: AnyRecord | null | undefined, lang: Lang): Sp
   } : null
   return {
     spisim: source.generator === 'spisim',
+    synth: source.generator === 'toolkit_synth',
+    generator: source.generator === 'spisim' || source.generator === 'toolkit_synth' ? source.generator : '',
+    family: String(source.family || ''),
+    // 合成時記下規範表的 label；這之前產生的沒有，代號是顯示名稱的小寫（lpddr4x → LPDDR4X）。
+    familyLabel: String(source.family_label || source.family || '').toUpperCase(),
+    role: String(source.role || ''),
+    noDfe: Boolean(source.no_dfe),
+    parameters: synthParameters(source.parameters, lang),
     originNote: pickText(source, 'origin_note', lang),
     template: String(source.template || ''),
     templateKind: String(source.template_kind || ''),
@@ -158,4 +198,114 @@ export function localizedNote(source: AnyRecord | null | undefined, key: string,
   if (!source) return ''
   if (lang === 'en') return String(source[`${key}_en`] || '')
   return String(source[key] || '')
+}
+
+// ── 本工具合成（#0116，ADR-0069） ─────────────────────────────
+
+export type SynthRoleChoice = 'tx' | 'rx' | 'both'
+
+export interface SynthForm {
+  family: string
+  roles: SynthRoleChoice
+  rate: string
+  ccomp: string
+  slewMin: string
+  slewMax: string
+  /** 規範表待確認的參數由使用者填（鍵同後端 PARAM_KEYS；清單用逗號分隔）。 */
+  overrides: Record<string, string>
+}
+
+const positive = (text: string): number | null => {
+  if (String(text ?? '').trim() === '') return null
+  const value = Number(text)
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+/** POST /api/models/generate-synth 的內容。空白欄位不帶（後端用規範表）；
+ *  填了但不是正數也不帶——後端會說哪一項待確認，比靜默送 0 好。
+ *  待確認參數的字串原樣送（後端解析「34, 40」並檢查），錯了由後端講清楚。 */
+export function generateSynthBody(form: SynthForm): Record<string, unknown> | null {
+  if (!form.family) return null
+  const body: Record<string, unknown> = {
+    family: form.family,
+    roles: form.roles === 'both' ? ['tx', 'rx'] : [form.roles],
+  }
+  const fields: [keyof SynthForm, string][] = [['rate', 'data_rate_gbps'], ['ccomp', 'c_comp_pf'],
+    ['slewMin', 'slew_min_v_per_ns'], ['slewMax', 'slew_max_v_per_ns']]
+  for (const [key, name] of fields) {
+    const value = positive(form[key] as string)
+    if (value !== null) body[name] = value
+  }
+  const overrides = Object.fromEntries(Object.entries(form.overrides || {})
+    .filter(([, value]) => String(value ?? '').trim() !== ''))
+  if (Object.keys(overrides).length) body.overrides = overrides
+  return body
+}
+
+/** 規範表裡待確認、必須由使用者填的欄位（前端標紅、按鈕前先提醒）。
+ *  和後端 resolve_request 的必要條件一致：VDDQ、Ron 可選值、C_IO；Rx 有端接時
+ *  的 ODT 可選值；Tx 的斜率。預設值、容差、Vin 門檻查不到不擋。 */
+export function synthMissingInputs(family: AnyRecord | null | undefined, form: SynthForm): string[] {
+  if (!family?.params) return []
+  const filled = (key: string) => String(form.overrides?.[key] ?? '').trim() !== ''
+  const unconfirmed = (key: string) => !filled(key) && (family.params[key]?.status !== 'confirmed'
+    || family.params[key]?.value === null || family.params[key]?.value === undefined)
+  const missing: string[] = []
+  if (unconfirmed('vddq')) missing.push('vddq')
+  // Rx 的 Ron 只用來推接收門檻：CTT／無端接的 Rx 用不到（後端同一條規則）。
+  const needRon = form.roles !== 'rx' || family.termination === 'pod' || family.termination === 'lvstl'
+  if (needRon && unconfirmed('ron_options')) missing.push('ron_options')
+  if (form.roles !== 'tx' && family.termination !== 'none' && unconfirmed('odt_options')) {
+    missing.push('odt_options')
+  }
+  if (unconfirmed('c_io_pf') && positive(form.ccomp) === null) missing.push('c_io_pf')
+  if (form.roles !== 'rx' && unconfirmed('slew_v_per_ns')
+    && positive(form.slewMin) === null && positive(form.slewMax) === null) missing.push('slew_v_per_ns')
+  return missing
+}
+
+export interface RunOriginLine {
+  role: 'Tx' | 'Rx'
+  generator: ModelGenerator
+  name: string
+  label: string
+}
+
+/** SPISim 規格模型當 Rx 的終端種類（後端 model_origin.spisim_rx_kind）：兩種都不是 POD。
+ *  split：參數式（視窗產生）上下分壓；template：jar Input 範本只接地。 */
+export type SpisimRxKind = 'split' | 'template'
+
+/** 眼圖結果的模型來源（執行紀錄頂層 model_origin）；原廠模型不列。 */
+export function runModelOrigin(result: AnyRecord | null | undefined, lang: Lang):
+  { lines: RunOriginLine[]; noDfe: string; spisimRx: { name: string; kind: SpisimRxKind } | null } {
+  // 一般結果在頂層、重用結果在 manifest、Corner 掃描取第一筆（各筆模型相同）。
+  const origin = result?.model_origin || result?.manifest?.model_origin
+    || result?.runs?.[0]?.result?.model_origin
+  const lines: RunOriginLine[] = []
+  let noDfe = ''
+  let spisimRx: { name: string; kind: SpisimRxKind } | null = null
+  for (const role of ['tx', 'rx'] as const) {
+    const item = origin?.[role]
+    if (!item || (item.generator !== 'spisim' && item.generator !== 'toolkit_synth')) continue
+    const name = String(item.display_name || '')
+    lines.push({ role: role === 'tx' ? 'Tx' : 'Rx', generator: item.generator, name,
+      label: pickText(item, 'label', lang) })
+    if (role === 'rx' && item.no_dfe) noDfe = name
+    if (role === 'rx' && (item.spisim_rx === 'split' || item.spisim_rx === 'template')) {
+      spisimRx = { name, kind: item.spisim_rx }
+    }
+  }
+  return { lines, noDfe, spisimRx }
+}
+
+/** SPISim 一般 IBIS 範本的「依規範帶入」：規範表的 VDDQ 與預設阻抗
+ *  （I/O 用 Ron、Input 用 ODT）。待確認的值不帶，留給使用者自己選。 */
+export function spisimFilterForFamily(family: AnyRecord, kind: string): Partial<TemplateFilter> {
+  const confirmed = (key: string) => family?.params?.[key]?.status === 'confirmed'
+    ? family.params[key].value : null
+  const out: Partial<TemplateFilter> = {}
+  if (family?.spisim_template_vcc) out.vcc = String(family.spisim_template_vcc)
+  const z = confirmed(kind === 'input' ? 'odt_default' : 'ron_default')
+  out.z = z === null || z === undefined ? '' : String(z)
+  return out
 }

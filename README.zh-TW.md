@@ -14,7 +14,7 @@
 | 建端點 Port、套用規格與掃頻 | [03 Port 與求解設定](docs/manual/03-Port與求解設定.md) |
 | 選整片或分段、逐段指定 HFSS／SIwave | [04 分段與混合求解](docs/manual/04-分段與混合求解.md) |
 | 排程、停止、重試匯出、Touchstone 串接 | [05 排程與串接](docs/manual/05-排程與串接.md) |
-| 模型匯入、SPISim 規格模型、眼圖精靈（單通道、多埠、AMI） | [06 IBIS 與眼圖](docs/manual/06-IBIS與眼圖.md) |
+| 模型匯入、規格模型（SPISim 產生／本工具合成）、眼圖精靈（單通道、多埠、AMI） | [06 IBIS 與眼圖](docs/manual/06-IBIS與眼圖.md) |
 | 模擬／量測 TDR 回標 Layout | [07 TDR 定位](docs/manual/07-TDR定位.md) |
 | 二維截面阻抗、側向收斂 | [08 截面阻抗](docs/manual/08-截面阻抗.md) |
 | 更新快照、浮水印、單檔 HTML | [09 報告與輸出](docs/manual/09-報告與輸出.md) |

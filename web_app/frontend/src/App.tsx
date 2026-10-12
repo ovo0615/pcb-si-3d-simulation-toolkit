@@ -6395,7 +6395,8 @@ export default function App() {
                       title={sceneLabel}
                       section={reportSectionByView[activeView]}
                       sourceRevision={reportSourceRevision}
-                      sourceMetadata={{
+                      // 按下快照時才組：模型分頁的 store 不會讓 App 重新 render（#0116）。
+                      sourceMetadata={() => ({
                         signal_net_count: signalNets.length,
                         reference_net_count: refNets.length,
                         // 卡 0083 R5：原本只看本次跑過的分段，重新開啟專案、直接
@@ -6416,7 +6417,7 @@ export default function App() {
                         // store，這裡整批掛上。
                         ...(activeView === 'models'
                           ? modelsReportMetadata() : {}),
-                      }}
+                      })}
                       onSaved={rememberReportWorkspace}
                     />
                   </div>

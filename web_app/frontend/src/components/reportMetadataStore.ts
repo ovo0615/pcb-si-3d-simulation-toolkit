@@ -19,3 +19,13 @@ export function setModelsReportMetadata(patch: Record<string, unknown>): void {
 export function modelsReportMetadata(): Record<string, unknown> {
   return { ...store }
 }
+
+/** 快照的中繼資料：物件，或在按下快照時才呼叫的函式。 */
+export type ReportMetadataSource = Record<string, unknown> | (() => Record<string, unknown>)
+
+/** 按下快照時才讀（#0116 實機 4.1）：store 是一般物件，更新時不會讓 App 重新
+ *  render；在 render 時取值，按快照拿到的是結果出現前的舊值（模型來源曾是空字串）。 */
+export function resolveReportMetadata(source: ReportMetadataSource | undefined): Record<string, unknown> {
+  if (typeof source === 'function') return source()
+  return { ...(source || {}) }
+}

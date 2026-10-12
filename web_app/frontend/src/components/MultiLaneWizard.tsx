@@ -17,6 +17,7 @@ import RunHistory, { RestorableRun } from './RunHistory'
 import EyeImageGallery from './EyeImageGallery'
 import OpenFolderButton from './OpenFolderButton'
 import ResultDetailsDrawer, { useResultDrawer } from './ResultDetailsDrawer'
+import ModelOriginNotice from './ModelOriginNotice'
 import { LicenseTag, useLicenseBlock } from './LicenseTag'
 import { releasedWithErrors, pickText, pickList, errorText } from '../backendFields'
 import { useT } from '../i18n'
@@ -1700,6 +1701,9 @@ export default function MultiLaneWizard({
           </div>
           {shownJob?.error && <div className="model-library__issue is-error">
             {m.failed(pickText(shownJob, 'error', lang))}</div>}
+
+          {/* #0116：規格模型（SPISim 產生／本工具合成）與 DDR5 Rx 未含 DFE；Corner 掃描取第一筆。 */}
+          <ModelOriginNotice result={jobResult} />
 
           {/* 執行警告要跟著結果一起看——特別是「帶錯誤放行」：這份眼圖
               是帶著相容性錯誤跑出來的，判讀時要對照原話。 */}

@@ -11,6 +11,7 @@ import MultiPortEyeWizard from './MultiPortEyeWizard'
 import EyeImageGallery from './EyeImageGallery'
 import OpenFolderButton from './OpenFolderButton'
 import ResultDetailsDrawer, { useResultDrawer } from './ResultDetailsDrawer'
+import ModelOriginNotice from './ModelOriginNotice'
 import EyeWizardAmiAdvanced from './EyeWizardAmiAdvanced'
 import type { AmiCandidate } from './EyeWizardAmiAdvanced'
 import { useCascadedChannel } from './useCascadedChannel'
@@ -995,6 +996,8 @@ export default function EyeWizard(
           {/* ADR-0017：重用的結果不得看起來像新求解。 */}
           {jobResult?.is_reused && <div className="model-library__issue is-warning">
             {t.reused(String(jobResult.manifest?.reused_from_run_id || jobResult.run_id || '—'))}</div>}
+          {/* #0116：規格模型（SPISim 產生／本工具合成）要在結果頁看得出來；DDR5 Rx 合成模型標未含 DFE。 */}
+          {!reuseOffer && <ModelOriginNotice result={jobResult} />}
           {(jobResult?.warnings?.length ?? 0) > 0 && !reuseOffer && (
             <details open={releasedWithErrors(jobResult)}>
               <summary>{t.runWarnings(jobResult.warnings.length)}</summary>

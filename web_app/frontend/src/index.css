@@ -2113,3 +2113,30 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .model-library__health .btn { width: auto; }
 .model-library__health .is-pass { color: #9ff0c4; }
 .model-library__health .is-fail { color: #ffb4a8; }
+
+/* #0116 產生規格模型：SPISim 產生／本工具合成兩塊並列（ADR-0069）。 */
+.model-library__gen-methods { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; margin-top: 8px; }
+.model-library__gen-card { padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(245, 158, 11, .35); background: rgba(245, 158, 11, .04); min-width: 0; }
+.model-library__gen-card--synth { border-color: rgba(56, 189, 248, .4); background: rgba(56, 189, 248, .05); }
+.model-library__gen-title { display: block; font-size: 14px; margin-bottom: 2px; color: #ffd28a; }
+.model-library__gen-card--synth .model-library__gen-title { color: #8fd8ff; }
+/* #0116 實機 4.2-1：1600 寬時合成面板的輸入框超出外框、標籤換行後沒對齊。
+   欄位可以縮到 0（數字輸入框的內建最小寬度不再撐開格子），底部對齊。 */
+.model-library__gen-card--synth .model-library__spec-filter { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; }
+.model-library__gen-card .model-library__spec-filter label { min-width: 0; }
+.model-library__gen-card .model-library__spec-filter .input { min-width: 0; width: 100%; box-sizing: border-box; }
+/* 出處很長（文件名＋頁碼＋備註）：固定欄寬、在格內換行，不撐出卡片。 */
+.model-library__gen-card .model-library__synth-params table { table-layout: fixed; width: 100%; }
+.model-library__synth-params td { white-space: normal; overflow-wrap: anywhere; }
+.model-library__source-badge.is-synth { color: #8fd8ff; border-color: rgba(56, 189, 248, .5); background: rgba(56, 189, 248, .1); }
+.model-library__spisim.is-synth { border-color: rgba(56, 189, 248, .5); background: rgba(56, 189, 248, .08); color: #cfe6f5; }
+.model-library__spisim.is-synth > strong { color: #8fd8ff; }
+.model-library__spisim .is-warning { color: #ffd28a; }
+.model-library__spec-filter label.is-missing { color: #ff9b8a; }
+.model-library__spec-filter label.is-missing .input { border-color: rgba(248, 113, 113, .7); }
+.model-library__synth-params { margin-top: 6px; font-size: 12.5px; }
+.model-library__synth-params tr.is-unconfirmed td { color: #ff9b8a; }
+.eye-results__origin { margin: 6px 0; padding: 7px 10px; border-radius: 7px; border: 1px solid rgba(56, 189, 248, .4); background: rgba(56, 189, 248, .06); font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+.eye-results__origin .is-warning { color: #ffd28a; font-weight: 600; }
+.model-library__synth-params .input { min-width: 0; width: 100%; box-sizing: border-box; padding: 3px 6px; }
+.model-library__synth-params .input.is-missing { border-color: rgba(248, 113, 113, .8); }
