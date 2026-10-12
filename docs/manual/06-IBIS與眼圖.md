@@ -49,17 +49,19 @@
 
 ## 沒有模型：本工具合成
 
-依 JEDEC 規範參數由工具自己算出 IBIS：不呼叫 SPISim、不讀 Ansys 檔案、不占授權。
+依規範參數（JEDEC、PCI-SIG、USB-IF）由工具自己算出 IBIS：不呼叫 SPISim、不讀 Ansys 檔案、不占授權。
 
-1. 同一個區塊用右邊「本工具合成」（畫面見上一節的圖）。選規範（DDR2～DDR5、LPDDR2～LPDDR5X）與角色（Tx、Rx 或 Tx＋Rx）。
+1. 同一個區塊用右邊「本工具合成」（畫面見上一節的圖）。選規範與角色（Tx、Rx 或 Tx＋Rx）：DDR2～DDR5、LPDDR2～LPDDR5X，或差動 SerDes（PCIe Gen3～Gen5、USB 3.2 Gen1／Gen2、USB4 Gen2／Gen3）。
 2. 資料率、C_comp、斜率留空就用規範預設；展開「參數與出處」核對每個值的出處。標「待確認」的欄位要自己填，否則不能合成。
-3. 按「合成並匯入」。Tx 每個 Ron 一個模型、Rx 每個 ODT 一個模型＋關閉，在眼圖精靈第 3 步用 `[Model Selector]` 挑。
+3. 按「合成並匯入」。DDR：Tx 每個 Ron 一個模型、Rx 每個 ODT 一個模型＋關閉，在眼圖精靈第 3 步用 `[Model Selector]` 挑。SerDes：差動 Tx（Output）＋Rx（Input）各一個。
 
 | 必須知道 | 說明 |
 |---|---|
 | 不是原廠、也不是 SPISim | 模型庫顯示藍色「本工具合成」徽章；SPISim 產生的是橘色。詳細資料、眼圖結果頁與報告都標得出來源 |
 | 出處 | 每個預設值附公開資料表與頁碼；查不到的標「待確認」、不代填。LPDDR5／5X 目前只有 VDDQ 有公開出處，Ron、ODT、斜率、C_IO 要自己填 |
 | DDR5 Rx 沒有 DFE | 只有 IBIS；用到它的眼圖標「未含 DFE，結果偏悲觀」 |
+| SerDes 沒有 AMI | 只有 IBIS、沒有 FFE／CTLE／DFE：眼圖偏悲觀、可能全閉，**不能判合規**。合成面板、模型庫詳細資料、眼圖結果頁與報告都標「沒有 AMI 等化」。每個 SerDes 規範都有查不到公開出處的欄位（PCIe Gen3 的上升時間與 pad 電容、PCIe Gen4／Gen5 的全部電氣參數、USB 3.2 的上升時間、USB4 的擺幅與 pad 電容），標「待確認」要自己填 |
+| SerDes 沒有斜率欄位 | 只填每腳阻抗、Tx 擺幅、Tx 上升時間與 pad 電容；C_comp 欄對應 pad 電容 |
 | 模型簡化 | I-V 為直線、封裝 R/L/C＝0；R 容差查不到，角落只有 VDDQ 與斜率。簽核換原廠模型 |
 | C_comp 檢查 | 和 SPISim 產生的一樣，依資料率檢查 τ／UI |
 
