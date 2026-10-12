@@ -3,8 +3,19 @@
 //
 // 版面刻意壓在一個視窗內、不要求捲動：入口的作用是「一眼看完所有選項再決定」，
 // 需要捲動才看得到的項目等於沒被看見。因此分兩欄、行高壓縮，說明文字放小。
+import { useState } from 'react'
 import { useT } from '../i18n'
 import type { Messages } from '../i18n'
+import BetaBadge from './BetaBadge'
+import {
+  betaTasksIn,
+  featureName,
+  mainOnlySelection,
+  splitByTier,
+  taskFeatureId,
+  taskHasBetaModes,
+  taskTier,
+} from '../featureTiers'
 import {
   ALL_TASK_SELECTION,
   DEFAULT_TASKS,
@@ -27,6 +38,8 @@ interface Props {
   closing?: boolean
   /** 退場動畫播完了，呼叫端可以卸載本元件。 */
   onClosed?: () => void
+  /** 啟動時從上次的設定載入、而且含 Beta 的任務（#0131）：原樣保留，只提示。 */
+  legacyBeta?: TaskKey[]
 }
 
 const FONT = '"Calibri", "Microsoft JhengHei", sans-serif'
@@ -176,10 +189,12 @@ function renderTask(
   task: TaskDef,
   flags: TaskFlags,
   onToggle: (key: TaskKey, checked: boolean) => void,
-  t: Messages['tasks'],
+  messages: Messages,
   depth = 0,
 ) {
+  const t = messages.tasks
   const on = flags[task.key]
+  const children = splitByTier(task.children ?? [])
   const iconKind = TASK_ICON_KIND[task.key]
   return (
     <div key={task.key}>
@@ -222,6 +237,16 @@ function renderTask(
               {task.eta}
             </span>
           )}
+          {/* 分級（#0131）：純 Beta 任務掛標籤；主要任務含 Beta 模式只提示，不整卡降級。 */}
+          {taskTier(task.key) === 'beta' && <BetaBadge feature={taskFeatureId(task.key)} />}
+          {taskHasBetaModes(task.key) && (
+            <span className="task-mixed-hint" style={{
+              marginLeft: 7, fontSize: 11, fontWeight: 400, color: '#d9b968',
+              whiteSpace: 'nowrap', verticalAlign: '2px',
+            }}>
+              {messages.featureTier.mixed}
+            </span>
+          )}
           <span style={{
             display: 'block', fontSize: depth ? 13 : 14, color: '#a8b8ca',
             marginTop: 5, lineHeight: 1.55,
@@ -249,20 +274,69 @@ function renderTask(
           <div style={{ fontSize: 13, color: '#9eafc3' }}>
             {t.childrenLead}
           </div>
-          {task.children.map(child => renderTask(child, flags, onToggle, t, depth + 1))}
+          {children.main.map(child => renderTask(child, flags, onToggle, messages, depth + 1))}
+          {children.beta.length > 0 && (
+            <BetaFold tasks={children.beta} flags={flags} onToggle={onToggle}
+              messages={messages} depth={depth + 1} />
+          )}
         </div>
       )}
     </div>
   )
 }
 
+/**
+ * 群組裡的 Beta 項收在這裡（#0131，Jeff 2026-10-12 核准）。
+ *
+ * 預設收合；已勾選的 Beta 項（例如舊設定載入的）一開始就展開，不讓它藏在
+ * 收合區裡被忘記。收合只是整理畫面，不會取消勾選、也不會停止執行中的工作。
+ */
+function BetaFold({ tasks, flags, onToggle, messages, depth }: {
+  tasks: TaskDef[]
+  flags: TaskFlags
+  onToggle: (key: TaskKey, checked: boolean) => void
+  messages: Messages
+  depth: number
+}) {
+  const selected = tasks.filter(task => flags[task.key]).length
+  const [open, setOpen] = useState(selected > 0)
+  const ft = messages.featureTier
+  return (
+    <div className="task-beta-fold" style={{ display: 'grid', gap: 5 }}>
+      <button
+        type="button"
+        className="task-beta-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen(value => !value)}
+        title={ft.summary}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+          background: 'transparent', border: '1px dashed #4a3f22', borderRadius: 6,
+          color: '#d9c18a', fontSize: depth ? 13 : 14, padding: '6px 10px',
+          cursor: 'pointer', textAlign: 'left', fontFamily: FONT,
+        }}
+      >
+        <span aria-hidden="true" style={{ width: 12 }}>{open ? '▾' : '▸'}</span>
+        <span>{ft.groupCount(tasks.length)}</span>
+        {selected > 0 && (
+          <span style={{ color: '#ffd98a', fontSize: 12 }}>{ft.groupSelected(selected)}</span>
+        )}
+      </button>
+      {open && tasks.map(task => renderTask(task, flags, onToggle, messages, depth))}
+    </div>
+  )
+}
+
 export default function TaskPicker(
-  { flags, onToggle, onSetAll, onStart, returning, closing, onClosed }: Props,
+  { flags, onToggle, onSetAll, onStart, returning, closing, onClosed, legacyBeta }: Props,
 ) {
   const { t: messages } = useT()
   const t = messages.tasks
+  const ft = messages.featureTier
   const chosen = allTasks(t).filter(task => flags[task.key])
+  const chosenBeta = betaTasksIn(chosen.map(task => task.key))
   const gaps = missingPrerequisites(flags, t)
+  const legacy = (legacyBeta ?? []).filter(key => flags[key])
 
   return (
     <div
@@ -297,7 +371,7 @@ export default function TaskPicker(
         // 讓每組只佔自己內容的高度。
         alignItems: 'start',
       }}>
-        {taskGroups(t).map(group => (
+        {taskGroups(t).map(group => ({ ...group, split: splitByTier(group.tasks) })).map(group => (
           <div key={group.title} className="task-picker-group">
             <div style={{
               fontSize: 16, fontWeight: 700, color: '#7fd1ff',
@@ -306,11 +380,26 @@ export default function TaskPicker(
               {group.title}
             </div>
             <div style={{ display: 'grid', gap: 6 }}>
-              {group.tasks.map(task => renderTask(task, flags, onToggle, t))}
+              {group.split.main.map(task => renderTask(task, flags, onToggle, messages))}
+              {group.split.beta.length > 0 && (
+                <BetaFold tasks={group.split.beta} flags={flags}
+                  onToggle={onToggle} messages={messages} depth={0} />
+              )}
             </div>
           </div>
         ))}
       </div>
+
+      {legacy.length > 0 && (
+        <div className="task-beta-legacy" role="status" style={{
+          flexShrink: 0, marginTop: 10,
+          border: '1px solid #8A6D23', background: '#3A2B0B',
+          borderRadius: 8, padding: '6px 14px', fontSize: 13.5, lineHeight: 1.6, color: '#FFD166',
+        }}>
+          {ft.legacy}{' '}
+          {ft.legacyList(legacy.map(key => featureName(taskFeatureId(key) ?? key, ft)).join(ft.listSep))}
+        </div>
+      )}
 
       {gaps.length > 0 && (
         <div style={{
@@ -360,6 +449,14 @@ export default function TaskPicker(
         <button
           className="btn"
           style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }}
+          onClick={() => onSetAll(mainOnlySelection(ALL_TASK_SELECTION))}
+          title={ft.summary}
+        >
+          {ft.mainOnly}
+        </button>
+        <button
+          className="btn"
+          style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }}
           onClick={() => onSetAll(DEFAULT_TASKS)}
         >
           {t.reset}
@@ -369,6 +466,7 @@ export default function TaskPicker(
           fontSize: 11.5, color: '#8d9db0', lineHeight: 1.5,
         }}>
           {chosen.length === 0 ? t.noneChosen : t.chosenCount(chosen.length)}
+          {chosenBeta.length > 0 && ft.selectedBeta(chosenBeta.length)}
           {t.rememberedHere}
         </span>
       </div>

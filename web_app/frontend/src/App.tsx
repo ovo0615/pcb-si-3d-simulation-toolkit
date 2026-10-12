@@ -52,6 +52,9 @@ import EvidenceBadges from './components/EvidenceBadges'
 import OpenFolderButton from './components/OpenFolderButton'
 import TdrChart from './components/TdrChart'
 import TaskPicker from './components/TaskPicker'
+import BetaBadge from './components/BetaBadge'
+import { betaTasksIn } from './featureTiers'
+import { confirmBetaUse } from './betaGuard'
 import {
   DEFAULT_TASKS,
   loadSavedTasks,
@@ -696,6 +699,7 @@ export default function App() {
   const [showSegmentCutDiagnostics, setShowSegmentCutDiagnostics] = useState(true)
   const [showSolverRegionOverlay, setShowSolverRegionOverlay] = useState(true)
   const [segmentSolverPlans, setSegmentSolverPlans] = useState<SegmentSolverPlan[]>([])
+  const mixedSolverCascade = new Set(segmentSolverPlans.map(plan => plan.requested_solver)).size > 1
   /** 分段預覽跟著誰畫（卡 0121）：null＝剛分析完，跟著分析；有值＝執行過或
    *  載入了 segments.json，跟著混合求解表。值是檔案裡的切點，載入時用得到。 */
   const [segFollowPlan, setSegFollowPlan] = useState<PlanLayout | null>(null)
@@ -706,6 +710,9 @@ export default function App() {
   // ── 入口介面：這次要用哪些項目 ──────────────────────
   const [enabledTasks, setEnabledTasks] = useState<TaskKey[]>(
     () => loadSavedTasks() ?? DEFAULT_TASKS)
+  // 上次存下的設定裡就有的 Beta 任務（#0131）：原樣載入，入口只提示、不改值。
+  const [legacyBetaTasks] = useState<TaskKey[]>(
+    () => betaTasksIn(loadSavedTasks() ?? []) as TaskKey[])
   // 每次啟動都先顯示入口（帶出上次勾選），按「開始」才進主畫面。
   const [pickerOpen, setPickerOpen] = useState(true)
   const [pickerReturning, setPickerReturning] = useState(false)
@@ -2331,6 +2338,8 @@ export default function App() {
     }
     const metadataPath = normalizeUserPath(schedMetaPath)
     if (!metadataPath) { alert(t.appFlow.completeNSegmentSplittingAndScheduledSimulation); return }
+    // 分段求解器混用時，串接要把各段內插到共同頻點（B03，Beta）；請求本身看不出來，這裡先問。
+    if (mixedSolverCascade && !confirmBetaUse(['B03'])) return
     setSchedMetaPath(metadataPath)
     setCascadeBusy(true)
     try {
@@ -4198,6 +4207,7 @@ export default function App() {
           returning={pickerReturning}
           closing={pickerClosing}
           onClosed={finishClosingPicker}
+          legacyBeta={legacyBetaTasks}
         />
       )}
       {hiddenRunning.length > 0 && (
@@ -4703,7 +4713,7 @@ export default function App() {
 
                 {/* 「疊構更換」：疊構更換 */}
                 <div hidden={!(show.stackup)} style={{ opacity: boardLoaded ? 1 : 0.5, pointerEvents: boardLoaded ? undefined : 'none' }}>
-                  <h3 className="panel-title">{t.appView.replaceStackup}</h3>
+                  <h3 className="panel-title">{t.appView.replaceStackup}<BetaBadge feature="B05" /></h3>
                   <p className="panel-hint">{t.appView.supportsXmlCsvJson}<b>{t.appView.reviewChangesBeforeApplying}</b>{t.appView.alwaysSavesANewFile}</p>
                   <p className="panel-hint">
                     <b>{t.appView.runAfterCutoutBeforeBackdrillAndPort}</b>
@@ -4798,7 +4808,7 @@ export default function App() {
 
                 {/* 「背鑽」：背鑽 */}
                 <div hidden={!(show.backdrill)} style={{ opacity: canSegment ? 1 : 0.5, pointerEvents: canSegment ? undefined : 'none' }}>
-                  <h3 className="panel-title">{t.appView.backdrill}</h3>
+                  <h3 className="panel-title">{t.appView.backdrill}<BetaBadge feature="B06" /></h3>
                   <p className="panel-hint">{t.appView.deriveTheConnectedLayersAndDrillSide}</p>
 
                   <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
@@ -4891,7 +4901,7 @@ export default function App() {
 
                 {/* 「Layout 清理」：Layout 清理 */}
                 <div hidden={!(show.cleanup)} style={{ opacity: canSegment ? 1 : 0.5 }}>
-                  <h3 className="panel-title">{t.appView.layoutCleanup}</h3>
+                  <h3 className="panel-title">{t.appView.layoutCleanup}<BetaBadge feature="M09" /></h3>
                   <p className="panel-hint">{t.appView.preservesSignalsReferencePlanesComponentPinsAnd}</p>
                   <div className="field-label" style={{ marginTop: 6 }}>{t.appView.cleanupLevel}</div>
                   <div className="field-row">
@@ -5221,9 +5231,10 @@ export default function App() {
                       onChange={e => pickHfssMeshMethod(e.target.value as 'Phi' | 'PhiPlus' | 'Classic')}
                       title={t.appView.hfssDLayoutMeshMethodPhiIsTip}>
                       <option value="Phi">{t.appView.phiDefault}</option>
-                      <option value="PhiPlus">{t.appView.phiPlusMayCrashIn}</option>
+                      <option value="PhiPlus">{t.appView.phiPlusMayCrashIn}{t.featureTier.betaSuffix}</option>
                       <option value="Classic">{t.appView.fieldClassic}</option>
                     </select>
+                    {hfssMeshMethod === 'PhiPlus' && <BetaBadge feature="B01" style={{ marginLeft: 0 }} />}
                     <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>{t.appView.appliesOnlyToHfssSegmentsAppliedDuring}</span>
                   </div>
 
@@ -5707,7 +5718,7 @@ export default function App() {
                   {show.remotepack && schedMetaPath && !schedStatus?.running && (
                     <div style={{ marginTop: 8, paddingTop: 8,
                                   borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                      <div className="field-label">{t.appView.remoteSolvePackageNoPythonNeededOn}</div>
+                      <div className="field-label">{t.appView.remoteSolvePackageNoPythonNeededOn}<BetaBadge feature="B07" /></div>
                       <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                         <input aria-label={t.appView.remoteSolvePackageOutputFolder} className="input" style={{ flex: 1 }} value={packDir}
                           onChange={e => setPackDir(e.target.value)}
@@ -5819,6 +5830,11 @@ export default function App() {
                     ))}
                   </div>
 
+                  {cascadeMode === 'tool' && mixedSolverCascade && (
+                    <div className="panel-hint" style={{ marginTop: 6 }}>
+                      {t.featureTier.names.B03}<BetaBadge feature="B03" />
+                    </div>
+                  )}
                   {cascadeMode === 'tool' && (
                     <div style={{ display: 'flex', gap: 6, marginTop: 6, opacity: schedMetaPath ? 1 : 0.5 }}>
                       <button className="btn" style={{ flex: 1 }}
@@ -5880,7 +5896,7 @@ export default function App() {
                             title={t.appView.automaticallyPairsPortsMatchingTheToolConventionTip}>{t.appView.suggestWiring}</button>
 
                           {/* 接線表 */}
-                          <div className="field-label" style={{ marginTop: 8 }}>{t.appView.connections(extConns.length)}</div>
+                          <div className="field-label" style={{ marginTop: 8 }}>{t.appView.connections(extConns.length)}<BetaBadge feature="B04" /></div>
                           {extConns.map((c, i) => (
                             <div key={i} style={{ display: 'flex', gap: 3, marginTop: 3, alignItems: 'center' }}>
                               <select aria-label={t.appView.connectionFileA(i + 1)} className="input" style={{ width: 46, padding: '2px 3px', fontSize: 10.5 }}
@@ -6239,7 +6255,7 @@ export default function App() {
                         {/* 量測波形匯入（乙路）：不依賴串接結果——客戶拿
                             示波器檔來的時候，常常手上只有板子與波形。 */}
                         <details style={{ marginTop: 8 }}>
-                          <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>{t.appView.importMeasuredWaveformScopeTdr}</summary>
+                          <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>{t.appView.importMeasuredWaveformScopeTdr}<BetaBadge feature="B18" /></summary>
                           <div className="panel-hint" style={{ marginTop: 4 }}>{t.appView.twoColumnCsvTimeAndVoltageOr}</div>
                           <div className="panel-hint" style={{ marginTop: 2 }}>{t.appView.t0IsTheBoardLaunchReflectionTime}</div>
                           <div className="panel-hint" style={{ marginTop: 2 }}>{t.appView.afterAnalysisResultsAppearInTheTdr}<strong>{t.appView.theTabStaysDimUntilThen}</strong>{t.appView.thisIsExpected}</div>
@@ -6935,7 +6951,7 @@ export default function App() {
                                           marginTop: 10, paddingTop: 8,
                                           borderTop: '1px solid #232b36',
                                         }}>
-                                          <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 4 }}>{t.appView.sampleCrossSectionsAlongTrace}</div>
+                                          <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 4 }}>{t.appView.sampleCrossSectionsAlongTrace}<BetaBadge feature="B19" /></div>
                                           <div style={{ fontSize: 10.5, color: '#8fa1b5', marginBottom: 6 }}>{t.appView.takeCutsAtRegularIntervalsAlongThe}</div>
                                           <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
                                             <div style={{ flex: 1 }}>

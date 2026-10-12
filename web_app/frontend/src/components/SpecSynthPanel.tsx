@@ -10,6 +10,7 @@ import type { Lang, Messages } from '../i18n'
 import { pickList, pickText } from '../backendFields'
 import { generateSynthBody, specModelInfo, synthMissingInputs } from '../specModel'
 import type { SynthForm, SynthRoleChoice } from '../specModel'
+import BetaBadge from './BetaBadge'
 
 type AnyRecord = Record<string, any>
 type Notice = (t: Messages, lang: Lang) => string
@@ -88,7 +89,7 @@ export default function SpecSynthPanel({ request, errorOf, disabled, onImported 
 
   return (
     <div className="model-library__gen-card model-library__gen-card--synth">
-      <strong className="model-library__gen-title">{t.specMethodSynth}</strong>
+      <strong className="model-library__gen-title">{t.specMethodSynth}<BetaBadge feature="B13" /></strong>
       <p className="model-library__hint">{t.specMethodSynthHint}</p>
       <div className="model-library__spec-filter">
         <label>{t.synthFamily}

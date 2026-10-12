@@ -17,6 +17,7 @@ import { applyEqRow, ddr4Mask, previewUiMismatch } from '../eyeWizard'
 import type { PortMap } from '../eyeWizard'
 import { errorText, pickList, pickText } from '../backendFields'
 import { useT } from '../i18n'
+import BetaBadge from './BetaBadge'
 
 export interface EditableParameter {
   name: string
@@ -176,7 +177,7 @@ export default function EyeWizardAmiAdvanced(props: EyeWizardAmiAdvancedProps) {
         )
       })}
 
-      <h4>{t.previewTitle}</h4>
+      <h4>{t.previewTitle}<BetaBadge feature="B11" /></h4>
       {!ready && <p className="hint">{t.previewNeeds}</p>}
       <div className="eye-wizard__row">
         <button className="btn" disabled={!ready || previewBusy} title={t.previewTip}

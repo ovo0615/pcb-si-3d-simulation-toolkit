@@ -26,6 +26,7 @@ import { confirmationState } from '../eyeWizard'
 import SelectorFunnelPanel from './SelectorFunnelPanel'
 import { selectorSignature } from '../selectorFunnelSelection'
 import type { SelectorChange, SelectorInput } from '../selectorFunnelSelection'
+import BetaBadge from './BetaBadge'
 type MultiLaneText = Messages['multiLane']
 
 function failure(data: any, fallback: string, key = 'detail'): Error {
@@ -1020,7 +1021,7 @@ export default function MultiLaneWizard({
       {wizardStep === 5 && confirmation !== 'confirmed' && <p className="warning">
         {confirmation === 'stale' ? t.eyeWizard.stale : t.eyeWizard.missing.confirm}</p>}
       <section data-wizard-step={3} hidden={hiddenStep(3)}>
-        <h3>{m.selectTitle}</h3>
+        <h3>{m.selectTitle}<BetaBadge feature="B09" /></h3>
         <p className="hint">
           {m.selectHint}</p>
         <label>{m.txPackage}<select className="input" value={packageId}

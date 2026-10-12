@@ -16,6 +16,7 @@ import {
 } from '../specModel'
 import type { IbisTemplate, LicenseFailure, TemplateFilter } from '../specModel'
 import type { Lang, Messages } from '../i18n'
+import BetaBadge from './BetaBadge'
 
 // 保存訊息所需資料，畫面切換語言時重新產生文字。
 type LibraryNotice = (t: Messages, lang: Lang) => string
@@ -717,7 +718,7 @@ export default function ModelLibrary() {
           <div className="model-library__tabs">
             {(['wizard', 'library', 'toolbox'] as const).map(key => (
               <button key={key} className={activePanel === key ? 'is-active' : ''}
-                onClick={() => setActivePanel(key)}>{tabs[key]}</button>
+                onClick={() => setActivePanel(key)}>{tabs[key]}{key === 'toolbox' && t.featureTier.betaSuffix}</button>
             ))}
           </div>
           <div className="model-library__count">
@@ -757,7 +758,7 @@ export default function ModelLibrary() {
         <summary>{t.library.specGenerator}</summary>
         <div className="model-library__gen-methods">
         <div className="model-library__gen-card model-library__gen-card--spisim">
-          <strong className="model-library__gen-title">{t.library.specMethodSpisim}</strong>
+          <strong className="model-library__gen-title">{t.library.specMethodSpisim}<BetaBadge feature="B12" /></strong>
           <p className="model-library__hint">{t.library.specMethodSpisimHint}</p>
           {/* 實機比對（#0116）：SPISim 規格模型的 Rx 終端不是 POD，DDR5 眼高少約一半。 */}
           <p className="model-library__hint is-warning">{t.library.specSpisimRxHint}</p>
@@ -869,7 +870,7 @@ export default function ModelLibrary() {
 
       {/* 量測→IBIS 建模（B4）：客戶只有示波器／SMU 量測時的路。 */}
       <details className="model-library__import" style={{ padding: '8px 12px' }}>
-        <summary>{t.library.measurementBuilder}</summary>
+        <summary>{t.library.measurementBuilder}<BetaBadge feature="B14" /></summary>
         <p className="model-library__hint" style={{ marginTop: 4 }}>
           {t.library.measurementUnits}</p>
         <p className="model-library__hint">

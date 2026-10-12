@@ -10,6 +10,7 @@ import { errorText, pickList, pickText } from '../backendFields'
 import { useT } from '../i18n'
 import OpenFolderButton from './OpenFolderButton'
 import type { Lang, Messages } from '../i18n'
+import BetaBadge from './BetaBadge'
 
 type SerdesText = Messages['serdes']
 
@@ -155,7 +156,7 @@ export default function SerdesCompliancePanel() {
   return (
     <div className="ibis-wizard">
       <section>
-        <h3>{tx.title}</h3>
+        <h3>{tx.title}<BetaBadge feature="B17" /></h3>
         <p className="hint">
           {tx.intro}
         </p>
