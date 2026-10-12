@@ -47,6 +47,13 @@ Most images are shared, but any image containing local paths or customer data ne
 anonymized `-public` variant first. Before copying in any image the public repository does not
 already have, actually look at the image content and decide.
 
+### Feature tiers (main / Beta Option)
+
+`web_app/frontend/src/featureTiers.json` is the single list of which features are Beta. It is synced
+from the private repository with the rest of `web_app/frontend/` — do not edit it here. README
+feature lists and the manual only add a "(Beta)" mark and point to that file; never copy the full
+tier table into documentation.
+
 ## Before publishing
 
 Review changed files for private/local file paths (including this machine's own directory
