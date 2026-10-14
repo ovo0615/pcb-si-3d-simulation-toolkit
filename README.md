@@ -14,6 +14,7 @@ PCB 通道裁切、分段、HFSS／SIwave 混合求解、Touchstone 串接、IBI
 | [版本說明](CHANGELOG.md) | 本次基準與尚待驗收項目 |
 | [驗證資料](validation/README.md) | 個別功能的歷史驗證條件與結果 |
 | [圖片帳冊](docs/visual-assets.md) | 截圖版本與驗收狀態 |
+| [2027 功能藍圖](docs/ROADMAP.md) | 規劃方向與 Beta 轉正式原則（非交期承諾） |
 
 文件適用工具 `1.0.0`，功能基準 `65fa265`。35 張主圖狀態已盤點，仍有 3 項缺圖；5 張條件圖與完整工具包驗收尚未完成，詳見版本說明與圖片帳冊。
 
