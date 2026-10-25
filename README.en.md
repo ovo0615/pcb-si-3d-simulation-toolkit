@@ -1,7 +1,5 @@
 # PCB SI 3D Simulation Toolkit
 
-![Current task picker with no board loaded; Beta options collapsed](graph/gui-01-task-picker.png)
-
 Extract and solve a PCB signal channel, cascade its segments, and inspect eye diagrams, TDR locations and cross-section impedance as needed.
 
 **This public repository contains front-end assets, documentation and demonstration data. It has no back end, launcher or Ansys licence.** Its Source ZIP cannot run the complete workflow. For the complete tool and commercial support, contact [TADC](https://www.cadmen.com/) or [jeff.hong@cadmen.com](mailto:jeff.hong@cadmen.com).
@@ -14,13 +12,13 @@ Extract and solve a PCB signal channel, cascade its segments, and inspect eye di
 | Endpoint ports, profiles and frequency sweeps | [03](docs/manual/03-Port與求解設定.md) |
 | Whole-board or segmented analysis, HFSS/SIwave assignment | [04](docs/manual/04-分段與混合求解.md) |
 | Scheduling, stopping, export retries and Touchstone cascading | [05](docs/manual/05-排程與串接.md) |
-| Model import, spec models (SPISim or toolkit-synthesized, Beta), Eye Wizard; eye analysis (single, multi-port, AMI, Beta) | [06](docs/manual/06-IBIS與眼圖.md) |
+| External IBIS/AMI model import, Eye Wizard; eye analysis (single, multi-port, AMI, Beta) | [06](docs/manual/06-IBIS與眼圖.md) |
 | Simulated or measured (Beta) TDR mapped to Layout | [07](docs/manual/07-TDR定位.md) |
-| 2D cross-section impedance and lateral convergence | [08](docs/manual/08-截面阻抗.md) |
+| 2D cross-section impedance and lateral convergence (Beta) | [08](docs/manual/08-截面阻抗.md) |
 | Snapshots, watermarks and a single-file HTML report | [09](docs/manual/09-報告與輸出.md) |
-| External channels, remote solve packages (Beta), S-parameter tools (Beta) and COM (Beta) | [10](docs/manual/10-其他工作模式.md) |
+| External channels, remote solve packages (Beta), S-parameter tools (Beta) | [10](docs/manual/10-其他工作模式.md) |
 
-Features marked Beta are usable but have fewer validation cases; at equal severity, main features are fixed first (except issues affecting data, privacy or result validity). Beta does not mean the result is invalid. Tiers follow [`featureTiers.json`](web_app/frontend/src/featureTiers.json); the in-app labels and the one-time confirmation are described in [chapter 01](docs/manual/01-開始使用.md#beta-選項).
+Beta starts OFF on every launch. Enable it for the current launch before use. Features marked Beta are usable but have fewer validation cases; at equal severity, main features are fixed first (except issues affecting data, privacy or result validity). Beta does not mean the result is invalid. Tiers follow [`featureTiers.json`](web_app/frontend/src/featureTiers.json); the in-app labels and the session switch and confirmation are described in [chapter 01](docs/manual/01-開始使用.md#beta-選項).
 
 ## Complete-tool prerequisites
 
@@ -28,16 +26,17 @@ Features marked Beta are usable but have fewer validation cases; at equal severi
 |---|---|
 | Windows 10/11 x64 | Runs the complete tool |
 | Ansys Electronics Desktop 2026 R1 (2026.1) and applicable licences | EDB operations and selected solvers; install and license separately |
-| Python 3.12 x64 | Required by the native distribution; source packages also accept 3.10. Follow launcher installation prompts; install first for offline use |
-| Microsoft Edge WebView2 Runtime | Default desktop window; the launcher falls back to a browser if unavailable |
-| Locked backend dependencies and pywebview supplied with the tool | Installed by `start.bat` into separate environments; do not upgrade independently |
+| Bundled CPython 3.12.10 and offline packages | The v1.0.4 installer creates the environment; no separate Python or pip package installation is needed |
+| Microsoft Edge WebView2 Evergreen Runtime | Displays the tool window; follow installer prompts if missing |
 | IBIS/AMI models or measurement data (optional) | Eye and measurement analysis; verify usage and redistribution rights |
 
 Ordinary use does not require Node.js. Front-end source changes require Node.js/npm and installation according to the supplied `package.json` and lockfile.
 
 ## First result
 
-Obtain the complete tool → run `web_app/start.bat` → select tasks → load a demo board → select signal/reference nets → cut out and preprocess → create ports → choose whole-board or segmented analysis → solve and validate Touchstone → cascade → update report snapshots.
+Obtain the complete installer → verify SHA-256 → run Setup and import the licence → open the tool → select tasks → load a demo board → select signal/reference nets → cut out and preprocess → create ports → choose whole-board or segmented analysis → solve and validate Touchstone → cascade → update report snapshots.
+
+The v1.0.4 installer includes `Example_SYZ.aedb`; copy it to your own ASCII work path before use. Trial licences run for 14 days, with dates defined by the licence file.
 
 Follow [00 First run](docs/manual/00-第一次跑.md). Eye analysis has a separate [chapter 06](docs/manual/06-IBIS與眼圖.md). There is no fixed completion-time guarantee. The detailed manual is in Traditional Chinese.
 
@@ -52,6 +51,6 @@ Follow [00 First run](docs/manual/00-第一次跑.md). Eye analysis has a separa
 | Reports/support bundles | Check paths, models, logs and identifiers before sending. Watermarks are not DRM |
 | 2D Q2D | Does not cover the complete 3D effects of vias, corners or reference-plane gaps |
 
-Documentation targets `1.0.0`, feature baseline `65fa265`. The status of all 35 main screenshots has been recorded, with 3 missing items. 5 conditional screenshots and distribution-package acceptance remain pending. [Release notes](CHANGELOG.md) · [Image register](docs/visual-assets.md) · [Validation](validation/README.md) · [Troubleshooting](docs/manual/11-疑難排解.md). Historical validation supports only its recorded versions, data and conditions.
+This documentation draft follows v1.0.4 behaviour; it does not establish a public release or completed live acceptance. See the image register for older screenshots and pending replacements. [Release notes](CHANGELOG.md) · [Image register](docs/visual-assets.md) · [Validation](validation/README.md) · [Troubleshooting](docs/manual/11-疑難排解.md). Historical validation supports only its recorded versions, data and conditions.
 
 Commercial licensing and support are provided by Taiwan Auto-Design Co., Ltd. (TADC). This independent showcase is not affiliated with or endorsed by Ansys, Inc. Trademarks belong to their respective owners. The tool does not include, provide or bypass Ansys licensing.

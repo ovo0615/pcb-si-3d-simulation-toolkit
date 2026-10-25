@@ -1,73 +1,30 @@
-# Public showcase repository guidelines
+# 公開展示版維護規則
 
-This repository contains the public demonstration edition of the PCB SI 3D Simulation Toolkit.
-The complete implementation is maintained separately in a restricted-access repository that
-holds the full front-end + back-end + test suite + launcher scripts.
+本 Repo 僅放公開前端、已建置的 `dist`、使用者文件、去識別截圖與展示／驗證資料。完整後端、啟動器、求解協調、私有測試與開發決策不放在這裡。Source ZIP 無法執行完整工具。
 
-## Scope
+## 文件只在公開版維護
 
-- Keep this repository limited to public front-end assets, workflow visualization, documentation, and demonstration data.
-- Do not add company-specific back-end implementations, customer data, internal file paths, credentials, solver orchestration, or licensed execution environments.
-- `web_app/backend/` does not exist on this branch on purpose — that is expected, not a missing file.
-- Use Demo or anonymized PCB data in screenshots and examples.
+`操作說明.md`、`docs/manual/`、截圖與公開驗證報告以本 Repo 為唯一維護位置。不在私有版重建手冊，也不從私有版整份覆蓋 README、AGENTS 或使用者文件。跨 Repo 引用使用公開檔案的完整網址，避免相對路徑分岔。
 
-## Files that exist on both sides
+前端從私有版已提交的固定 commit 同步，核對整個目錄與 `web_app/VERSION`，再建置 `dist`；公開版不帶私有測試驅動、內部 fixture 或後端實作。`web_app/frontend/src/featureTiers.json` 隨前端同步，不在公開版單獨修改分級。README 與手冊只標 Beta 並連到登錄檔，不複製整份分級表。
 
-### The manual: same text on both sides, safe to sync wholesale
+## 截圖與版本
 
-Since 2026-08-14, `操作說明.md` and `docs/manual/` (ten chapters) carry **word-for-word
-identical text** on both sides. The private repository is the single source; the whole set can
-be copied over.
+- 新圖片先逐張看過；只用有權公開的中性示範資料。不得含使用者／客戶名稱、本機路徑、授權位址或憑證。
+- 不符現行流程的圖先移除，不用舊圖冒充新介面；在 `docs/visual-assets.md` 留待補項。未遮罩原圖不進公開版。
+- `CHANGELOG.md` 的未發布項目與已發布歷史分開。未建立公開 tag／Release 的版本不得寫成已發布。
+- 混合來源串接目前維持 Beta；須完成整合與實機驗證才改分級。截面阻抗（Q2D）亦為 Beta，每次啟動需重新啟用。
 
-The only difference is four screenshots whose log, path, or location fields expose a local
-absolute path. The public side must reference the anonymized `-public` variants instead:
+## 提交前檢查
 
-| Private reference | Public must use | What leaked |
-|---|---|---|
-| `指定裁切區_20260730.png` | `指定裁切區_20260730-public.png` | `.aedb` path in the log and input field |
-| `混合排程模擬過程_20260805.png` | `混合排程模擬過程_20260805-public.png` | solver output path |
-| `背鑽示意_20260805.png` | `背鑽示意_20260805-public.png` | save-as path field |
-| `IBIS模型庫_20260813.png` | `IBIS模型庫_20260813-public.png` | managed model library location, including the user name |
-
-Unredacted originals stay in the private repository only. The public repository carries the
-`-public` variant alone — never both.
-
-After syncing, run `bash .github/scripts/ci_scan_local.sh`, which reproduces every CI scan
-locally. **Do not rewrite those patterns as inline shell commands** — the shell eats one level
-of backslash escaping, so the check passes locally and then fails in CI (the drive-letter match
-was silently disabled that way once, and two example paths got pushed).
-
-> An earlier rule said the manual must never be overwritten wholesale — that applied when the
-> public manual was the shorter one and no longer holds. **Other files** (READMEs, validation
-> reports) are still maintained independently and must not be copied over wholesale.
-
-### graph/: not every image is publishable
-
-Most images are shared, but any image containing local paths or customer data needs an
-anonymized `-public` variant first. Before copying in any image the public repository does not
-already have, actually look at the image content and decide.
-
-### Feature tiers (main / Beta Option)
-
-`web_app/frontend/src/featureTiers.json` is the single list of which features are Beta. It is synced
-from the private repository with the rest of `web_app/frontend/` — do not edit it here. README
-feature lists and the manual only add a "(Beta)" mark and point to that file; never copy the full
-tier table into documentation.
-
-## Before publishing
-
-Review changed files for private/local file paths (including this machine's own directory
-paths), customer identifiers, API keys, tokens, passwords, and proprietary model files. Keep the
-public repository separate from any private implementation repository. Before pushing, confirm
-no backend files were accidentally staged:
+從公開主線建立短命分支，只暫存本次變更。掃描使用 Git 追蹤清單，新增檔需先暫存才能掃到。
 
 ```bash
-git ls-files | grep -v '^\.github/' | grep -iE "backend|\.py$|pyedb|aedt|start\.(bat|ps1)"
+bash .github/scripts/ci_scan_local.sh
+python .github/scripts/check_dist_assets.py
+python .github/scripts/check_touchstone_headers.py
 ```
 
-The command above should produce no output. CI helper scripts under `.github/scripts/` (for
-example `check_dist_assets.py`) are expected and excluded.
+前端在 `web_app/frontend` 使用 Node.js／npm，依 `package-lock.json` 執行 `npm ci`、`npm run build`。另檢查文件連結、GitHub 錨點與新增 diff 行的客戶識別資訊；檢查全部通過才進入發布流程。CI 規則不能用忽略失敗代替驗證。圖片是二進位，文字掃描不會證明截圖乾淨。
 
-## Technical note
-
-The showcase describes workflows related to Ansys HFSS 3D Layout, PyAEDT, and EDB. It is an independent technical portfolio and is not an official Ansys project.
+完整產品測試只在受限的開發版依鎖檔執行，不能把後端或模型資料補進公開版來讓測試通過。此工具與 Ansys 無隸屬或背書關係，亦不包含 Ansys 授權。
