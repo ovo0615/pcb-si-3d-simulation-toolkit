@@ -42,8 +42,10 @@ pattern='(^|[^A-Za-z])[A-Za-z]:(\\\\|/)|\\\\\\\\[A-Za-z0-9_.-]+\\\\|10\.[0-9]+\.
 check "介面語言檔的路徑／憑證掃描" \
   "$(git grep -I -n -i -E "$pattern" -- $I18N || true)"
 
-check "客戶關鍵字（報告功能原始碼除外）" \
-  "$(git grep -I -n -i -E 'customer' -- . $CUST_EXCLUDES $REPORT_SOURCES || true)"
+# 只豁免完整 customer_display，同一行的其他客戶詞仍會被擋。
+customer_matches=$( (git grep -I -n -i -E 'customer' -- . $CUST_EXCLUDES $REPORT_SOURCES || true) | python .github/scripts/filter_customer_references.py) || exit 1
+check "客戶關鍵字（報告功能原始碼除外）" "$customer_matches"
+python .github/scripts/test_customer_scan.py || exit 1
 
 pattern='(^|[^A-Za-z])[A-Za-z]:[\\/]|\\\\[A-Za-z0-9_.-]+\\'
 check "豁免檔中的絕對路徑" \

@@ -71,15 +71,19 @@ jobs:
         run: |
           set -e
           export LC_ALL=C
-          EXCLUDES=":(exclude).git :(exclude).github/** :(exclude,glob)**/dist/** :(exclude,glob)**/package-lock.json :(exclude,glob)**/*.svg :(exclude)AGENTS.md :(exclude)README.en.md :(exclude)README.zh-TW.md :(exclude)docs/visual-assets.md"
+          CUST_EXCLUDES=":(exclude).git :(exclude).github/** :(exclude,glob)**/dist/** :(exclude,glob)**/package-lock.json :(exclude,glob)**/*.svg :(exclude)AGENTS.md :(exclude)README.en.md :(exclude)README.zh-TW.md :(exclude)docs/visual-assets.md"
           REPORT_SOURCES=":(exclude,glob)**/components/ReportCenter.tsx :(exclude,glob)**/reportTypes.ts :(exclude)一鍵HTML報告_操作與交接.md :(exclude,glob)web_app/frontend/src/i18n/*.ts"
-          matches=$(git grep -I -n -i -E 'customer' -- . $EXCLUDES $REPORT_SOURCES || true)
+          # 只豁免完整 customer_display，同一行的其他客戶詞仍會被擋。
+          matches=$( (git grep -I -n -i -E 'customer' -- . $CUST_EXCLUDES $REPORT_SOURCES || true) | python .github/scripts/filter_customer_references.py)
           if [ -n "$matches" ]; then
             echo "Customer references found outside the report feature - review before merging:"
             echo "$matches"
             exit 1
           fi
           echo "OK: no customer references outside the report feature."
+
+      - name: Test precise customer identifier exception
+        run: python .github/scripts/test_customer_scan.py
 
       # 上面那條敏感掃描把 AGENTS.md、兩份 README 與 docs/visual-assets.md 排除
       # 掉了——那是為了讓它們能寫出 `graph/…` 這類相對路徑與範例。但排除的代價
