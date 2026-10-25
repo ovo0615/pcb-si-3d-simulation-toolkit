@@ -1,4 +1,4 @@
-/** 板上既有的元件端 Port（#0122，後端 `existing_component_ports`）。 */
+/** 板上既有的元件端 Port（後端 `existing_component_ports`）。 */
 export interface ExistingPort {
   name: string
   net: string

@@ -1,4 +1,4 @@
-// 報告快照中繼資料的 segment_count（卡 0083 R5）。
+// 報告快照中繼資料的 segment_count。
 // 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
 //
 // 原本只看 `segRun`（本次工作階段跑過的分段）與 `segAnalysis`。重新開啟專案、

@@ -2,7 +2,13 @@
 // 右側面板仿 SIwave 欄位設計：Layers / Components / Nets 分頁
 //   Layers 欄位由左至右：Fill/Unfill All、Show/Hide All、Planes、Traces、Pads、Vias、Circuit Elements
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { useT } from '../i18n'
+import { useLengthT as useT } from '../useLengthT'
+import { useLengthUnit } from '../lengthContext'
+import { mergeRestoredVisibility, restoredTransform } from '../previewSessionView'
+import { zoomAt } from '../layoutZoom'
+import type { SavedPreviewView } from '../previewSessionView'
+import { notifySessionChange, registerSessionField, restoredFieldValue } from '../uiSession'
+import { useSessionState } from '../useSessionState'
 import {
   forbiddenIntervalRects, segmentOverlayLayers, type ForbiddenInterval,
 } from '../segmentOverlay'
@@ -43,7 +49,7 @@ export interface SegmentCutsInfo {
     feature_count: number
   }[]
   valids?: boolean[]
-  /** 不分割（卡 0121）：整塊板一個區域，沒有切面線；求解器取 region_solvers[0]。 */
+  /** 不分割：整塊板一個區域，沒有切面線；求解器取 region_solvers[0]。 */
   whole_board?: boolean
   region_solvers?: ('hfss' | 'siwave')[]
   region_scores?: number[]
@@ -54,7 +60,7 @@ export interface SegmentCutsInfo {
     hard_blocked: boolean
     reasons: string[]
   }[]
-  /** 板子禁切區間（#0130）：沿切割軸所有硬擋取樣面合併而成，與 N 無關。 */
+  /** 板子禁切區間：沿切割軸所有硬擋取樣面合併而成，與 N 無關。 */
   forbidden_intervals?: ForbiddenInterval[]
   safety_overlay?: {
     items: {
@@ -169,7 +175,15 @@ interface Preview2DProps {
   crossSectionCut?: CrossSectionCut | null
   onCrossSectionRegionDrawn?: (region: CrossSectionRegion) => void
   onCrossSectionCutDrawn?: (cut: CrossSectionCut) => void
-  estimatedCutoutBoundary?: number[][] | null // PyEDB 唯讀預檢外框（mm）
+  estimatedCutoutBoundary?: number[][] | null //  唯讀預檢外框（mm）
+  /** 畫布解析度倍率：報告收納以 3 倍原生重畫，不是把 1 倍畫布放大。 */
+  renderScale?: number
+  /** 報告收納：用定位後的視角把這份資料畫完一次就呼叫。報告容器靠它判定
+   *  可以截圖，不用固定延遲猜。 */
+  onRendered?: () => void
+  /** 給了就把視角、圖層／元件／網路顯示、側欄分頁跟著關窗保存。
+   *  同時開著的幾份預覽只能有一份給（鍵重複會互相蓋掉）。 */
+  sessionKey?: string
 }
 
 // ── 顏色常數 ────────────────────────────────────────────────
@@ -252,10 +266,14 @@ export default function Preview2D({
   onCrossSectionCutDrawn,
   showOnlySelected: showOnlySelectedProp,
   onShowOnlySelectedChange,
+  renderScale = 1,
+  onRendered,
+  sessionKey = '',
 }: Preview2DProps) {
   // tp 只在切換語言時換成另一份物件（messagesFor 回傳固定的字典），
   // 所以放進 drawCanvas 的相依不會造成多餘的重畫。
   const { t } = useT()
+  const { unit, length } = useLengthUnit()
   const tp = t.preview2d
   const canvasRef    = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -268,7 +286,7 @@ export default function Preview2D({
   const [transform,  setTransform]  = useState({ x: 0, y: 0, scale: 1 })
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart,  setDragStart]  = useState({ x: 0, y: 0 })
-  const mouseDownPoint = useRef({ x: 0, y: 0 })
+  const mouseDownPoint = useRef<{ x: number; y: number; button: number } | null>(null)
 
   // 刀線拖曳：拖動時只有這條線跟著走，分段矩形要等後端重算才會對，
   // 因此拖動期間把矩形壓暗，表示「這是舊的」。
@@ -281,11 +299,45 @@ export default function Preview2D({
   const [visibleComps, setVisibleComps] = useState<Record<string, boolean>>({})
   const [visibleNets,  setVisibleNets]  = useState<Record<string, boolean>>({})
 
+  // 關窗前的視角與顯示：資料第一次載入、重設成全開之後才合併上去。
+  const pendingRestore = useRef(sessionKey ? {
+    layerModes: restoredFieldValue<Record<string, unknown> | undefined>(`${sessionKey}.layerModes`, undefined),
+    visibleComps: restoredFieldValue<Record<string, unknown> | undefined>(`${sessionKey}.visibleComps`, undefined),
+    visibleNets: restoredFieldValue<Record<string, unknown> | undefined>(`${sessionKey}.visibleNets`, undefined),
+    view: restoredFieldValue<Partial<SavedPreviewView> | undefined>(`${sessionKey}.view`, undefined),
+  } : null)
+  const sessionValues = useRef({ layerModes, visibleComps, visibleNets })
+  sessionValues.current = { layerModes, visibleComps, visibleNets }
+  const transformRef = useRef(transform)
+  transformRef.current = transform
+  useEffect(() => {
+    if (!sessionKey) return
+    const setters = {
+      layerModes: (v: unknown) => setLayerModes(prev => mergeRestoredVisibility(prev, v as Record<string, unknown>)),
+      visibleComps: (v: unknown) => setVisibleComps(prev => mergeRestoredVisibility(prev, v as Record<string, unknown>)),
+      visibleNets: (v: unknown) => setVisibleNets(prev => mergeRestoredVisibility(prev, v as Record<string, unknown>)),
+    }
+    const offs = (['layerModes', 'visibleComps', 'visibleNets'] as const).map(name =>
+      registerSessionField(`${sessionKey}.${name}`, () => sessionValues.current[name], setters[name], {}))
+    // 視角：拖曳時不觸發自動保存，跟著下一次變更或關窗一起存。
+    offs.push(registerSessionField(`${sessionKey}.view`,
+      () => ({ fitKey: fitKey ?? '', ...transformRef.current }),
+      v => applyRestoredView(v as Partial<SavedPreviewView>), {}))
+    return () => offs.forEach(off => off())
+  }, [sessionKey, fitKey])
+  const visibilityLoaded = useRef(false)
+  useEffect(() => {
+    if (!sessionKey) return
+    if (!visibilityLoaded.current) { visibilityLoaded.current = Object.keys(layerModes).length > 0; return }
+    notifySessionChange()
+  }, [sessionKey, layerModes, visibleComps, visibleNets])
+
   // 面板折疊
-  const [panelOpen, setPanelOpen] = useState(layerPanelInitiallyOpen)
+  const [panelOpen, setPanelOpen] = useSessionState(sessionKey && `${sessionKey}.panelOpen`, layerPanelInitiallyOpen)
 
   // 分頁 / 搜尋
-  const [activeTab,   setActiveTab]   = useState<'Layers' | 'Components' | 'Nets'>('Layers')
+  const [activeTab,   setActiveTab]   = useSessionState<'Layers' | 'Components' | 'Nets'>(
+    sessionKey && `${sessionKey}.activeTab`, 'Layers')
   const [compFilter,  setCompFilter]  = useState('')
   const [netFilter,   setNetFilter]   = useState('')
 
@@ -315,9 +367,14 @@ export default function Preview2D({
         if (prim.net)                           nets[prim.net]  = true
       })
     })
-    setLayerModes(modes)
-    setVisibleComps(comps)
-    setVisibleNets(nets)
+    const restore = pendingRestore.current
+    if (restore) {
+      // 只在第一次載入時套回；之後換板、換畫面照常全開。
+      pendingRestore.current = { ...restore, layerModes: undefined, visibleComps: undefined, visibleNets: undefined }
+    }
+    setLayerModes(mergeRestoredVisibility(modes, restore?.layerModes))
+    setVisibleComps(mergeRestoredVisibility(comps, restore?.visibleComps))
+    setVisibleNets(mergeRestoredVisibility(nets, restore?.visibleNets))
   }, [data])
 
   // ── 幾何 ──────────────────────────────────────────────────
@@ -361,8 +418,13 @@ export default function Preview2D({
   const fittedRef = useRef(false)
   /** 使用者是否在上次全覽之後自己平移／縮放過。沒動過的話，畫布尺寸一變
    *  （載入後圖層面板展開、拖動日誌面板、視窗縮放）就重新置中——原本只在
-   *  「還沒 fit 過」時重算，板子停在舊尺寸的中心，看起來偏一邊（#0062）。 */
+   *  「還沒 fit 過」時重算，板子停在舊尺寸的中心，看起來偏一邊。 */
   const userMovedViewRef = useRef(false)
+  /** fitView 最後一次設定的視角。同一次 commit 裡繪圖效果會先拿舊視角畫一次，
+   *  只有畫的正是這個物件時才算「定位後畫完」（onRendered）。 */
+  const fitTransformRef = useRef<typeof transform | null>(null)
+  const onRenderedRef = useRef(onRendered)
+  onRenderedRef.current = onRendered
 
   const fitView = useCallback(() => {
     if (!data || !containerRef.current) return
@@ -377,12 +439,34 @@ export default function Preview2D({
     const s = Math.min(w*0.85/cW, h*0.85/cH)
     if (!Number.isFinite(s) || s <= 0) return
     const cx = (min[0]+max[0])/2, cy = (min[1]+max[1])/2
-    setTransform({ x: w/2 - cx*s, y: -h/2 + cy*s, scale: s })
+    const next = { x: w/2 - cx*s, y: -h/2 + cy*s, scale: s }
+    fitTransformRef.current = next
+    setTransform(next)
     fittedRef.current = true
     userMovedViewRef.current = false
   }, [data, computeContentBounds])
 
-  useEffect(() => { fittedRef.current = false; fitView() }, [data, fitKey, fitView])
+  /** 關窗前的視角：同一個畫面（fitKey 相同）才套回，套了就不再自動全覽。 */
+  const applyRestoredView = (saved: Partial<SavedPreviewView> | undefined): boolean => {
+    const view = restoredTransform(saved, fitKey ?? '')
+    if (!view) return false
+    setTransform(view)
+    fittedRef.current = true
+    userMovedViewRef.current = true
+    return true
+  }
+
+  useEffect(() => {
+    fittedRef.current = false
+    fitView()
+    const restore = pendingRestore.current
+    if (data && restore?.view) {
+      pendingRestore.current = { ...restore, view: undefined }
+      applyRestoredView(restore.view)
+    }
+    // applyRestoredView 每次 render 都是新的函式，只跟資料與畫面有關。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, fitKey, fitView])
 
   useEffect(() => {
     if (!focusBounds || !containerRef.current) return
@@ -429,7 +513,7 @@ export default function Preview2D({
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const dpr  = window.devicePixelRatio || 1
+    const dpr  = (window.devicePixelRatio || 1) * renderScale
     const rect = cont.getBoundingClientRect()
     if (rect.width === 0 || rect.height === 0) return
     canvas.width  = rect.width  * dpr
@@ -772,7 +856,7 @@ export default function Preview2D({
         })
       }
 
-      // 板子禁切區間（#0130）：斜線填色，畫在板子層最底下，硬擋框與斜走線疊在
+      // 板子禁切區間：斜線填色，畫在板子層最底下，硬擋框與斜走線疊在
       // 它上面才不會被蓋住。區間與 N 無關，取代原本隨 N 移動的 250 條紅色虛線。
       if (showSegmentSafetyOverlay && segmentCuts.forbidden_intervals?.length) {
         forbiddenIntervalRects(
@@ -839,7 +923,7 @@ export default function Preview2D({
         ctx.lineWidth = px2(1.2)
         ctx.strokeStyle = 'rgba(255, 82, 82, 0.75)'
         ctx.beginPath()
-        ;(segmentCuts.rejected_candidates || []).forEach(candidate => {
+        ;([] as NonNullable<SegmentCutsInfo["rejected_candidates"]>).forEach(candidate => {
           const p = candidate.position_mm
           if (axis === 0) {
             ctx.moveTo(p, contentBounds.min[1]); ctx.lineTo(p, contentBounds.min[1] + tick)
@@ -961,7 +1045,7 @@ export default function Preview2D({
         // 標帶狀分段」——跳過這一段就好，不要順手把其他疊圖一起帶走。
         // 一刀都沒有時整片板子就是「第 1 段」，標一個 S1 只是雜訊。
         // 例外是整片求解：那一塊就是要送去求解的整片，標出求解器才看得出
-        // 它跟著表格的「指定」走（卡 0121）。
+        // 它跟著表格的「指定」走。
         const edges = segmentCuts.positions_mm.length || segmentCuts.whole_board
           ? regionEdges : []
         for (let index = 0; index + 1 < edges.length; index++) {
@@ -1008,7 +1092,7 @@ export default function Preview2D({
       ctx.setLineDash(drawingRegion ? [6 / transform.scale, 4 / transform.scale] : [])
       ctx.strokeRect(shownRegion.x0Mm, shownRegion.y0Mm, w, h)
       ctx.setLineDash([])
-      // 切線兩端必定貼齊工作範圍，所以直接畫滿整個範圍（ADR-0002 的沿用）
+      // 切線兩端必定貼齊工作範圍，所以直接畫滿整個範圍（ 的沿用）
       if (crossSectionCut && !drawingRegion) {
         ctx.strokeStyle = '#ffd600'
         ctx.lineWidth = 2 / transform.scale
@@ -1064,21 +1148,21 @@ export default function Preview2D({
           ctx.fillStyle = marker.excluded ? 'rgba(186, 196, 208, 0.95)' : '#ff8ab0'
           ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)'
           ctx.lineWidth = 3
-          ctx.strokeText(marker.label, 8, -8)
-          ctx.fillText(marker.label, 8, -8)
+          ctx.strokeText(`${marker.label} ${length(marker.distance_mm)} ${unit}`, 8, -8)
+          ctx.fillText(`${marker.label} ${length(marker.distance_mm)} ${unit}`, 8, -8)
           ctx.restore()
         }
       })
       ctx.restore()
     }
 
-    // ── 裁切外框：PyEDB 精確預估／正式裁切比對 ──────
+    // ── 裁切外框： 精確預估／正式裁切比對 ──────
     // 先前這裡還有一種「快速估算」：直接拿 2D 預覽的圖元在前端算凸包或
     // 外接矩形。那份資料本身是為了畫面顯示而降階過的，算出來的外框與正式
     // 裁切可能相差甚遠，容易讓人誤以為那就是實際裁切範圍，已整段移除。
     // 現在只在按下「分析精確裁切外框」（後端唯讀呼叫與正式裁切相同的
     // 演算法）之後才會畫預估外框。
-    // 裁切完成後的「預估 vs 實際」外框比對與填色已移除（#0062）：裁切後
+    // 裁切完成後的「預估 vs 實際」外框比對與填色已移除：裁切後
     // 分頁只畫裁切後的板子，這裡只剩裁切前的預估外框。
     const hasBackendEstimate = (estimatedCutoutBoundary?.length || 0) >= 3
     if (hasBackendEstimate) {
@@ -1144,8 +1228,25 @@ export default function Preview2D({
         ctx.restore()
       }
     }
+    ctx.save()
+    const scaleLengthMm = 100 / transform.scale
+    ctx.strokeStyle = '#b9c5d3'
+    ctx.fillStyle = '#b9c5d3'
+    ctx.lineWidth = 1
+    ctx.font = '12px "Calibri","Microsoft JhengHei",sans-serif'
+    ctx.beginPath()
+    ctx.moveTo(rect.width - 118, 28)
+    ctx.lineTo(rect.width - 18, 28)
+    ctx.stroke()
+    ctx.textAlign = 'right'
+    ctx.fillText(`${length(scaleLengthMm)} ${unit}`, rect.width - 18, 22)
+    ctx.restore()
+    if (onRenderedRef.current && fitTransformRef.current === transform
+        && Object.keys(layerModes).length > 0) {
+      onRenderedRef.current()
+    }
   // tp：畫布上的字（上面的預估外框標籤）跟著語言，切換語言時要重畫。
-  }, [tp, data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, segmentCuts, draggingCut, showSegmentSafetyOverlay, showSegmentCutDiagnostics, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, tdrMarkers, crossSectionRegion, crossSectionCut, drawingRegion, getLayerColor, getStackupLayers, computeContentBounds])
+  }, [tp, unit, renderScale, data, transform, layerModes, visibleComps, visibleNets, signalNets, expansionMm, extentType, estimatedCutoutBoundary, segmentCuts, draggingCut, showSegmentSafetyOverlay, showSegmentCutDiagnostics, showSolverRegionOverlay, cleanupOverlay, removedGeometry, dimBase, differenceKind, differenceLayer, tdrMarkers, crossSectionRegion, crossSectionCut, drawingRegion, getLayerColor, getStackupLayers, computeContentBounds])
 
   useEffect(() => { drawCanvas() }, [drawCanvas])
 
@@ -1167,7 +1268,7 @@ export default function Preview2D({
    * 滾輪縮放要掛**原生**監聽器，不能用 React 的 `onWheel`。
    *
    * React 18 把 `wheel` 掛在根節點而且是 passive 的，裡面呼叫
-   * `preventDefault()` 只會在主控台印一行警告然後被忽略——結果是使用者
+   * `preventDefault` 只會在主控台印一行警告然後被忽略——結果是使用者
    * 縮放板子時整頁跟著捲動。`{ passive: false }` 才擋得住。
    */
   useEffect(() => {
@@ -1181,9 +1282,8 @@ export default function Preview2D({
       const r = canvas.getBoundingClientRect()
       const mx = e.clientX - r.left, my = e.clientY - r.top
       userMovedViewRef.current = true
-      setTransform(prev => ({
-        x: mx - (mx - prev.x) * f, y: my - (my - prev.y) * f, scale: prev.scale * f,
-      }))
+      // Y 軸翻轉：錨點數學要用畫布高度，見 layoutZoom.zoomAt。
+      setTransform(prev => zoomAt(prev, mx, my, r.height, f))
     }
     cont.addEventListener('wheel', onWheel, { passive: false })
     return () => cont.removeEventListener('wheel', onWheel)
@@ -1202,11 +1302,7 @@ export default function Preview2D({
       // 以畫布中心為基準縮放，不是游標——鍵盤操作沒有游標位置可用。
       const mx = (rect?.width ?? 0) / 2, my = (rect?.height ?? 0) / 2
       userMovedViewRef.current = true
-      setTransform(prev => ({
-        x: mx - (mx - prev.x) * factor,
-        y: my - (my - prev.y) * factor,
-        scale: prev.scale * factor,
-      }))
+      setTransform(prev => zoomAt(prev, mx, my, rect?.height ?? 0, factor))
     }
     const pan = (dx: number, dy: number) => {
       userMovedViewRef.current = true
@@ -1257,7 +1353,13 @@ export default function Preview2D({
   }
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    mouseDownPoint.current = { x: e.clientX, y: e.clientY }
+    mouseDownPoint.current = { x: e.clientX, y: e.clientY, button: e.button }
+    if (e.button !== 0) {
+      // 中鍵／右鍵維持原本的平移，但不進入框選、切線、拖刀，放開時也不改派。
+      setIsDragging(true)
+      setDragStart({ x: e.clientX-transform.x, y: e.clientY-transform.y })
+      return
+    }
     if (crossSectionMode === 'region') {
       const world = toWorld(e)
       if (world) {
@@ -1326,9 +1428,14 @@ export default function Preview2D({
     setTransform(prev => ({ ...prev, x: e.clientX-dragStart.x, y: e.clientY-dragStart.y }))
   }
   const handleMouseUp = (e: React.MouseEvent) => {
+    // 每次左鍵手勢只能消費一次；離開畫布也要結束拖曳，但不能當成改派點擊。
+    // 排程完成重載後的 mouseleave 曾重用舊按下座標，將 SIwave 靜默切回 HFSS。
+    const pressed = mouseDownPoint.current
+    mouseDownPoint.current = null
+    if (!pressed) return
     const movement = Math.hypot(
-      e.clientX - mouseDownPoint.current.x,
-      e.clientY - mouseDownPoint.current.y,
+      e.clientX - pressed.x,
+      e.clientY - pressed.y,
     )
     if (regionAnchor.current) {
       const pending = drawingRegion
@@ -1350,7 +1457,8 @@ export default function Preview2D({
       return
     }
     setIsDragging(false)
-    if (movement > 4 || !onSegmentRegionClick || !segmentCuts || !data) return
+    if (e.type !== 'mouseup' || e.button !== 0 || pressed.button !== 0 || movement > 4
+        || !onSegmentRegionClick || !segmentCuts || !data) return
     const canvasRect = canvasRef.current?.getBoundingClientRect()
     if (!canvasRect) return
     const screenX = e.clientX - canvasRect.left
@@ -1358,7 +1466,7 @@ export default function Preview2D({
     const worldX = (screenX - transform.x) / transform.scale
     const worldY = (canvasRect.height + transform.y - screenY) / transform.scale
     // 每段是矩形（依複雜度分段、載入的檔案）時直接比對矩形：混合軸向的刀
-    // 不能用單一軸的帶狀去換算是第幾段（卡 0121）。
+    // 不能用單一軸的帶狀去換算是第幾段。
     if (segmentCuts.segment_boxes?.length) {
       const hit = segmentCuts.segment_boxes.findIndex(({ bounds_mm: [x0, y0, x1, y1] }) => (
         worldX >= Math.min(x0, x1) && worldX <= Math.max(x0, x1)
@@ -1479,7 +1587,7 @@ export default function Preview2D({
 
   // ─────────────────────────────────────────────────────────
   const hasPanel = !!(layerPanelEnabled && data && data.layers && Object.keys(data.layers).length > 0)
-  // 分段疊圖兩顆開關（#0130）：板子禁切／風險、切點診斷，各自有東西可畫才出現。
+  // 分段疊圖兩顆開關：板子禁切／風險、切點診斷，各自有東西可畫才出現。
   const overlayLayers = segmentCuts
     ? segmentOverlayLayers(segmentCuts) : { board: false, diagnostics: false }
   const showBoardToggle = overlayLayers.board && !!onSegmentSafetyOverlayChange
@@ -1785,6 +1893,7 @@ export default function Preview2D({
                 <button onClick={()=>setAllItems('comps',true)}  style={smallBtn}>{tp.selectAll}</button>
                 <button onClick={()=>setAllItems('comps',false)} style={smallBtn}>{tp.selectNone}</button>
               </div>
+              <div className="panel-hint" style={{ padding: '0 10px 6px' }}>{tp.allComponentsScope}</div>
               <div style={{ overflowY:'auto', flex:1 }}>
                 {filteredComps.map(comp => (
                   <label
@@ -1860,6 +1969,7 @@ export default function Preview2D({
                 <button onClick={()=>setAllItems('nets',true)}  style={smallBtn}>{tp.selectAll}</button>
                 <button onClick={()=>setAllItems('nets',false)} style={smallBtn}>{tp.selectNone}</button>
               </div>
+              <div className="panel-hint" style={{ padding: '0 10px 6px' }}>{tp.allNetsScope}</div>
 
               {/* 網路清單 */}
               <div style={{ overflowY:'auto', flex:1 }}>

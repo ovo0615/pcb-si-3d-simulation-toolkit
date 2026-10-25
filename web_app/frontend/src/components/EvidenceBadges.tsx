@@ -19,7 +19,7 @@ type Badge = {
   value: string
   level: Level
   detail: string
-  /** 卡 0087：後端 channel_evidence 給的英文；呼叫端自帶的徽章可以不給。 */
+  /** ：後端 channel_evidence 給的英文；呼叫端自帶的徽章可以不給。 */
   label_en?: string
   value_en?: string
   detail_en?: string

@@ -1,7 +1,7 @@
 //
 // React 在 render 期間丟出例外時會卸載整棵樹，畫面只剩空白，使用者看不到任何
 // 線索、也失去整個工作階段的狀態（載入的板子、選好的 Net、分段結果…）。
-// 實際發生過：S 參數分頁把 freq_ghz 傳給要 freq 的圖表，執行到 undefined.map()
+// 實際發生過：S 參數分頁把 freq_ghz 傳給要 freq 的圖表，執行到 undefined.map
 // 整頁變白。
 //
 // 這個邊界把災情限制在出錯的那一塊，並直接把錯誤訊息秀出來，方便回報。
@@ -9,7 +9,7 @@ import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { useT } from '../i18n'
 import type { Messages } from '../i18n'
 
-/** 區塊名稱：字串，或從字典取（卡 0087：切換語言時跟著換）。 */
+/** 區塊名稱：字串，或從字典取（：切換語言時跟著換）。 */
 type Label = string | ((t: Messages) => string)
 
 interface Props {
@@ -24,7 +24,7 @@ interface State {
 }
 
 /** 出錯後的畫面。拆成函式元件才拿得到語言（class 元件不能用 hook）。 */
-function Fallback({ label, error, stack, onRetry }: {
+function Fallback({ label, onRetry }: {
   label?: Label
   error: Error
   stack: string
@@ -46,14 +46,6 @@ function Fallback({ label, error, stack, onRetry }: {
         {e.stillThere}
         {' '}{e.report}
       </div>
-      <pre style={{
-        fontSize: 11.5, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-        background: '#0d0a0b', border: '1px solid #4a2a2e',
-        borderRadius: 6, padding: 10, margin: 0, color: '#ffb4b4',
-      }}>
-        {String(error?.stack || error)}
-        {stack ? `\n${e.componentStack}` + stack : ''}
-      </pre>
       <button
         onClick={onRetry}
         style={{

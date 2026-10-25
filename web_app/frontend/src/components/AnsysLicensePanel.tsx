@@ -1,6 +1,7 @@
-// 「說明 → Ansys 授權對照」：全部功能需要哪些 Ansys 授權、目前可用幾個（ADR-0062）。
+// 「說明 → Ansys 授權對照」：全部功能需要哪些 Ansys 授權、目前可用幾個。
 import { LICENSE_COLORS, licenseText, refreshLicenseStatus, useAnsysLicense } from '../ansysLicense'
 import { useT } from '../i18n'
+import { ProductLicenseSection } from './ProductLicenseSection'
 
 export function AnsysLicensePanel({ onClose }: { onClose: () => void }) {
   const { t, lang } = useT()
@@ -28,6 +29,7 @@ export function AnsysLicensePanel({ onClose }: { onClose: () => void }) {
           </button>
           <button className="btn" onClick={onClose}>{p.close}</button>
         </div>
+        <ProductLicenseSection labels={t.productLicense} lang={lang} />
         <div className="panel-hint" style={{ fontSize: 11.5, marginBottom: 8, lineHeight: 1.5 }}>
           {p.viewModeLead}<b>{p.viewMode}</b>{p.viewModeTail}
           <br />{p.usesLicense}

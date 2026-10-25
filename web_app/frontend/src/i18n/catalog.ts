@@ -1,4 +1,4 @@
-// 語言 → 字典（卡 0087 批 2）。不碰 React：非 React 模組（healthcheckStatus、
+// 語言 → 字典。不碰 React：非 React 模組（healthcheckStatus、
 // revealPath…）收一個 `lang` 參數，從這裡取字典；Node 測試照樣能跑。
 // 它們要的不只是字典，還要依語言挑後端的 `*_en` 欄位，所以傳語言而不是傳字典。
 

@@ -1,4 +1,4 @@
-// 共用眼圖畫廊的純函式（#0104）。不碰 React，Node 直接測
+// 共用眼圖畫廊的純函式。不碰 React，Node 直接測
 // （tests/test_eye_gallery_0104.py）。
 
 export interface GalleryItem {
@@ -28,7 +28,7 @@ export function stepIndex(index: number, delta: number, length: number): number 
   return ((index + delta) % length + length) % length
 }
 
-/** 結果頁的欄數（#0115）：眼圖是主角，盡量大、不留大空白。
+/** 結果頁的欄數：眼圖是主角，盡量大、不留大空白。
  *  一張佔滿；兩張、四張排成兩欄剛好填滿；三張以上三欄（三張一列、五張 3＋2）。 */
 export function galleryColumns(count: number): number {
   if (count <= 1) return 1

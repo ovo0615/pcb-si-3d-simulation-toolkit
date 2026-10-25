@@ -18,6 +18,8 @@ export interface CascadeGraph {
 
 interface Props {
   graph: CascadeGraph
+  /** 報告收納：視窗是全覽、SVG 已畫上去之後呼叫。 */
+  onRendered?: () => void
 }
 
 const BLOCK_W = 170
@@ -36,7 +38,7 @@ const netColor = (net: string) => {
 // pin 群：短路群組的多個 port 共用一個接點（顯示為小匯流排）
 interface PinGroup { ports: string[]; side: 'left' | 'right' | 'top'; y: number; x: number }
 
-export default function CascadeSchematic({ graph }: Props) {
+export default function CascadeSchematic({ graph, onRendered }: Props) {
   const { blocks, connections, shorts } = graph
 
   // 1. 每個 block 把 port 歸入短路群（未在群組者自成一群）
@@ -111,7 +113,7 @@ export default function CascadeSchematic({ graph }: Props) {
   }, [svgW, svgH])
   /**
    * 滾輪縮放掛原生監聽器。React 的 `onWheel` 是掛在根節點的 passive 監聽器，
-   * 裡面 `preventDefault()` 攔不住任何東西——縮放電路圖時整頁跟著捲。
+   * 裡面 `preventDefault` 攔不住任何東西——縮放電路圖時整頁跟著捲。
    * 監聽器固定呼叫 ref，ref 每次 render 更新（handleWheel 讀 view／svgW）。
    */
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -141,6 +143,12 @@ export default function CascadeSchematic({ graph }: Props) {
     })
   }
   wheelRef.current = handleWheel
+  const onRenderedRef = useRef(onRendered)
+  onRenderedRef.current = onRendered
+  useEffect(() => {
+    // 效果在 commit 之後跑：這時 SVG 已在 DOM 上，而且視窗確定是全覽。
+    if (view.x === 0 && view.y === 0 && view.w === svgW && view.h === svgH) onRenderedRef.current?.()
+  }, [view, svgW, svgH])
   if (blocks.length === 0) {
     return <div style={{ padding: 40, color: 'var(--faint)', textAlign: 'center' }}>{t.cascadeSchematic.noData}</div>
   }
@@ -205,7 +213,6 @@ export default function CascadeSchematic({ graph }: Props) {
                 <text x={x0 + BLOCK_W / 2} y={blockY + 29} fill={solverColor}
                   fontSize={8.5} fontWeight={700} textAnchor="middle">
                   {b.solver.toUpperCase()}
-                  {Number.isFinite(b.complexity_score) ? ` · ${b.complexity_score}` : ''}
                 </text>
               )}
               {b.sub_label && (

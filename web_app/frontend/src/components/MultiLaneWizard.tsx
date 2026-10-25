@@ -1,5 +1,5 @@
-// 眼圖精靈的多埠分支：多道串擾分析與位元組通道（ADR-0044、ADR-0045、ADR-0046）。
-// 只嵌在眼圖精靈裡（ADR-0067 收掉「進階：多埠通道」頁籤），通道與速率由精靈第 1、2 步提供。
+// 眼圖精靈的多埠分支：多道串擾分析與位元組通道。
+// 只嵌在眼圖精靈裡（ 收掉「進階：多埠通道」頁籤），通道與速率由精靈第 1、2 步提供。
 //
 // 這個面板的三個設計要點都直接對應 ADR，改動前請先讀那三份：
 //
@@ -22,16 +22,21 @@ import { LicenseTag, useLicenseBlock } from './LicenseTag'
 import { releasedWithErrors, pickText, pickList, errorText } from '../backendFields'
 import { useT } from '../i18n'
 import type { Messages } from '../i18n'
-import { confirmationState } from '../eyeWizard'
+import { confirmationState, jobFailureText } from '../eyeWizard'
 import SelectorFunnelPanel from './SelectorFunnelPanel'
 import { selectorSignature } from '../selectorFunnelSelection'
 import type { SelectorChange, SelectorInput } from '../selectorFunnelSelection'
 import BetaBadge from './BetaBadge'
+import { safeUserMessage, userError } from '../userMessages'
 type MultiLaneText = Messages['multiLane']
 
 function failure(data: any, fallback: string, key = 'detail'): Error {
-  return Object.assign(new Error(data?.[key] || fallback),
-    { detail_en: data?.[`${key}_en`] })
+  if (data?.user_safe === true) {
+    const safe = { ...data, detail: data?.[key] || fallback, detail_en: data?.[`${key}_en`] }
+    return Object.assign(userError(safeUserMessage(safe, 'zh-TW'), safeUserMessage(safe, 'en')),
+      { code: data?.code, event_id: data?.event_id })
+  }
+  return userError(fallback)
 }
 
 interface PortBinding {
@@ -106,7 +111,7 @@ interface PendingDecision {
   suggested?: string
 }
 
-/** 匯流排方向（ADR-0049）。`driving_side` 為 null 就是還沒定案，不能送解。 */
+/** 匯流排方向。`driving_side` 為 null 就是還沒定案，不能送解。 */
 interface BusDirection {
   driving_side: number | null
   receiving_side: number | null
@@ -255,7 +260,7 @@ export default function MultiLaneWizard({
   const [bothPatterns, setBothPatterns] = useState(false)
   const [transientUi, setTransientUi] = useState(2000)
   const [settleUi, setSettleUi] = useState(4)
-  // ── DDR 時序（只有組內有選通參考時才有意義；ADR-0044）────────────
+  // ── DDR 時序（只有組內有選通參考時才有意義）────────────
   //
   // 沒有選通就沒有時序裕度這個量，所以這一段的預設是「跟著選通走」：
   // 偵測到選通對就打開，偵測不到就整段隱藏，不讓人填一組不會被用到的數字。
@@ -269,10 +274,12 @@ export default function MultiLaneWizard({
   const strobePhaseUi = busMode === 'write' ? 0.5 : 0
   // 判讀準位用 JEDEC 的講法輸入（VDDQ 與相對 Vref 的偏移），四個門檻由此導出，
   // 不要求使用者自己算四個絕對電壓。
-  const [vddq, setVddq] = useState('1.35')
-  const [acOffset, setAcOffset] = useState('0.130')
-  const [dcOffset, setDcOffset] = useState('0.090')
-  // 規格要求。留空就不換算成裕度、也不判 Pass／Fail（ADR-0015）。
+  // 工具不內建 JEDEC 數值：預設空白，由使用者依自己有權使用的
+  // 規格或資料手冊填寫；沒填齊就不送門檻，後端不量時序裕度並說明缺哪幾項。
+  const [vddq, setVddq] = useState('')
+  const [acOffset, setAcOffset] = useState('')
+  const [dcOffset, setDcOffset] = useState('')
+  // 規格要求。留空就不換算成裕度、也不判 Pass／Fail。
   const [tds, setTds] = useState('')
   const [tdh, setTdh] = useState('')
   /**
@@ -296,13 +303,13 @@ export default function MultiLaneWizard({
   // 分析狀態就顯示在這一頁。先前它只在「標準 IBIS 通道」頁，那一頁移掉之後
   // 多埠分析會變成「按下去就沒有下文」。
   const [job, setJob] = useState<ChannelJob | null>(null)
-  /** 這個面板自己送出的工作（#0088）：精靈與其他面板共用同一份工作狀態，
+  /** 這個面板自己送出的工作：精靈與其他面板共用同一份工作狀態，
    *  不過濾的話別人的結果會出現在這裡。 */
   const ownJobIds = useRef(new Set<string>())
   const own = (id?: string) => { if (id) ownJobIds.current.add(String(id)) }
   const [laneCount, setLaneCount] = useState<number | null>(null)
   // 方向沒有預設值：雙向 I/O 的讀與寫都真實存在，替使用者選一個等於
-  // 有一半的機率量到反方向的通道，而且沒有任何跡象（ADR-0049）。
+  // 有一半的機率量到反方向的通道，而且沒有任何跡象。
   const [drivingSide, setDrivingSide] = useState<number | null>(null)
   const [dispositions, setDispositions] = useState<Record<number, Disposition>>({})
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null)
@@ -311,7 +318,7 @@ export default function MultiLaneWizard({
   const [selectorAnswers, setSelectorAnswers] = useState<Record<string,
     { odtOhm: number | null; driveOhm: number | null }>>({})
   const [busy, setBusy] = useState(false)
-  // 會用到 Ansys 的按鈕（ADR-0062）：沒有空位就變灰並寫原因。
+  // 會用到 Ansys 的按鈕：沒有空位就變灰並寫原因。
   const quickCheckBlock = useLicenseBlock(['model_check'])
   const multiLaneBlock = useLicenseBlock(['multi_lane'])
   const [error, setError] = useState('')
@@ -481,7 +488,7 @@ export default function MultiLaneWizard({
   }, [suggestion, usedPorts, reverseDroppedPorts])
 
   const strobePair = suggestion?.group.strobe_pairs?.[0]
-  // 兩側都是顆粒（#0099）：顯示後端那句，中英文由代碼表給，這裡只加標題。
+  // 兩側都是顆粒：顯示後端那句，中英文由代碼表給，這裡只加標題。
   const bothDramIndex = suggestion?.warning_codes?.indexOf('multilane.both_sides_dram') ?? -1
   const bothDramWarning = suggestion && bothDramIndex >= 0
     ? pickList(suggestion, 'warnings', lang)[bothDramIndex] : ''
@@ -491,7 +498,11 @@ export default function MultiLaneWizard({
     vih_dc: vref + Number(dcOffset), vil_dc: vref - Number(dcOffset),
     vddq: Number(vddq),
   }
-  const thresholdsValid = Object.values(thresholds).every(v => Number.isFinite(v))
+  // 空白不能當 0（Number('') 是 0）：三欄都填了且是數字、VDDQ 大於 0 才算有門檻。
+  // 前端不自己補值；沒有門檻就不送 timing_thresholds。
+  const thresholdsFilled = [vddq, acOffset, dcOffset].every(text => text.trim() !== '')
+  const thresholdsValid = thresholdsFilled && Number(vddq) > 0
+    && Object.values(thresholds).every(v => Number.isFinite(v))
 
   /** 解析貼上的 derating 表；解不開就回錯誤訊息，不會靜默忽略。 */
   const derating = useMemo(() => {
@@ -569,7 +580,7 @@ export default function MultiLaneWizard({
    *
    * 只清 `suggestion` 是不夠的：`drivingSide` 留著會讓下一次預檢把上一片板子
    * 選的方向送出去，後端收到就當成「依指定」，於是新檔案的方向是使用者從來
-   * 沒替它選過的（ADR-0049）。
+   * 沒替它選過的。
    */
   useEffect(() => {
     setSuggestion(null); setDrivingSide(null); setStarted('')
@@ -657,7 +668,7 @@ export default function MultiLaneWizard({
       const data = await response.json()
       if (!current()) return
       if (!response.ok) throw failure(data,  m.groupFailed)
-      if (data.reason) throw failure(data, '', 'reason')
+      if (data.reason) throw failure(data, m.groupFailed, 'reason')
       setAddrCheck({ signature, data })
     } catch (exc) {
       if (current()) setAddrError(errorText(exc, lang))
@@ -698,7 +709,7 @@ export default function MultiLaneWizard({
           // 扇出就看起來像點對點，分支延遲整組不會被算進去。
           ...(addrResult.topology ? { topology: addrResult.topology } : {}),
           // 方向未定時**不送這個欄位**：送 0 會被後端當成「使用者指定第 1 側」，
-          // 於是雙向 I/O 有一半機率整場量到反方向而且毫無跡象（ADR-0049）。
+          // 於是雙向 I/O 有一半機率整場量到反方向而且毫無跡象。
           ...(suggestion.bus_direction.driving_side !== null
             ? { driving_side: suggestion.bus_direction.driving_side } : {}),
           tx_buffer: driverChoice ? pickedVariant(driverChoice) : '',
@@ -812,7 +823,7 @@ export default function MultiLaneWizard({
           touchstone_path: touchstone, package_id: packageId,
           rx_package_id: rxPackageId,
           selection_basis: selectionBasis,
-          // 依定案的方向送出。遠端會再強制一次（ADR-0049），這裡送對的是
+          // 依定案的方向送出。遠端會再強制一次，這裡送對的是
           // 為了讓畫面上顯示的方向與送出的內容一致。
           lanes: lanes.slice(0, selectedLanes).map((lane, index) => {
             const oriented = suggestion.lane_orientation[index]
@@ -827,7 +838,7 @@ export default function MultiLaneWizard({
           }),
           driving_side: suggestion.bus_direction.driving_side,
           tx_buffer: choice?.tx.selected, rx_buffer: choice?.rx.selected,
-          // 沒填處置的 Port **不補預設**：默默選開路正是 ADR-0046 要禁的事。
+          // 沒填處置的 Port **不補預設**：默默選開路正是  要禁的事。
           // 填不完整時 `canStart` 已經擋住啟動，這裡不留第二條路。
           dispositions: portsNeedingDisposition
             .filter(item => dispositions[item.index])
@@ -960,6 +971,7 @@ export default function MultiLaneWizard({
     return decision?.inputSignature === selectorSignature(selectorInput(item)) ? decision : null
   }
   const selectionBasis = {
+    port_models: portModels,
     ...Object.fromEntries(selectorChoices
       .map(item => [variantKey(item), currentDecision(item)?.selectionBasis || {}])),
     ...(presetSelectionBasis ? { preset: presetSelectionBasis } : {}),
@@ -989,7 +1001,7 @@ export default function MultiLaneWizard({
    *
    *  **只填得回去的填，填不回去的講出來**。半套還原比不還原更危險——
    *  使用者會以為表單已經完全回到那一版，然後拿一組混合的設定重跑。
-   *  舊紀錄不動：ADR-0016 規定既有紀錄不得被新結果覆蓋。 */
+   *  舊紀錄不動： 規定既有紀錄不得被新結果覆蓋。 */
   function restoreRun(run: RestorableRun) {
     if (run.touchstonePath) setTouchstone(run.touchstonePath)
     if (run.txPackageId) setPackageId(run.txPackageId)
@@ -1061,7 +1073,7 @@ export default function MultiLaneWizard({
         {amiPackages.length > 0 && <p className="hint">
           {m.amiSkipped(amiPackages.length)}</p>}
         <p className="hint">{m.pickBoth}</p>
-        {/* 速率在精靈第 2 步填，這裡不出第二個欄位；上升時間覆寫精靈也要看得到（#0104）。 */}
+        {/* 速率在精靈第 2 步填，這裡不出第二個欄位；上升時間覆寫精靈也要看得到。 */}
         <div>
         <label>{m.riseTime}<input className="input" type="number" value={riseTimePs}
             placeholder={dataRate > 0 ? m.riseTimePlaceholder((200 / dataRate).toFixed(0)) : ''}
@@ -1076,7 +1088,7 @@ export default function MultiLaneWizard({
         {error && <p className="error">{error}</p>}
       </section>
 
-      {/* #0104：精靈模式也看得到，放在第 3 步（選完套件就能跑）。 */}
+      {/* ：精靈模式也看得到，放在第 3 步（選完套件就能跑）。 */}
       <section data-wizard-step={3} hidden={hiddenStep(3)}>
         <h3>{t.eyeWizard.quickTitle}</h3>
         {/* 不接使用者通道：TX 與 RX 之間放的是工具自產的參考線——近無損
@@ -1155,7 +1167,7 @@ export default function MultiLaneWizard({
       </section>
 
       {suggestion && <>
-        {/* 放在選兩端晶片的這一步：使用者在這裡就能換模型。不擋（ADR-0050）。 */}
+        {/* 放在選兩端晶片的這一步：使用者在這裡就能換模型。不擋。 */}
         {bothDramWarning && <section data-wizard-step={3} hidden={hiddenStep(3)}>
           <p className="warning"><strong>{t.multiLanePreflight.bothDramTitle}</strong></p>
           <p className="hint">{bothDramWarning}</p>
@@ -1246,7 +1258,7 @@ export default function MultiLaneWizard({
 
         <section data-wizard-step={4} hidden={hiddenStep(4)}>
           <h3>{m.busTitle}</h3>
-          {/* ADR-0049：方向決定哪一側接驅動緩衝器。接反了電路照樣解得動、
+          {/* ：方向決定哪一側接驅動緩衝器。接反了電路照樣解得動、
               眼圖照樣畫得出來，只是量到的是反方向的通道——沒有任何跡象。
               單向訊號由 Model_type 定死，不給選；雙向 I/O 必選，不給預設。 */}
           <p className="hint">{pickText(suggestion.bus_direction, 'reason', lang)}</p>
@@ -1397,7 +1409,7 @@ export default function MultiLaneWizard({
               }} />
             </div>
           })}
-          {/* 上升時間對應的可用頻寬（舊進階頁籤只在這裡顯示，ADR-0067 搬來第 3 步）。 */}
+          {/* 上升時間對應的可用頻寬（舊進階頁籤只在這裡顯示， 搬來第 3 步）。 */}
           {suggestion.bandwidth && <p className="hint">
             {m.edgeBandwidth(suggestion.bandwidth.rise_time_ps.toFixed(0), suggestion.bandwidth.usable_bandwidth_ghz.toFixed(2), suggestion.bandwidth.sweep_max_ghz.toFixed(2))}</p>}
         </section>
@@ -1440,7 +1452,7 @@ export default function MultiLaneWizard({
             <label>{m.transientUi}<input className="input" type="number" min={1} value={transientUi}
                 onChange={event => setTransientUi(Number(event.target.value))} />
             </label>
-            {/* ADR-0045：隨機碼型的涵蓋率必須顯示，否則使用者會把
+            {/* ：隨機碼型的涵蓋率必須顯示，否則使用者會把
                 「沒看到最差」誤讀成「沒有問題」。 */}
             <p className="warning">
               {m.expectationLead}<strong>{worstCaseExpectation(selectedLanes, transientUi).toFixed(4)}</strong>
@@ -1491,7 +1503,7 @@ export default function MultiLaneWizard({
         {portsNeedingDisposition.length > 0 && <section data-wizard-step={4} hidden={hiddenStep(4)}>
           <h3>{m.dispTitle(portsNeedingDisposition.length)}</h3>
           {/* 留著不接等於默默選了開路，而開路與終結給出不同的串擾結果——
-              實測差 3.7 mV 峰值。兩者都不是安全預設（ADR-0046）。 */}
+              實測差 3.7 mV 峰值。兩者都不是安全預設。 */}
           <p className="hint">
             {m.dispHint}</p>
           <table className="model-library__table">
@@ -1543,7 +1555,7 @@ export default function MultiLaneWizard({
           <h3>{m.qualityTitle}</h3>
           {/* 分兩層顯示：檔案固有的性質與這次激勵是否充分是兩件事，
               合併成一個通過與否會讓人把「這次夠用」誤讀成「這個檔案沒問題」
-              （ADR-0048）。 */}
+              。 */}
           {suggestion.quality.intrinsic && <>
             <h4>{m.intrinsic}</h4>
             <p>{m.passivity(String(suggestion.quality.intrinsic.passivity_max_singular_value))}</p>
@@ -1564,7 +1576,7 @@ export default function MultiLaneWizard({
           </table>
         </section>}
 
-        {/* 沒有選通就沒有時序裕度這個量（ADR-0044），所以整段跟著選通出現。 */}
+        {/* 沒有選通就沒有時序裕度這個量，所以整段跟著選通出現。 */}
         {strobePair && <section data-wizard-step={4} hidden={hiddenStep(4)}>
           <h3>{m.timingTitle}</h3>
           <label>
@@ -1597,11 +1609,14 @@ export default function MultiLaneWizard({
                   onChange={e => setDcOffset(e.target.value)} />
               </label>
             </div>
-            <p className="hint">
-              {m.thresholdSummary(Number.isFinite(vref) ? vref.toFixed(3) : '—',
-                thresholds.vih_ac.toFixed(3), thresholds.vil_ac.toFixed(3),
-                thresholds.vih_dc.toFixed(3), thresholds.vil_dc.toFixed(3))}
-            </p>
+            <p className="hint">{m.thresholdSourceHint}</p>
+            {thresholdsValid ? (
+              <p className="hint">
+                {m.thresholdSummary(vref.toFixed(3),
+                  thresholds.vih_ac.toFixed(3), thresholds.vil_ac.toFixed(3),
+                  thresholds.vih_dc.toFixed(3), thresholds.vil_dc.toFixed(3))}
+              </p>
+            ) : <p className="warning">{m.thresholdMissing}</p>}
             <p className="hint">{m.acDcHint}</p>
 
             <h4>{m.specTitle}</h4>
@@ -1652,10 +1667,10 @@ export default function MultiLaneWizard({
             {busy ? m.working : m.startMulti}
           </button>
           <LicenseTag functions={['multi_lane']} />
-          {/* #0088 小修 7：單次執行固定 typ，原本畫面沒寫。 */}
+          {/* ：單次執行固定 typ，原本畫面沒寫。 */}
           <p className="hint">{m.singleRunCorner}</p>
 
-          {/* 最差條件由結果排序得出，不預先假設 Slow 最差（ADR-0011）。 */}
+          {/* 最差條件由結果排序得出，不預先假設 Slow 最差。 */}
           <h4>{m.cornersTitle}</h4>
           <div className="field-row">
             {[['typ', 'Typical'], ['min', 'Slow'], ['max', 'Fast']].map(([code, label]) => (
@@ -1700,10 +1715,10 @@ export default function MultiLaneWizard({
             <div><strong>{pickText(shownJob, 'phase', lang) || m.notRun}</strong><span>{pickText(shownJob, 'message', lang)}</span></div>
             <div>{m.jobLine(shownJob?.status || 'idle', jobElapsed, shownJob?.job_id || '—')}</div>
           </div>
-          {shownJob?.error && <div className="model-library__issue is-error">
-            {m.failed(pickText(shownJob, 'error', lang))}</div>}
+          {jobFailureText(shownJob, lang) && <div className="model-library__issue is-error">
+            {m.failed(jobFailureText(shownJob, lang))}</div>}
 
-          {/* #0116：規格模型（SPISim 產生／本工具合成）與 DDR5 Rx 未含 DFE；Corner 掃描取第一筆。 */}
+          {/* ：規格模型（SPISim 產生／本工具合成）與 DDR5 Rx 未含 DFE；Corner 掃描取第一筆。 */}
           <ModelOriginNotice result={jobResult} />
 
           {/* 執行警告要跟著結果一起看——特別是「帶錯誤放行」：這份眼圖
@@ -1717,7 +1732,7 @@ export default function MultiLaneWizard({
             </details>
           )}
 
-          {/* #0115：結果頁只放眼圖；排序表、逐訊號時序、量測收進「眼圖參數」抽屜。
+          {/* ：結果頁只放眼圖；排序表、逐訊號時序、量測收進「眼圖參數」抽屜。
               最差 Corner 與判定留一行在頁面上——FAIL 不能藏在按鈕後面。 */}
           {eyeCards.length > 0 && ranking?.ranked?.length > 0 && (() => {
             const worst = ranking.ranked[0]
@@ -1727,11 +1742,12 @@ export default function MultiLaneWizard({
           })()}
           {(eyeCards.length > 0 || Boolean(jobResult?.run_dir || jobResult?.output_dir)) && <div className="eye-results__toolbar">
             {eyeCards.length > 0 && <h4>{m.eyeCount(eyeCards.length)}</h4>}
-            {eyeCards.length > 0 && <button type="button" className="btn"
+            {eyeCards.length > 0 && <button type="button" className="btn eye-results__details-btn"
               aria-expanded={details.open} onClick={details.toggle}>
               {t.resultDetails.open}</button>}
             <OpenFolderButton path={jobResult?.run_dir || jobResult?.output_dir} />
           </div>}
+          <div className="eye-results__layout">
           {eyeCards.length > 0 && <EyeImageGallery items={eyeCards.map(card => ({
             key: card.key, title: card.title, sub: card.corner, url: card.imageUrl,
             alt: m.eyeAlt(card.title),
@@ -1822,7 +1838,7 @@ export default function MultiLaneWizard({
 
           {/* 快速檢驗的重點是數字：眼高眼寬是基準線，之後接上真實通道
               比的就是這一組。量測在 measurements.metrics 底下，外層是
-              ADR-0039 的可得性包裝，取不到時要把原因印出來。 */}
+               的可得性包裝，取不到時要把原因印出來。 */}
           {quickMeasurements && quickMeasurements.available === false && (
             <p className="hint">
               {m.noMeasurements(pickText(quickMeasurements, 'unavailable_reason', lang))}</p>
@@ -1845,9 +1861,10 @@ export default function MultiLaneWizard({
           </>}
 
           </ResultDetailsDrawer>
+          </div>
         </section>}
 
-      {/* 執行歷史。ADR-0016 的不可變紀錄一直只存在於後端，這是它的入口。
+      {/* 執行歷史。 的不可變紀錄一直只存在於後端，這是它的入口。
           一次求解要跑數十分鐘到數小時，能回頭比對的價值遠大於少一顆按鈕。 */}
       {/* 讀 `multi_lane` 種類的紀錄，不是點對點 IBIS 的。
           先前這裡讀的是 Touchstone 旁邊的 `ibis_channel_runs`——那些是

@@ -1,4 +1,4 @@
-// 眼圖精靈的純函式（#0088 方案 A）。不碰 React，Node 直接測
+// 眼圖精靈的純函式（ 方案 A）。不碰 React，Node 直接測
 // （tests/test_eye_wizard_logic_0088.py）。
 //
 // 畫面上「為什麼按不下去」「要不要重新確認」「這個變體是誰決定的」「結果能不能用」
@@ -49,7 +49,7 @@ export interface NativeLibraryState {
 
 export type TrustState = 'trusted' | 'pending' | 'scanned' | 'scanError' | 'notHere'
 
-/** 這台電腦不會載入的（Windows 上的 Linux .so）不必信任（ADR-0005、小修 8）。 */
+/** 這台電腦不會載入的（Windows 上的 Linux .so）不必信任（小修 8）。 */
 export function nativeTrustState(item: NativeLibraryState): TrustState {
   if (item.required_here === false) return 'notHere'
   if (item.trust_status === 'trusted') return 'trusted'
@@ -110,6 +110,7 @@ export const MISSING_STEP = {
   stale: 4,
   license: 5,
   running: 5,
+  healthcheck: 5,
 } as const
 
 export type MissingKey = keyof typeof MISSING_STEP
@@ -131,6 +132,7 @@ export interface ChecklistInput {
   confirmation: Confirmation
   licenseBlocked: boolean
   jobRunning: boolean
+  healthcheckRunning?: boolean
   /** AMI 的模擬位元數（標準 IBIS 不看）。 */
   bitCount: number
   /** AMI 的設定預檢（Ignore_Bits、路由）失敗。 */
@@ -162,6 +164,7 @@ export function missingItems(input: ChecklistInput): { key: MissingKey; step: nu
   if (input.confirmation === 'stale') keys.push('stale')
   if (input.licenseBlocked) keys.push('license')
   if (input.jobRunning) keys.push('running')
+  if (input.healthcheckRunning) keys.push('healthcheck')
   return keys.map(key => ({ key, step: MISSING_STEP[key] }))
 }
 
@@ -173,6 +176,15 @@ export interface WizardLane {
   label?: string
   input_port?: string
   output_port?: string
+}
+
+export interface WizardBindings { topology: string; ports: PortMap; lanes: WizardLane[] }
+
+/** 預檢回來後要用的接線。keepRestored＝重開還原後的第一次預檢：已存了接線
+ *  （有拓撲）就保留，只補建議；沒存過才照建議填。 */
+export function bindingsAfterSuggest(current: WizardBindings, suggested: WizardBindings,
+                                     keepRestored: boolean): WizardBindings {
+  return keepRestored && current.topology ? current : suggested
 }
 
 /** 選到的埠要都在通道裡、彼此不重複（後端也會擋，這裡是讓按鈕先講原因）。 */
@@ -255,7 +267,7 @@ export function funnelRows(funnel: Funnel, t: WizardText): FunnelRow[] {
   })
 }
 
-// ── #0086 結果契約 ────────────────────────────────────────
+// ──  結果契約 ────────────────────────────────────────
 
 export interface MetricRow { key: string; label: string; value: string }
 
@@ -323,7 +335,7 @@ export function resultBlocks(result: AnyRecord | null | undefined, lang: Lang): 
   return blocks
 }
 
-/** 後端因 Ignore_Bits 調整或警告的位元數（#0086）；沒有就回 null。 */
+/** 後端因 Ignore_Bits 調整或警告的位元數；沒有就回 null。 */
 export function bitAdjustment(result: AnyRecord | null | undefined, lang: Lang):
   { requested: number; actual: number; message: string } | null {
   const adjustment = result?.bit_count_adjustment
@@ -376,7 +388,7 @@ export function eyeImages(engine: 'ami' | 'ibis', result: AnyRecord | null | und
   return cards
 }
 
-/** 精靈第 5 步，impulse 響應另列在眼圖後面（#0104，舊 AMI 面板有）。只挑
+/** 精靈第 5 步，impulse 響應另列在眼圖後面（舊 AMI 面板有）。只挑
  *  檔名 *_impulse.jpg 的；道的圖沒有 impulse。 */
 export function impulseImages(engine: 'ami' | 'ibis', result: AnyRecord | null | undefined,
   lang: Lang = 'zh-TW', jobId = ''): EyeImage[] {
@@ -397,7 +409,7 @@ export function impulseImages(engine: 'ami' | 'ibis', result: AnyRecord | null |
   return cards
 }
 
-// ── #0104：GetWave 結果與註記（舊 AMI 面板搬過來）──────────────
+// ── ：GetWave 結果與註記（舊 AMI 面板搬過來）──────────────
 
 export type GetwaveSummary =
   | { available: true; eyeHeight: string; eyeWidth: string; bitsUsed: string;
@@ -437,7 +449,7 @@ export function analysisExtras(result: AnyRecord | null | undefined, lang: Lang)
   return out
 }
 
-// ── #0104：分析方式、AMI 參數、等化掃描、DDR4 眼罩 ─────────────
+// ── ：分析方式、AMI 參數、等化掃描、DDR4 眼罩 ─────────────
 
 /** 兩條後端各自接受的 analysis_route（ibis_channel._ANALYSIS_ROUTES、ami_channel._ROUTES）。 */
 export function analysisRoutes(engine: 'ami' | 'ibis'): string[] {
@@ -456,25 +468,6 @@ export function touchedParameters(params: Record<string, string> | undefined): R
   return Object.fromEntries(Object.entries(params || {}).filter(([, value]) => value !== ''))
 }
 
-/** 等化掃描的一列套用到兩側參數（只動那一列有的參數，其他保留）。 */
-export function applyEqRow(row: AnyRecord, tx: Record<string, string>, rx: Record<string, string>):
-  { tx: Record<string, string>; rx: Record<string, string> } {
-  return {
-    tx: row?.tx_param ? { ...tx, [row.tx_param]: String(row.tx_value) } : { ...tx },
-    rx: row?.rx_param ? { ...rx, [row.rx_param]: String(row.rx_value) } : { ...rx },
-  }
-}
-
-/** DDR4 Rx 眼罩統計簽核：寬（UI）與高（mV）都大於 0 才送；RJ σ 留空用 1 ps。
- *  尺寸依 JESD79-4 由使用者填，工具不內建（ADR-0015）。 */
-export function ddr4Mask(width: string, height: string, rjSigma: string):
-  { width_ui: number; height_mv: number; rj_sigma_ps: number } | Record<string, never> {
-  const w = Number(width)
-  const h = Number(height)
-  if (!(w > 0) || !(h > 0)) return {}
-  return { width_ui: w, height_mv: h, rj_sigma_ps: Number(rjSigma) || 1 }
-}
-
 // ── 送出內容 ──────────────────────────────────────────────
 
 export interface StartState {
@@ -491,11 +484,11 @@ export interface StartState {
   modulation: string
   bitCount: number
   confirmed: boolean
-  /** 選型依據（ADR-0047）：變體漏斗的答案、改用模型與理由，寫進執行紀錄。 */
+  /** 選型依據：變體漏斗的答案、改用模型與理由，寫進執行紀錄。 */
   selectionBasis?: Record<string, unknown>
-  /** 分析方式（#0104）；沒給就是 auto。 */
+  /** 分析方式；沒給就是 auto。 */
   analysisRoute?: string
-  /** 親手改過的 AMI 參數（#0104）；標準 IBIS 不送。 */
+  /** 親手改過的 AMI 參數；標準 IBIS 不送。 */
   txParameters?: Record<string, string>
   rxParameters?: Record<string, string>
 }
@@ -544,10 +537,10 @@ export function startRequest(engine: 'ami' | 'ibis', state: StartState):
   return { url: '/api/ibis-channel/start', body: { ...common, corner: state.corner } }
 }
 
-// ── #0104 第 3 輪（審稿 H2／L7、畫面驗收 B3／B4／T 系列）──────────────
+// ──  第 3 輪（審稿 H2／L7、畫面驗收 B3／B4／T 系列）──────────────
 
 /** 一個 UI 幾 ps。資料率欄是位元率（Gb/s）；PAM4 一個符號 2 bit，引擎看的是
- *  符號率，所以 UI＝1/(rate/2)（審稿 H2，ADR-0068）。沒有速率回 null。 */
+ *  符號率，所以 UI＝1/(rate/2)（審稿 H2）。沒有速率回 null。 */
 export function uiPs(rateGbps: number | null | undefined, modulation: string | null | undefined): number | null {
   const baud = symbolRateGbd(rateGbps, modulation)
   return baud === null ? null : Number((1000 / baud).toFixed(4))
@@ -558,16 +551,6 @@ export function symbolRateGbd(rateGbps: number | null | undefined, modulation: s
   const rate = Number(rateGbps)
   if (rateGbps === null || rateGbps === undefined || !Number.isFinite(rate) || rate <= 0) return null
   return Number((modulation === 'PAM4' ? rate / 2 : rate).toFixed(6))
-}
-
-/** 秒級預覽回報的 UI 和精靈換算不符（差 1% 以上）時回精靈的值，否則 null。
- *  引擎把 PAM4 位元率當符號率用時，畫出來的眼寬會是一半，這裡要講出來。 */
-export function previewUiMismatch(engineUi: unknown, rateGbps: number | null | undefined,
-  modulation: string): number | null {
-  const expected = uiPs(rateGbps, modulation)
-  const got = Number(engineUi)
-  if (expected === null || engineUi === undefined || engineUi === null || !Number.isFinite(got)) return null
-  return Math.abs(got - expected) / expected > 0.01 ? expected : null
 }
 
 export interface QuickCheckMark { jobId: string; txModel: string; rxModel: string }
@@ -605,6 +588,13 @@ export function statusLabel(status: string, lang: Lang = 'zh-TW'): string {
   return (wizardText(lang).statusNames as Readonly<Record<string, string>>)[status] || status
 }
 
+/** 工作的失敗說明；只有真的結束在 error 才有。還在跑時的 error 不是結論，
+ *  畫面維持處理中、繼續輪詢（ 驗收發現 G：後處理時先報失敗、約 20 秒後又出結果）。 */
+export function jobFailureText(job: AnyRecord | null | undefined, lang: Lang = 'zh-TW'): string {
+  if (!job || job.running || job.status !== 'error') return ''
+  return pickText(job, 'error', lang)
+}
+
 interface PresetLike { family?: string; min_bits?: number | null; supported?: boolean }
 
 /** bit 數低於規範下限時回下限（畫面驗收 T9）。 */
@@ -612,10 +602,4 @@ export function belowMinBits(preset: PresetLike | null | undefined, bitCount: nu
   const min = Number(preset?.min_bits)
   if (!preset || !Number.isFinite(min) || min <= 0) return null
   return Number(bitCount) < min ? min : null
-}
-
-/** DDR4 Rx 眼罩只對 DDR／LPDDR 有意義；選了別的規範就不顯示（畫面驗收 T10）。沒選規範照舊顯示。 */
-export function ddrMaskApplies(preset: PresetLike | null | undefined): boolean {
-  if (!preset) return true
-  return preset.family === 'DDR' || preset.family === 'LPDDR'
 }

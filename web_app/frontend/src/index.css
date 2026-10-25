@@ -85,6 +85,13 @@ pre {
   gap: 10px;
 }
 
+.app-header { display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; gap: 12px; }
+.app-header__aside { display: flex; align-items: center; gap: 16px; }
+.app-logo { height: 64px; object-fit: contain; display: block; }
+.log-dock { display: flex; align-items: center; gap: 10px; flex-shrink: 0; min-width: 0; }
+.log-dock__last { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); }
+.netlist__note { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; color: var(--muted); }
+
 .app-title {
   margin: 0;
   font-size: 30px;
@@ -117,6 +124,13 @@ pre {
   margin: 4px 0 0;
   font-size: 13.5px;
   color: var(--muted);
+}
+
+@media (max-height: 820px) {
+  .app-shell { padding: 6px 12px 8px; gap: 6px; }
+  .app-title { font-size: 20px; }
+  .app-sub { display: none; }
+  .app-logo { height: 36px; }
 }
 
 /* ── 選單列（File / Run / View / Help） ─────────────── */
@@ -211,16 +225,12 @@ pre {
 }
 
 /* ── 檢視分頁（完整 / 裁切後 / N 段分割） ───────────── */
-/* 分頁列會被擠。圖層面板一展開，右側可用寬度就少了兩百多 px，十一個分頁的
-   標籤全部折成兩行——「清理對比」變成「清理對／比」、「S 參數」變成
-   「S 參／數」。分頁名稱是這個工具最需要一眼掃過的東西，折行等於掃不動。
-   改成不折、不縮，放不下就水平捲；分頁本來就是可以捲的東西，折行不是。 */
+/* 分頁按鈕不縮字、不拆標籤；左右分欄時整顆換列，所有入口都完整可見。 */
 .viewtabs {
   display: flex;
   gap: 6px;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
+  flex-wrap: wrap;
+  overflow: visible;
   scrollbar-width: thin;
   /* 選中的分頁往上抬 1px 加陰影，容器裁掉的話會看不到那層影子。 */
   padding-top: 2px;
@@ -246,13 +256,14 @@ pre {
 /* 分頁列的外框：左邊是會捲的分頁，右邊是釘住的「更新報告快照」。 */
 .viewtabs-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 8px;
   min-width: 0;
 }
 
 .viewtabs-row > .viewtabs {
-  flex: 1 1 auto;
+  flex: 1 1 320px;
   min-width: 0;
 }
 
@@ -261,9 +272,7 @@ pre {
   align-self: center;
 }
 
-/* 左右內距由 16 收到 11：十個分頁在展開圖層面板後需要 941 px，可用只有
-   842 px。每一顆省 10 px 剛好補上這個差，全部一行放得下，也不必捲。
-   放不下時（視窗更窄、或分頁更多）還是會捲，那是保底不是常態。 */
+/* 保持完整按鈕寬度；不足一列時由分頁列安排換列。 */
 .viewtab {
   flex: 0 0 auto;
   white-space: nowrap;
@@ -666,7 +675,26 @@ pre {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  color: #cfe0f0;
+  /* 卡 0138：收合後只剩這一列，跟著主題字色（原本寫死的淺色在淺色主題上看不到）。 */
+  color: var(--text);
+}
+
+/* 摘要列（卡 0138）：整列可按，展開／收合執行歷史。 */
+.run-history__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.run-history__toggle:hover b {
+  text-decoration: underline;
 }
 
 .run-history__row {
@@ -696,6 +724,14 @@ pre {
   color: #93a5b9;
 }
 
+.run-history__filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 4px 0;
+  font-size: 11px;
+}
 .run-history__actions {
   display: flex;
   flex-wrap: wrap;
@@ -728,6 +764,47 @@ pre {
 
 .input::placeholder {
   color: var(--faint);
+}
+
+.length-input-stepper {
+  position: relative;
+  display: inline-flex;
+  width: 100%;
+}
+
+.length-input-stepper > .input {
+  padding-right: 28px;
+}
+
+.length-input-stepper__buttons {
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  bottom: 3px;
+  display: flex;
+  flex-direction: column;
+  width: 20px;
+}
+
+.length-input-stepper__buttons > button {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--panel-solid);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.length-input-stepper__buttons > button:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.length-input-stepper__buttons > button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .input:focus {
@@ -794,6 +871,22 @@ select.input {
 .btn--mini:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* TDR 深底劇變表：明確指定文字色，避免繼承表格的淺字配上白底。 */
+.tdr-crosssection-button {
+  color: #243247;
+  background: #f5f7fa;
+}
+.tdr-crosssection-button:hover:not(:disabled) {
+  color: #ffffff;
+  background: #294fbd;
+  border-color: #294fbd;
+}
+.tdr-crosssection-button:disabled {
+  color: #4d5c70;
+  background: #e4e9f0;
+  cursor: not-allowed;
 }
 
 /* ── 網路清單 ───────────────────────────────────────── */
@@ -1125,6 +1218,28 @@ select.input {
   background: var(--danger-soft);
 }
 
+/* ：手動放行 D 級的小標與評估表的理由欄 */
+.segment-analysis__release {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+.segment-analysis__reason {
+  min-width: 180px;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--muted);
+  /* 一列一行；完整理由在滑鼠提示（ 長說明不逐刀重複）。 */
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .segment-analysis__rule {
   padding: 6px 9px;
   color: var(--muted);
@@ -1238,7 +1353,7 @@ select.input {
 [hidden] { display: none !important; }
 
 /* ── IBIS／IBIS-AMI 本機模型庫 ────────────────────────────── */
-/* 容器本身要能直向捲動（#0116 第二輪）：上方的匯入列與「產生規格模型」「量測建模」
+/* 容器本身要能直向捲動：上方的匯入列與「產生規格模型」「量測建模」
    兩個摺疊區展開後可能比視窗高，原本的 overflow: hidden 會把超出的部分直接裁掉、
    捲不到。下方清單／詳細資料區與精靈仍各自內捲，平常不會出現外層捲軸。 */
 .model-library {
@@ -1328,7 +1443,7 @@ select.input {
 .model-library__card-title { align-self: center; font-size: 14px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-library__card-meta,
 .model-library__card-hash { grid-column: 1 / -1; color: #8da0b5; font-size: 10.5px; }
-/* #0104 SPISim 規格模型：非原廠標記與 C_comp τ/UI */
+/*  SPISim 規格模型：非原廠標記與 C_comp τ/UI */
 .model-library__source-badges { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; }
 .model-library__source-badge { padding: 1px 7px; border-radius: 999px; color: #ffd28a; border: 1px solid rgba(245, 158, 11, .45); background: rgba(245, 158, 11, .1); font-size: 11px; }
 .model-library__ccomp { padding: 1px 7px; border-radius: 999px; font-size: 11px; border: 1px solid #3b4654; color: #b5c1cf; }
@@ -1338,14 +1453,6 @@ select.input {
 .model-library__spisim { margin: 8px 0; padding: 9px 11px; display: flex; flex-direction: column; gap: 4px; border: 1px solid rgba(245, 158, 11, .45); border-radius: 8px; background: rgba(245, 158, 11, .08); color: #e6d6b5; font-size: 13px; }
 .model-library__spisim > strong { color: #ffd28a; }
 .model-library__spisim .model-library__ccomp { margin-top: 4px; padding: 7px 9px; display: flex; flex-direction: column; gap: 3px; border-radius: 7px; font-size: 13px; }
-.model-library__spec-modes { display: flex; flex-wrap: wrap; gap: 14px; margin: 6px 0; font-size: 13px; }
-.model-library__spec-modes label { display: inline-flex; align-items: center; gap: 5px; }
-.model-library__spec-modes input { width: auto; }
-.model-library__spec-filter { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; font-size: 12px; }
-.model-library__spec-filter label, .model-library__spec-rate { display: flex; flex-direction: column; gap: 3px; font-size: 12px; margin-top: 6px; }
-.model-library__spec-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
-.model-library__spec-actions .btn { width: auto; }
-.model-library__hint.is-warning { color: #ffd28a; }
 
 .model-library__state { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; padding: 3px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; }
 .model-library__state--ready { color: #8ef0b6; background: rgba(46, 204, 113, .15); border: 1px solid rgba(46, 204, 113, .35); }
@@ -1391,7 +1498,7 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 
 /* ── 標準 IBIS 點對點通道七步向導 ─────────────────────────── */
 /* `overflow-y: auto` 是這裡的必要條件，不是選配：父層 `.model-library` 是
-   固定高度的 flex 直排（原本 `overflow: hidden`，#0116 第二輪改成外層也能捲，
+   固定高度的 flex 直排（原本 `overflow: hidden`，改成外層也能捲，
    但精靈仍要自己內捲），本層拿 `flex: 1` 吃掉剩餘高度。少了它，
    超出的內容不會長出捲軸、也捲不到，而是**直接被父層裁掉且無法到達**——
    沒有任何錯誤，畫面看起來只是「下面沒東西了」。`min-height: 0` 本來就是
@@ -1409,7 +1516,7 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .ibis-wizard__content section { max-width: 1080px; margin: 0 auto; }
 .ibis-wizard__content h3 { margin: 0 0 5px; color: #e6f1fb; font-size: 20px; }
 .ibis-wizard__content section > p { margin: 0 0 15px; color: #8fa1b5; font-size: 12px; line-height: 1.55; }
-/* 眼圖精靈（#0088）：五步、兩端並排、漏斗逐層、Tx → 通道 → Rx 示意圖。 */
+/* 眼圖精靈：五步、兩端並排、漏斗逐層、Tx → 通道 → Rx 示意圖。 */
 /* 精靈內層捲動時標題與步驟列固定在上緣，不被切掉一半（畫面驗收 V7）。 */
 .eye-wizard__header { position: sticky; top: 0; z-index: 3; padding: 6px 0 8px; background: #11161d; }
 .eye-wizard__header h3 { margin: 0 0 4px; }
@@ -1454,17 +1561,17 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .eye-wizard .btn--mini { width: auto; align-self: flex-start; padding: 2px 10px; color: #9fd3f5; border-color: #3b5b74; background: transparent; }
 .eye-wizard .btn--mini:hover { color: #eaf6ff; border-color: #4eaddd; }
 .eye-wizard__nav .btn { width: auto; padding: 6px 18px; }
-/* #0104：快速檢驗、AMI 進階、註記（搬自舊 AMI 面板） */
+/* ：快速檢驗、AMI 進階、註記（搬自舊 AMI 面板） */
 .eye-wizard__quick, .eye-wizard__advanced { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid #2b3643; border-radius: 8px; }
 .eye-wizard__quick h4, .eye-wizard__advanced h4 { margin: 4px 0 0; }
 .eye-wizard__advanced > summary { cursor: pointer; color: #b8c7d8; font-weight: 600; }
-/* 按鈕不縮、不換行：輸入框 flex 撐滿時「瀏覽…」會被擠成兩行（#0111 複查截圖 01）。 */
+/* 按鈕不縮、不換行：輸入框 flex 撐滿時「瀏覽…」會被擠成兩行。 */
 .eye-wizard__row .btn { width: auto; padding: 6px 14px; white-space: nowrap; flex: 0 0 auto; }
 .eye-wizard label.eye-wizard__inline { flex-direction: row; align-items: center; gap: 6px; }
 .eye-wizard label.eye-wizard__inline input { width: auto; }
 .eye-wizard__notes ul { margin: 4px 0; padding-left: 18px; }
 .eye-wizard tr.is-best td { font-weight: 700; color: #eaf6ff; }
-/* #0104 常見規範預設 */
+/*  常見規範預設 */
 .eye-wizard__preset { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid #2f4d63; border-radius: 8px; background: rgba(38, 117, 160, .08); }
 .eye-wizard__preset-info { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: #c5d9eb; }
 .eye-wizard__preset-info .hint { font-size: 13px; }
@@ -1548,10 +1655,10 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .ibis-eye-modal__panel > header span { color: #8bdcff; font-size: 11px; text-transform: uppercase; }
 .ibis-eye-modal__panel > img { flex: 1; min-height: 0; width: 100%; object-fit: contain; border-radius: 7px; background: #fff; }
 .ibis-eye-modal__panel > code { overflow: hidden; color: #8295a9; text-align: center; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
-/* 結果頁共用畫廊（#0104，EyeImageGallery.tsx）：兩欄 16:9 縮圖，點開燈箱。
+/* 結果頁共用畫廊（，EyeImageGallery.tsx）：兩欄 16:9 縮圖，點開燈箱。
    原圖 1600×900 照原尺寸放會一張佔滿一個畫面；縮圖約 520px 寬，報告快照匯出倍率 3
    約 1560px，畫質與原圖相當。 */
-/* #0115：欄數由 galleryColumns 依張數給（--eye-gallery-cols）；一張時依視窗高度限寬，免得一張圖比螢幕還高。 */
+/* ：欄數由 galleryColumns 依張數給（--eye-gallery-cols）；一張時依視窗高度限寬，免得一張圖比螢幕還高。 */
 .eye-gallery { margin-top: 8px; display: grid; grid-template-columns: repeat(var(--eye-gallery-cols, 2), minmax(0, 1fr)); gap: 12px; }
 .eye-gallery[data-count="1"] { max-width: min(1200px, calc((100vh - 320px) * 16 / 9)); margin-left: auto; margin-right: auto; }
 .eye-gallery article { min-width: 0; padding: 10px; border: 1px solid #303d4b; border-radius: 9px; background: #0d131a; }
@@ -1566,14 +1673,17 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .ibis-eye-modal__panel > header .btn { width: auto; }
 /* 眼圖量測表：數字要一眼讀得出來，表不必撐滿整個寬度。 */
 .eye-metrics { max-width: 440px; font-size: 14px; }
-/* 結果頁（#0115）：只放眼圖，上方一列工具按鈕（眼圖參數、開啟模擬資料夾）。 */
-.eye-results__toolbar { margin: 10px 0 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.eye-results__toolbar h4 { margin: 0 auto 0 0; }
+/* 結果頁：只放眼圖，上方一列工具按鈕（眼圖參數、開啟模擬資料夾）。 */
+.eye-results__toolbar { margin: 10px 0 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; position: sticky; top: 0; z-index: 2; background: #11161d; padding: 6px 0; }
+.eye-results__toolbar h4 { margin: 0; }
+.eye-results__details-btn { border-color: var(--accent); color: #fff; background: var(--accent); }
+.eye-results__details-btn:hover:not(:disabled) { color: #fff; }
 .eye-results__toolbar .btn { width: auto; }
-/* 參數抽屜：從右邊滑出、沒有遮罩，眼圖仍看得到（ResultDetailsDrawer.tsx）。配色沿用燈箱。 */
-/* Jeff 2026-10-11 回饋：只有內容那麼大——寬度剛好放下量測表、最多視窗寬三分之一；高度跟著內容，
-   超過才捲動。浮在右上角，不從頂端拉到底，陰影只在面板邊緣，頁面不變暗。 */
-.result-drawer { position: fixed; top: 72px; right: 16px; z-index: 4000; width: max-content; min-width: 280px; max-width: min(33vw, 480px); max-height: calc(100vh - 96px); display: flex; flex-direction: column; border: 1px solid #344253; border-radius: 10px; background: #0d131a; box-shadow: 0 10px 28px rgba(0, 0, 0, .35); animation: result-drawer-in .18s ease-out; }
+/* 展開量測時保留側欄空間；結果區太窄就換到下一列，不覆蓋眼圖。 */
+.eye-results__layout { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; min-width: 0; }
+.eye-results__layout > .eye-gallery { flex: 1 1 420px; min-width: 0; }
+.eye-results__layout > .result-drawer__inline { min-width: 0; width: 100%; }
+.result-drawer { flex: 0 1 340px; min-width: min(280px, 100%); max-width: 100%; max-height: calc(100vh - 160px); margin-top: 8px; display: flex; flex-direction: column; border: 1px solid #344253; border-radius: 10px; background: #0d131a; box-shadow: 0 10px 28px rgba(0, 0, 0, .35); }
 .result-drawer > header { padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #263240; }
 .result-drawer > header strong { color: #e6f1fb; font-size: 16px; }
 .result-drawer > header .btn { width: auto; }
@@ -1591,8 +1701,6 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .eye-wizard__params { table-layout: fixed; width: 100%; }
 .eye-wizard__params th:nth-child(1) { width: 40%; }
 .eye-wizard__params th:nth-child(2) { width: 32%; }
-/* 「從 AEDT 內建規格產生」：summary 一行、內容在下面，不跟匯入列一樣左右排（畫面驗收 V1）。 */
-.model-library__import.model-library__generate { display: block; }
 .eye-metrics td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 .eye-metrics th:last-child { text-align: right; }
 @media (max-width: 760px) {
@@ -1651,7 +1759,7 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
   }
 }
 
-/* ── IBIS 預檢與重用（ADR-0016／0017／0036／0037）────────────────────────── */
+/* ── IBIS 預檢與重用────────────────────────── */
 
 .ibis-wizard__preflight-block {
   margin-top: 12px;
@@ -2035,7 +2143,7 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
    線框圖示刻意畫得很淡——它是背景，不是要人去讀的東西。 */
 /* 用 inset + flex 置中，不用 translate(-50%,-50%)：這個元素掛了 rise-in
    動畫（fill-mode both），動畫結束把 transform 設成 none，置中位移被蓋掉，
-   提示框的左上角落在中心點、整塊往右下偏（#0062）。 */
+   提示框的左上角落在中心點、整塊往右下偏。 */
 .stage-empty {
   position: absolute;
   inset: 0;
@@ -2120,29 +2228,11 @@ details.model-library__section[open] > summary { margin-bottom: 4px; }
 .model-library__health .is-pass { color: #9ff0c4; }
 .model-library__health .is-fail { color: #ffb4a8; }
 
-/* #0116 產生規格模型：SPISim 產生／本工具合成兩塊並列（ADR-0069）。 */
-.model-library__gen-methods { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; margin-top: 8px; }
-.model-library__gen-card { padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(245, 158, 11, .35); background: rgba(245, 158, 11, .04); min-width: 0; }
-.model-library__gen-card--synth { border-color: rgba(56, 189, 248, .4); background: rgba(56, 189, 248, .05); }
-.model-library__gen-title { display: block; font-size: 14px; margin-bottom: 2px; color: #ffd28a; }
-.model-library__gen-card--synth .model-library__gen-title { color: #8fd8ff; }
-/* #0116 實機 4.2-1：1600 寬時合成面板的輸入框超出外框、標籤換行後沒對齊。
-   欄位可以縮到 0（數字輸入框的內建最小寬度不再撐開格子），底部對齊。 */
-.model-library__gen-card--synth .model-library__spec-filter { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; }
-.model-library__gen-card .model-library__spec-filter label { min-width: 0; }
-.model-library__gen-card .model-library__spec-filter .input { min-width: 0; width: 100%; box-sizing: border-box; }
-/* 出處很長（文件名＋頁碼＋備註）：固定欄寬、在格內換行，不撐出卡片。 */
-.model-library__gen-card .model-library__synth-params table { table-layout: fixed; width: 100%; }
 .model-library__synth-params td { white-space: normal; overflow-wrap: anywhere; }
 .model-library__source-badge.is-synth { color: #8fd8ff; border-color: rgba(56, 189, 248, .5); background: rgba(56, 189, 248, .1); }
 .model-library__spisim.is-synth { border-color: rgba(56, 189, 248, .5); background: rgba(56, 189, 248, .08); color: #cfe6f5; }
 .model-library__spisim.is-synth > strong { color: #8fd8ff; }
 .model-library__spisim .is-warning { color: #ffd28a; }
-.model-library__spec-filter label.is-missing { color: #ff9b8a; }
-.model-library__spec-filter label.is-missing .input { border-color: rgba(248, 113, 113, .7); }
 .model-library__synth-params { margin-top: 6px; font-size: 12.5px; }
-.model-library__synth-params tr.is-unconfirmed td { color: #ff9b8a; }
 .eye-results__origin { margin: 6px 0; padding: 7px 10px; border-radius: 7px; border: 1px solid rgba(56, 189, 248, .4); background: rgba(56, 189, 248, .06); font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
 .eye-results__origin .is-warning { color: #ffd28a; font-weight: 600; }
-.model-library__synth-params .input { min-width: 0; width: 100%; box-sizing: border-box; padding: 3px 6px; }
-.model-library__synth-params .input.is-missing { border-color: rgba(248, 113, 113, .8); }

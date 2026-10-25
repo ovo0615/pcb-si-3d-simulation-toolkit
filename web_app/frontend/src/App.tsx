@@ -1,7 +1,15 @@
+import SupportBundleDialog from './components/SupportBundleDialog'
+import { notifyStartupPaint } from './startupDiagnostics'
+import { safeUserMessage } from './userMessages'
+import { useLengthT as useT } from './useLengthT'
+import { LengthInput, LengthUnitControl, LengthUnitError, useLengthUnit, useLengthField } from './lengthContext'
+import { formatLength, type DisplayLengthUnit } from './lengthUnits'
+import { lengthText } from './lengthText'
+import { lengthRequest } from './lengthRequests'
 // PCB SI 3D 模擬分析工具 — 前端主程式
 // 裁切流程：載入電路板 → 選擇訊號／參考網路 → 裁切設定 → Port 設定 → 執行裁切
 import {
-  useState, useEffect, useMemo, useRef, useCallback,
+  useState, useEffect, useMemo, useRef, useCallback, Fragment,
   type CSSProperties, type ChangeEvent,
 } from 'react'
 import { Allotment } from 'allotment'
@@ -9,26 +17,39 @@ import {
   loadLogSplit, loadMainSplit, saveLogSplit, saveMainSplit,
   loadReportWorkspace, saveReportWorkspace, resetReportWorkspaceIfNewInstance,
 } from './splitLayout'
-import { logColor, logText, parseLogMessage } from './logLevel'
+import { logPaneMaxPx, tdrChartHeight } from './compactLayout'
+import { dcNoteLabel } from './dcNoteLabel'
+import { appendLogEntry, logColor, logText, parseLogMessage } from './logLevel'
+import { solverProgress, monitorRetry } from './solverProgress'
+import { alertMessage as alert, alertMessageAndWait, confirmMessage as confirm, promptMessage } from './messageDialog'
+import { useLogAutoScroll } from './useLogAutoScroll'
 import type { LogEntry } from './logLevel'
 import { describeApiError as describeApiErrorText } from './apiError'
-import { isNoDiffPairsError, profileLabel, pickText, pickList, errorText } from './backendFields'
+import { isNoDiffPairsError, pickText, pickList, errorText } from './backendFields'
 import type { ProfileListItem } from './backendFields'
-import {
-  INITIAL_BANDWIDTH_STATE, bandwidthCoverage, bandwidthFromProfile, bandwidthProfileSettings,
-  normalizeDataRate, resolveSolverBandwidth, switchBandwidthMode,
-} from './bandwidthSource'
-import type { BandwidthMode, BandwidthState, ResolvedBandwidth } from './bandwidthSource'
-import { LANG_NAMES, LANGS, useT } from './i18n'
+import type { ResolvedBandwidth } from './bandwidthSource'
+import SimulationSettings from './components/SimulationSettings'
+import { simulationPayload } from './simulationRequest'
+import { confirmProfileOverwrite } from './profileSave'
+import { LANG_NAMES, LANGS } from './i18n'
 import { currentLang, messagesFor } from './i18n/catalog'
 import type { Messages } from './i18n/zh-TW'
 import type { Lang } from './i18n/lang'
 import { revealPath } from './revealPath'
 import { buildSegmentOverlay, isWholeBoardPlan, segmentOverlayCount } from './segmentOverlay'
 import type { ForbiddenInterval, PlanLayout } from './segmentOverlay'
-import { copyText, useDesktopShell } from './desktopBridge'
+import { complexityCutRequests, moveComplexityCut } from './complexityCutRequests'
+import {
+  cancelShellClose, copyText, finishShellClose, installCloseRequestHandler, useDesktopShell,
+} from './desktopBridge'
+import type { CloseRequestPayload } from './desktopBridge'
+import { rememberInstallKind, restartHint } from './installKind'
 import { describeJobFailure, fatalJobError, isFatalJobError } from './jobError'
+import { runBoundaryPreviewJob } from './boundaryPreviewJob'
+import { failureText, failureTime, hasFailure } from './segmentFailure'
+import type { SegmentFailure } from './segmentFailure'
 import RunHistory from './components/RunHistory'
+import EulaPanel from './components/EulaPanel'
 import 'allotment/dist/style.css'
 import Preview2D, {
   CleanupOverlay,
@@ -53,28 +74,52 @@ import OpenFolderButton from './components/OpenFolderButton'
 import TdrChart from './components/TdrChart'
 import TaskPicker from './components/TaskPicker'
 import BetaBadge from './components/BetaBadge'
-import { betaTasksIn } from './featureTiers'
+import BetaSwitch, { useBetaEnabled } from './components/BetaSwitch'
+import { mainOnlySelection, betaTasksIn } from './featureTiers'
 import { confirmBetaUse } from './betaGuard'
 import {
-  DEFAULT_TASKS,
   loadSavedTasks,
   makeFlags,
+  normalizeTaskList,
   saveTasks,
   type TaskKey,
 } from './taskConfig'
+import { backendDirectAfterLoad, createEntryModeSyncer, initialEnabledTasks } from './entryMode'
 import { portComponents, readExistingPorts, signalNetsFromPorts, type ExistingPort } from './existingPorts'
 import CascadeSchematic, { CascadeGraph } from './components/CascadeSchematic'
-import ReportCenter from './components/ReportCenter'
+import ReportCenter, { type ReportCollectSources } from './components/ReportCenter'
 import ReportSnapshotButton from './components/ReportSnapshotButton'
+import { boundJobResult, supplementalViews, hashText, sourcePathKey, type ReportJobBinding, type PreprocessingRecord } from './reportCollect'
+import { appendLineage, rememberedWorkSources, rememberWorkSource, segmentedWorkSource, startLineage,
+  type WorkLineage } from './reportWorkSources'
+import type { WorkSource } from './reportCollect'
 import ModelLibrary from './components/ModelLibrary'
 import { modelsReportMetadata } from './components/reportMetadataStore'
 import { notifyCascadedChannelChanged } from './components/useCascadedChannel'
-import { markReportSnapshotsStale } from './reportApi'
+import { markReportSnapshotsStale, captureReportSourceEvidence } from './reportApi'
 import { effectiveReportLocale } from './reportLocale'
 import { displayFileName } from './reportPrivacy'
 import { reportSegmentCount } from './reportSegmentCount'
 import { AnsysLicensePanel } from './components/AnsysLicensePanel'
+import { CloseSessionDialog } from './components/CloseSessionDialog'
+import { ConfirmDialog, useConfirmDialog } from './components/ConfirmDialog'
+import { useSessionRef, useSessionState } from './useSessionState'
+import { DEFAULT_SOLVER_CORES, SOLVER_CORES_SESSION_KEY, SOLVER_CORES_PREFERENCE_KEY, parseSolverCores, isSolverCoresPreference } from './solverCores'
+import { SolverCoresField } from './components/SolverCoresField'
+import { restoreSparamView, sparamTabEnabled, useSparamViewPersistence } from './sparamViewRestore'
+import { formatMaxS } from './cascadeSummary'
+import {
+  applySessionFields, attachSession, closeSession, createAutosaver, getAttachResult, hasRestoredFields,
+  HEARTBEAT_MS, sendSessionHeartbeat,
+  notifySessionChange, onSessionChange, putSessionSnapshot, registerSessionField,
+  restoredFieldValue, sessionData,
+} from './uiSession'
 import { LicenseTag } from './components/LicenseTag'
+import {
+  canOfferStitchRelease, releaseBadge, releaseConfirmNumbers, releaseHasNoGuarantee,
+  releaseRunLimit, releaseWarning, segmentReleaseNote, segmentReleases,
+  type ManualDRelease, type StitchCeiling,
+} from './stitchRelease'
 import { licenseBlock, useAnsysLicense, type AnsysFunction } from './ansysLicense'
 
 const normalizeUserPath = (path: string): string => {
@@ -128,12 +173,22 @@ interface SegmentCut {
    *  後端刻意讓每一刀的文字相同，所以顯示時去重、只出現一次。 */
   stitch_return_path_risk?: string | null
   nearest_obstacle?: { kind: string; label: string; net: string; layer: string } | null
+  /** 手動放行 D 級（縫合不足）的刀才有；評級仍是 D。 */
+  manual_d_release?: ManualDRelease | null
+}
+
+/** 兩種分析共用的放行相關欄位。舊後端沒有。 */
+interface StitchReleaseFields {
+  allow_stitch_release?: boolean
+  stitch_ceiling?: StitchCeiling | null
+  stitch_failed_count?: number
+  manual_d_release?: ManualDRelease[]
 }
 
 type QualityThreshold = 'A' | 'B' | 'C'
 
 /** 依 3D 複雜度分段的分析結果。段數是偵測結果，不是輸入。 */
-interface ComplexityAnalysis {
+interface ComplexityAnalysis extends StitchReleaseFields {
   mode: 'complexity'
   feasible: boolean
   reason: string
@@ -149,6 +204,7 @@ interface ComplexityAnalysis {
   }[]
   cuts: {
     axis: number
+    source_index?: number
     direction: 'x' | 'y'
     position_mm: number
     region: number
@@ -162,7 +218,9 @@ interface ComplexityAnalysis {
     auto_position_mm: number | null
     /** 單參考（微帶線）切面的提示。每一刀文字相同，顯示時去重。 */
     stitch_return_path_risk?: string | null
+    manual_d_release?: ManualDRelease | null
   }[]
+  source_cuts?: { axis: number; position_mm: number; manual?: boolean }[]
   segments: {
     index: number
     bounds_mm: [number, number, number, number]
@@ -184,7 +242,7 @@ interface ThresholdReportItem {
   balance_ratio?: number
 }
 
-interface SegmentAnalysis {
+interface SegmentAnalysis extends StitchReleaseFields {
   mode: 'axis'
   quality_threshold: QualityThreshold
   /** 選定門檻下是否找得到可行的切點組合；false 時切面僅供參考，不可執行。 */
@@ -207,7 +265,7 @@ interface SegmentAnalysis {
     reasons: string[]
     nearest_obstacle?: { kind: string; label: string; net: string; layer: string } | null
   }[]
-  /** 板子禁切區間（#0130），與 N 無關。舊版後端沒有這個欄位。 */
+  /** 板子禁切區間，與 N 無關。舊版後端沒有這個欄位。 */
   forbidden_intervals?: ForbiddenInterval[]
   safety_overlay: {
     items: {
@@ -278,7 +336,11 @@ interface SegmentSolverPlan {
   export_status?: string
   touchstone?: string | null
   result_stale?: boolean
-  /** 該段的矩形範圍（mm）；預覽畫載入檔案的分段時用（卡 0121）。舊檔沒有。 */
+  /** 上一次為什麼失敗；舊檔沒記錄是 null，畫面顯示「未記錄」。 */
+  failure?: SegmentFailure | null
+  /** 這一段兩側切面的手動放行 D 級紀錄；舊檔沒有。 */
+  manual_d_release?: ManualDRelease[]
+  /** 該段的矩形範圍（mm）；預覽畫載入檔案的分段時用。舊檔沒有。 */
   box_mm?: [number, number, number, number] | null
 }
 
@@ -330,11 +392,13 @@ const WIDEN_FACTOR = 1.5
 
 /** 系統日誌保留的行數上限。
  *
- *  日誌是從 WebSocket 一行一行推進來的，而畫面上那一塊是整份 `logs.map()`
+ *  日誌是從 WebSocket 一行一行推進來的，而畫面上那一塊是整份 `logs.map`
  *  出來的——沒有上限的話，一趟數小時的 HFSS 求解會讓陣列與 DOM 一路長大，
  *  每來一行就重繪整個元件。5000 行足夠回頭看完一個階段（AEDT 自己的訊息
  *  視窗也是同一個量級），又不會把記憶體吃到影響求解。 */
 const MAX_LOG_LINES = 5000
+/** 自動保存工作階段的防抖時間。關窗時另外再存一次最新的。 */
+const SESSION_AUTOSAVE_MS = 1500
 
 const NETLIST_ROW_HEIGHT = 24
 const NETLIST_CHROME_HEIGHT = 27
@@ -354,21 +418,36 @@ type ViewMode = 'full' | 'cut' | 'cleanup' | 'segments' | 'schematic' | 'sparam'
 
 /** 量測容器實際高度，讓圖表填滿剩餘空間而不需捲動。
  *  分頁高度會隨視窗與 Allotment 分隔線改變，因此以 ResizeObserver 追蹤，
- *  不用 window.innerHeight 推算。 */
+ *  不用 window.innerHeight 推算。
+ *
+ *  用 callback ref：被量的元素只在某個分頁才掛上，原本的
+ *  useEffect(…, []) 在 App 第一次 render 時元素還不在，之後就再也不量。 */
 function useMeasuredHeight<T extends HTMLElement>() {
-  const ref = useRef<T | null>(null)
+  const observerRef = useRef<ResizeObserver | null>(null)
   const [height, setHeight] = useState(0)
-  useEffect(() => {
-    const element = ref.current
+  const ref = useCallback((element: T | null) => {
+    observerRef.current?.disconnect()
+    observerRef.current = null
     if (!element) return
     setHeight(element.clientHeight)
     const observer = new ResizeObserver(entries => {
       for (const entry of entries) setHeight(entry.contentRect.height)
     })
     observer.observe(element)
-    return () => observer.disconnect()
+    observerRef.current = observer
   }, [])
   return [ref, height] as const
+}
+
+/** 視窗高度：系統日誌的最大高度跟著它走。 */
+function useViewportHeight() {
+  const [height, setHeight] = useState(() => window.innerHeight)
+  useEffect(() => {
+    const update = () => setHeight(window.innerHeight)
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+  return height
 }
 
 /** 前後端之間的介面版號，必須與後端 `main.py` 的 `API_CONTRACT_VERSION` 相同。
@@ -380,7 +459,7 @@ function useMeasuredHeight<T extends HTMLElement>() {
  *  2026-08-19 實測兩種都發生了。
  *
  *  加端點或改送出欄位時兩邊一起 +1；`test_api_contract_version.py` 會擋住只改一邊。 */
-const API_CONTRACT_VERSION = 10
+const API_CONTRACT_VERSION = 13
 
 /** 結果物件換版後，將同類報告快照標記為可能過期；第一次載入不誤報。 */
 function useReportStaleRevision(
@@ -425,16 +504,17 @@ const BD_NET_STYLE: CSSProperties = {
 const BACKDRILL_MIN_SAFE_STUB_MIL = 4
 
 /** 保留殘樁過短的警告；空字串＝沒問題（或還沒填好，由送出時再擋）。 */
-const backdrillStubWarning = (text: string): string => {
+const backdrillStubWarning = (text: string, unit: DisplayLengthUnit): string => {
+  const tx = lengthText(messagesFor(currentLang()), unit, currentLang()).appFlow
   const mil = Number(text)
   if (text.trim() === '' || !Number.isFinite(mil) || mil < 0) return ''
   if (mil === 0) {
-    return messagesFor(currentLang()).appFlow.a0MilStubLetsTheDrill
-      + messagesFor(currentLang()).appFlow.connectionBetweenTheRoutingLayerAndBarrel(BACKDRILL_MIN_SAFE_STUB_MIL)
+    return tx.a0MilStubLetsTheDrill
+      + tx.connectionBetweenTheRoutingLayerAndBarrel(formatLength(BACKDRILL_MIN_SAFE_STUB_MIL, 'mil', unit))
   }
   if (mil < BACKDRILL_MIN_SAFE_STUB_MIL) {
-    return messagesFor(currentLang()).appFlow.aMilStubIsShorterThanA(mil)
-      + messagesFor(currentLang()).appFlow.keepAtLeastMilAndConfirmWith(BACKDRILL_MIN_SAFE_STUB_MIL)
+    return tx.aMilStubIsShorterThanA(formatLength(mil, 'mil', unit))
+      + tx.keepAtLeastMilAndConfirmWith(formatLength(BACKDRILL_MIN_SAFE_STUB_MIL, 'mil', unit))
   }
   return ''
 }
@@ -551,11 +631,13 @@ function useFlowMessage(initial: FlowMessage): [string, (next: FlowMessage) => v
 /** API 例外保留雙語，已顯示的錯誤列切語言後仍能改用英文。 */
 function flowError(message: (t: Messages, lang: Lang) => string): Error {
   return Object.assign(new Error(message(messagesFor('zh-TW'), 'zh-TW')), {
-    detail_en: message(messagesFor('en'), 'en'),
+    user_safe: true, detail: message(messagesFor('zh-TW'), 'zh-TW'), detail_en: message(messagesFor('en'), 'en'),
   })
 }
 
 export default function App() {
+  useEffect(() => notifyStartupPaint(), [])
+  const { unit, length, measure, valid: validLengths, reset: resetLengths } = useLengthUnit()
   const { t, lang, setLang } = useT()
   const EXTENT_LABEL: Record<string, string> = {
     Conforming: t.appFlow.conforming,
@@ -563,162 +645,171 @@ export default function App() {
     Bounding: t.appFlow.boundingBox,
   }
   // ── 檔案與載入狀態 ──
-  const [inputPath, setInputPath] = useState('')
-  const [outputPath, setOutputPath] = useState('')
+  const [inputPath, setInputPath] = useSessionState('inputPath', '')
+  const [outputPath, setOutputPath] = useSessionState('outputPath', '')
   // 資料放在哪裡：由後端回報實際路徑，前端不寫死。
   // 環境變數改得動模型庫與設定檔的位置，寫死的字串會安靜地說謊。
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null)
   // S 參數分頁：自動曲線（單端／差動、IL／RL／NEXT／FEXT）
-  const [spMode, setSpMode] = useState<'single' | 'diff'>('diff')
+  const [spMode, setSpMode] = useSessionState<'single' | 'diff'>('spMode', 'diff')
   // 使用者有沒有自己按過模式。沒按過而差動配不出來（兩條互不相干的單端
   // 網路）就自動改單端，不要讓人第一眼看到的是紅字「找不到可配對的差動對」。
   const spModePicked = useRef(false)
-  const [spKinds, setSpKinds] = useState<Record<string, boolean>>(
+  const [spKinds, setSpKinds] = useSessionState<Record<string, boolean>>('spKinds',
     { il: true, rl: true, next: false, fext: false })
   const [spData, setSpData] = useState<any | null>(null)
   const [spBusy, setSpBusy] = useState(false)
   const [spError, setSpError] = useFlowMessage('')
   // 設定 Port 與求解器：只建立 Port 與 Setup，不執行裁切
-  const [portsOutputPath, setPortsOutputPath] = useState('')
+  const [portsOutputPath, setPortsOutputPath] = useSessionState('portsOutputPath', '')
   // 6c 疊構更換
-  const [stackupFilePath, setStackupFilePath] = useState('')
-  const [stackupOutputPath, setStackupOutputPath] = useState('')
-  const [stackupExportFormat, setStackupExportFormat] = useState<'xml' | 'csv' | 'json'>('xml')
+  const [stackupFilePath, setStackupFilePath] = useSessionState('stackupFilePath', '')
+  const [stackupOutputPath, setStackupOutputPath] = useSessionState('stackupOutputPath', '')
+  const [stackupExportFormat, setStackupExportFormat] = useSessionState<'xml' | 'csv' | 'json'>('stackupExportFormat', 'xml')
   const [stackupDiff, setStackupDiff] = useState<any | null>(null)
   const [stackupConfirmRemoval, setStackupConfirmRemoval] = useState(false)
   // 6d 背鑽
-  const [bdTargetStubMil, setBdTargetStubMil] = useState('5')
-  // 鑽頭加大是選項，預設不加大：鑽頭直徑＝Via Hole（#0062）。
-  const [bdDrillOversize, setBdDrillOversize] = useState(false)
-  const [bdDiameterIncMil, setBdDiameterIncMil] = useState('8')
+  const [bdTargetStubMil, setBdTargetStubMil] = useSessionState('bdTargetStubMil', '5')
+  // 鑽頭加大是選項，預設不加大：鑽頭直徑＝Via Hole。
+  const [bdDrillOversize, setBdDrillOversize] = useSessionState('bdDrillOversize', false)
+  const [bdDiameterIncMil, setBdDiameterIncMil] = useSessionState('bdDiameterIncMil', '8')
   const [bdResult, setBdResult] = useState<any | null>(null)
-  const [bdOutputPath, setBdOutputPath] = useState('')
+  const [bdOutputPath, setBdOutputPath] = useSessionState('bdOutputPath', '')
   const [allNets, setAllNets] = useState<string[]>([])
   // DDR 自動分類的結果與使用者勾選的角色。null = 還沒分類過。
   const [ddrResult, setDdrResult] = useState<any>(null)
   const [ddrRoles, setDdrRoles] = useState<string[]>([])
   const [ddrBusy, setDdrBusy] = useState(false)
   const [components, setComponents] = useState<ComponentInfo[]>([])
-  /** 載入的板上已經有的元件端 Port（#0122）。用來預選訊號網路，以及在
+  /** 載入的板上已經有的元件端 Port。用來預選訊號網路，以及在
    *  勾著「局部裁切」載入時提示這塊板看起來已經裁切、設好 Port 了。 */
   const [existingPorts, setExistingPorts] = useState<ExistingPort[]>([])
   /** 載入時依既有 Port 預選了哪些訊號網路；畫面上講一聲，免得使用者以為是殘留。 */
   const [netsPrefilledFromPorts, setNetsPrefilledFromPorts] = useState<string[]>([])
 
   // ── 網路選擇 ──
-  const [signalNets, setSignalNets] = useState<string[]>([])
-  const [refNets, setRefNets] = useState<string[]>([])
-  const [filterText, setFilterText] = useState('')
+  const [signalNets, setSignalNets] = useSessionState<string[]>('signalNets', [])
+  const [refNets, setRefNets] = useSessionState<string[]>('refNets', [])
+  const [filterText, setFilterText] = useSessionState('filterText', '')
 
   // ── 裁切與 Port 設定 ──
-  const [expansionMm, setExpansionMm] = useState('2')
+  const [expansionMm, setExpansionMm] = useSessionState('expansionMm', '5')
   // 預設「貼合走線」：凸包對斜向與彎折通道必然多包一大塊無關銅箔與 Via。
   // 貼合外框漏掉訊號時後端會自動回退凸包並通知，不會安靜地切壞。
-  const [extentType, setExtentType] = useState('Conforming')
+  const [extentType, setExtentType] = useSessionState('extentType', 'Conforming')
   const [actualCutoutExtentType, setActualCutoutExtentType] = useState('')
   const [preciseBoundaryPreview, setPreciseBoundaryPreview] = useState<number[][] | null>(null)
   const [preciseBoundaryPreviewKey, setPreciseBoundaryPreviewKey] = useState('')
   /** 貼合外框比凸包少包多少面積（%）；只有 Conforming 預檢成功時才有值。 */
   const [boundaryAreaSaving, setBoundaryAreaSaving] = useState<number | null>(null)
   // 甲1（2026-08-29 拍板）：預設自動——細間距陣列整板 Pin Group，其餘 Coax。
-  const [portType, setPortType] = useState('auto')
-  const [checkedComps, setCheckedComps] = useState<Record<string, boolean>>({})
+  const [portType, setPortType] = useSessionState('portType', 'auto')
+  const [checkedComps, setCheckedComps] = useSessionState<Record<string, boolean>>('checkedComps', {})
   const [cutoutJobId, setCutoutJobId] = useState('')
   const [cutoutStopping, setCutoutStopping] = useState(false)
+  const [boundaryPreviewStartedAt, setBoundaryPreviewStartedAt] = useState<number | null>(null)
 
   // ── 模擬設定（HFSS 3D Layout／SIwave SYZ）──
-  const [sweepType, setSweepType] = useState('Interpolating')
-  // 預設抽成常數：「由資料率導出」要判斷掃頻表是不是還維持預設形狀，
-  // 是的話把上限一併帶入（50 GHz 對 DDR3L 是白算五倍頻寬）。
-  const DEFAULT_SWEEPS = [
-    { distribution: 'Linear Count', start: '0Hz', end: '1Hz', value: '2' },
-    { distribution: 'Log Scale', start: '1Hz', end: '100MHz', value: '20' },
-    { distribution: 'Linear Step', start: '100MHz', end: '50GHz', value: '0.05GHz' }
-  ]
-  const [sweeps, setSweeps] = useState(DEFAULT_SWEEPS)
-  /** 掃頻表是否仍是預設形狀（末段上限可以是我們上次帶入的值）。
-   *  使用者親手改過的表**絕不自動更動**——那是他的設定，不是預設。 */
-  const sweepsFollowDefault = (rows: typeof DEFAULT_SWEEPS) =>
-    rows.length === 3
-    && JSON.stringify(rows.slice(0, 2)) === JSON.stringify(DEFAULT_SWEEPS.slice(0, 2))
-    && rows[2].distribution === 'Linear Step'
-    && rows[2].start === '100MHz'
-    && rows[2].value === '0.05GHz'
-  const [solutionFreq, setSolutionFreq] = useState('25')
-  const [errorTolerance, setErrorTolerance] = useState('0.1')
-  const [maxPasses, setMaxPasses] = useState('20')
-  const [maxDeltaS, setMaxDeltaS] = useState('0.02')
-  const [maxRefinementPerPass, setMaxRefinementPerPass] = useState('15')
-  const [minConvergedPasses, setMinConvergedPasses] = useState('2')
-  // HFSS 網格方法：EDB 無此設定，求解時由 PyAEDT 套用；隨 segments.json 保存
-  // 預設 Phi：PhiPlus 在 AEDT 2026.1 非圖形化求解實測會讓 AEDT 崩潰（2026-09-05）。
-  const [hfssMeshMethod, setHfssMeshMethod] = useState<'Phi' | 'PhiPlus' | 'Classic'>('Phi')
-  /** 使用者自己選過網格方法就不再被 segments.json 的值回寫掉。
-   *
-   *  `/api/schedule/plan` **一定**會回一個正規化後的值（舊檔沒有這個欄位時
-   *  回預設 Phi）。無條件採用等於：選了 Classic 的人只要按一次「瀏覽…」
-   *  或「收回結果」，下拉就靜靜跳回 Phi，之後也真的用 Phi 去解。 */
-  const hfssMeshMethodTouched = useRef(false)
-  const pickHfssMeshMethod = (value: 'Phi' | 'PhiPlus' | 'Classic') => {
-    hfssMeshMethodTouched.current = true
-    setHfssMeshMethod(value)
-  }
-  // Ansys BKM：自適應方式與平行自適應區
-  const [adaptiveMode, setAdaptiveMode] = useState<'broadband' | 'multi' | 'single'>('broadband')
-  const [parallelRefinement, setParallelRefinement] = useState(true)
-  const [solverCores, setSolverCores] = useState('12')
-  const [solverMemoryPercent, setSolverMemoryPercent] = useState('90')
+  // ：只保存兩個使用者輸入，舊 session 的工程參數不再還原。
+  const [specName, setSpecName] = useSessionState('simulationSpecName', '')
+  const simulationChoiceEpoch = useRef(0)
+  const [maxFrequencyGHz, setMaxFrequencyGHz] = useSessionState('maxFrequencyGHz', () => {
+    const old = restoredFieldValue<{ end: string }[]>('sweeps', [])
+    const maximum = old.length ? Math.max(...old.map(row => parseFreqToGHz(row.end))) : 50
+    return String(Number.isFinite(maximum) && maximum > 0.1 ? maximum : 50)
+  })
+  const simulationKey = JSON.stringify([specName, maxFrequencyGHz])
+  const [simulationResolved, setSimulationResolved] = useState<any>(null)
+  const [simulationFailure, setSimulationFailure] = useState('')
+  const simulationReady = simulationResolved?.inputKey === simulationKey
+  const simulationInputRef = useRef({ specName, maxFrequencyGHz, ready: simulationReady })
+  simulationInputRef.current = { specName, maxFrequencyGHz, ready: simulationReady }
+  const fixed = simulationReady ? simulationResolved.settings : {}
+  const sweepType = fixed.sweepType || 'Interpolating'
+  const sweeps: { distribution: string; start: string; end: string; value: string }[] = fixed.sweeps || []
+  const solutionFreq = String(fixed.solutionFreq || '')
+  const errorTolerance = '0.1'
+  const maxPasses = '20'
+  const maxDeltaS = '0.02'
+  const maxRefinementPerPass = '15'
+  const minConvergedPasses = '2'
+  const hfssMeshMethod = 'Phi'
+  const adaptiveMode = fixed?.adaptiveMode || 'broadband'
+  const parallelRefinement = true
+  // 求解核心數由使用者設定：沒有 HPC 授權的客戶設 4 才能解。
+  // 跟著工作階段保存；舊工作階段沒有這個欄位時回到 12。
+  const [solverCores, setSolverCores] = useSessionState(SOLVER_CORES_SESSION_KEY, String(DEFAULT_SOLVER_CORES),
+    { key: SOLVER_CORES_PREFERENCE_KEY, valid: isSolverCoresPreference })
+  const solverCoresValue = parseSolverCores(solverCores)
+  const solverMemoryPercent = '90'
   const [solverResourcePreview, setSolverResourcePreview] = useState<any>(null)
 
   // ── Layout 保守清理 ──
-  // 預設＝建議設定：第一級電磁範圍、最小保護距離 0.2 mm、40 dB（#0062）。
-  const [cleanupGuardMm, setCleanupGuardMm] = useState('0.2')
-  const [cleanupMode, setCleanupMode] = useState<'conservative' | 'em_field'>('em_field')
-  const [cleanupIsolationDb, setCleanupIsolationDb] = useState('40')
-  const [cleanupOutputPath, setCleanupOutputPath] = useState('')
+  // 預設＝建議設定：第一級電磁範圍、最小保護距離 0.2 mm、40 dB。
+  const [cleanupGuardMm, setCleanupGuardMm] = useSessionState('cleanupGuardMm', '0.2')
+  const [cleanupMode, setCleanupMode] = useSessionState<'conservative' | 'em_field'>('cleanupMode', 'em_field')
+  const [cleanupIsolationDb, setCleanupIsolationDb] = useSessionState('cleanupIsolationDb', '40')
+  const [cleanupOutputPath, setCleanupOutputPath] = useSessionState('cleanupOutputPath', '')
   const [cleanupAnalysis, setCleanupAnalysis] = useState<CleanupAnalysis | null>(null)
   const [cleanupBeforeScene, setCleanupBeforeScene] = useState<PreviewData | null>(null)
   const [cleanupAfterScene, setCleanupAfterScene] = useState<PreviewData | null>(null)
-  const [cleanupCompareMode, setCleanupCompareMode] = useState<CleanupCompareMode>('overlay')
-  const [cleanupDiffKind, setCleanupDiffKind] = useState<'all' | 'primitive' | 'via'>('all')
-  const [cleanupDiffLayer, setCleanupDiffLayer] = useState('')
+  const [cleanupCompareMode, setCleanupCompareMode] = useSessionState<CleanupCompareMode>('cleanupCompareMode', 'overlay')
+  const [cleanupDiffKind, setCleanupDiffKind] = useSessionState<'all' | 'primitive' | 'via'>('cleanupDiffKind', 'all')
+  const [cleanupDiffLayer, setCleanupDiffLayer] = useSessionState('cleanupDiffLayer', '')
   const [cleanupFocusRegion, setCleanupFocusRegion] = useState<number | null>(null)
 
   // ── N 段分割 ──
-  const [nSegments, setNSegments] = useState('3')
+  const [nSegments, setNSegments] = useSessionState('nSegments', '3')
   // 這次可以接受的切點評分。門檻越嚴候選越少，各段就越難平分。
-  const [segmentQuality, setSegmentQuality] = useState<QualityThreshold>('B')
+  const [segmentQuality, setSegmentQuality] = useSessionState<QualityThreshold>('segmentQuality', 'B')
   /** 依複雜度分段的分析結果；與等分分段互斥，後分析的那個生效。 */
   const [complexityAnalysis, setComplexityAnalysis] =
     useState<ComplexityAnalysis | null>(null)
-  const [segOutputDir, setSegOutputDir] = useState('')
+  const [segOutputDir, setSegOutputDir] = useSessionState('segOutputDir', '')
   const [segAnalysis, setSegAnalysis] = useState<SegmentAnalysis | null>(null)
-  const [segRun, setSegRun] = useState<SegmentRunResult | null>(null)
-  const [activeSegIdx, setActiveSegIdx] = useState(0)
-  const [showSegmentSafetyOverlay, setShowSegmentSafetyOverlay] = useState(true)
-  const [showSegmentCutDiagnostics, setShowSegmentCutDiagnostics] = useState(true)
-  const [showSolverRegionOverlay, setShowSolverRegionOverlay] = useState(true)
+  // 分段結果也跟著工作階段保存，但不存預覽幾何（太大，畫面會退回裁切後的整板）。
+  const [segRun, setSegRun] = useState<SegmentRunResult | null>(() => restoredFieldValue<SegmentRunResult | null>('segRun', null))
+  const [activeSegIdx, setActiveSegIdx] = useSessionState('activeSegIdx', 0)
+  const [showSegmentSafetyOverlay, setShowSegmentSafetyOverlay] = useSessionState('showSegmentSafetyOverlay', true)
+  const [showSegmentCutDiagnostics, setShowSegmentCutDiagnostics] = useSessionState('showSegmentCutDiagnostics', true)
+  const [showSolverRegionOverlay, setShowSolverRegionOverlay] = useSessionState('showSolverRegionOverlay', true)
   const [segmentSolverPlans, setSegmentSolverPlans] = useState<SegmentSolverPlan[]>([])
   const mixedSolverCascade = new Set(segmentSolverPlans.map(plan => plan.requested_solver)).size > 1
-  /** 分段預覽跟著誰畫（卡 0121）：null＝剛分析完，跟著分析；有值＝執行過或
+  /** 分段預覽跟著誰畫：null＝剛分析完，跟著分析；有值＝執行過或
    *  載入了 segments.json，跟著混合求解表。值是檔案裡的切點，載入時用得到。 */
   const [segFollowPlan, setSegFollowPlan] = useState<PlanLayout | null>(null)
   // 直接匯入分段模式：跳過裁切，載入的檔案直接進行 N 段分割
-  const [directSegmentMode, setDirectSegmentMode] = useState(false)
+  const [directSegmentMode, setDirectSegmentMode] = useSessionState('directSegmentMode', false)
 
   // ── 排程求解 ──
   // ── 入口介面：這次要用哪些項目 ──────────────────────
+  // 入口勾選跟著工作階段快照走：重開視窗要和上次一樣，而且要在接續
+  // 載入之前就還原。localStorage 綁埠號，只當沒有快照時的備援。
   const [enabledTasks, setEnabledTasks] = useState<TaskKey[]>(
-    () => loadSavedTasks() ?? DEFAULT_TASKS)
-  // 上次存下的設定裡就有的 Beta 任務（#0131）：原樣載入，入口只提示、不改值。
+    () => initialEnabledTasks(restoredFieldValue<unknown>('enabledTasks', null), loadSavedTasks()))
+  const enabledTasksRef = useRef(enabledTasks)
+  enabledTasksRef.current = enabledTasks
+  useEffect(() => registerSessionField('enabledTasks', () => enabledTasksRef.current, value => {
+    const next = normalizeTaskList(value)
+    if (next) setEnabledTasks(next)
+  }, []), [])
+  const enabledTasksMounted = useRef(false)
+  useEffect(() => {
+    if (enabledTasksMounted.current) notifySessionChange()
+    enabledTasksMounted.current = true
+  }, [enabledTasks])
+  // 上次存下的設定裡就有的 Beta 任務：原樣載入，入口只提示、不改值。
   const [legacyBetaTasks] = useState<TaskKey[]>(
-    () => betaTasksIn(loadSavedTasks() ?? []) as TaskKey[])
+    () => betaTasksIn(enabledTasks) as TaskKey[])
   // 每次啟動都先顯示入口（帶出上次勾選），按「開始」才進主畫面。
-  const [pickerOpen, setPickerOpen] = useState(true)
+  const [pickerOpen, setPickerOpen] = useSessionState('pickerOpen', true)
   const [pickerReturning, setPickerReturning] = useState(false)
   const [pickerClosing, setPickerClosing] = useState(false)
   const pickerCloseTimer = useRef<number | null>(null)
-  const show = makeFlags(enabledTasks)
+  const betaEnabled = useBetaEnabled()
+  const effectiveTasks = betaEnabled ? enabledTasks : mainOnlySelection(enabledTasks)
+  const show = makeFlags(effectiveTasks)
+
   // 「模擬設定」被四個任務共用，任一個勾了就要顯示。
   // 裁切已不再建立 Port／Setup（見 create_ports），所以「模擬設定」不再跟
   // show.cutout 綁定；只有真的會用到 Setup 的任務才需要它。
@@ -727,26 +818,41 @@ export default function App() {
   // 「直接匯入分段」完全由入口的「局部裁切」決定，不需要使用者再勾一次：
   // 要裁切 → 載入的是整片板、之後才切；不裁切 → 載入的檔案本身就是通道，
   // 直接進分段。「設定 Port 與求解器」與這個判斷無關（Port 兩種情況都可能要建）。
+  // 載入中旗標要在入口同步之前宣告：同步 effect 的相依陣列在繪製時就讀它。
+  const [isLoading, setIsLoading] = useState(false)
+  const edbActionRef = useRef(false)
+  /** 後端目前的分段模式由同步器記著：載入、重新載入原始檔、同步成功後
+   *  才知道；null＝未知或入口管不到（還沒有板子、裁切過）。 */
+  const syncAlertRef = useRef<(e: unknown, direct: boolean) => void>(() => {})
+  syncAlertRef.current = (e, direct) => {
+    alert(t.appFlow.segmentModeSyncFailed(direct) + errorText(e, lang))
+  }
+  const [segmentModeSyncer] = useState(() => createEntryModeSyncer({
+    send: direct => api('/api/segment_mode', { direct }),
+    onError: (e, direct) => syncAlertRef.current(e, direct),
+  }))
   const forcedDirectSegment = !show.cutout
 
   useEffect(() => {
     setDirectSegmentMode(prev =>
       prev === forcedDirectSegment ? prev : forcedDirectSegment)
-    // 板子載入之後才回入口改勾選（#0122 情境 D）：後端的分段就緒只在載入時
+    // 板子載入之後才回入口改勾選：後端的分段就緒只在載入時
     // 決定，不同步的話這裡按鈕亮了、按下去卻被後端擋。已經裁切過的板不用管
     // ——就緒由「有沒有建 Port」決定；正在載入的那一次會自己帶模式過去。
-    if (!workingPath || cutScene || isLoading) return
+    // 只拿「已知的後端模式」來比：掛載當下接續載入還沒開始、後端也
+    // 還沒有板子，那時去同步只會拿到「EDB 尚未載入」而誤報不一致。
+    if (!workingPath || cutScene) return
     if (forcedDirectSegment) {
       setCleanupOutputPath(prev => prev || workingPath.replace(/\.aedb$/i, '') + '_cleaned.aedb')
       setPortsOutputPath(prev => prev || workingPath.replace(/\.aedb$/i, '') + '_ports.aedb')
     }
-    api('/api/segment_mode', { direct: forcedDirectSegment })
-      .catch(e => alert(t.appFlow.segmentModeSyncFailed + errorText(e, lang)))
-  }, [forcedDirectSegment])
+    // 快速切換時同步請求會重疊：交給同步器排隊，回應後再比最新勾選。
+    segmentModeSyncer.request(forcedDirectSegment, isLoading)
+  }, [forcedDirectSegment, isLoading])
 
-  const [schedMetaPath, setSchedMetaPath] = useState('')
+  const [schedMetaPath, setSchedMetaPath] = useSessionState('schedMetaPath', '')
   // 遠端求解包：打包 SIwave 段，複製到求解機雙擊執行
-  const [packDir, setPackDir] = useState('')
+  const [packDir, setPackDir] = useSessionState('packDir', '')
   // segments.json 一確定就帶出建議輸出資料夾；使用者已填則不覆蓋。
   useEffect(() => {
     if (!schedMetaPath) return
@@ -754,58 +860,65 @@ export default function App() {
   }, [schedMetaPath])
   const [packBusy, setPackBusy] = useState(false)
   // 收檔：把求解機跑出來的 Touchstone 收回 segments.json
-  const [ingestDir, setIngestDir] = useState('')
+  const [ingestDir, setIngestDir] = useSessionState('ingestDir', '')
   const [ingestBusy, setIngestBusy] = useState(false)
   const [schedStatus, setSchedStatus] = useState<any | null>(null)
+  const schedStartRef = useRef(false)
+  const [schedStartingAt, setSchedStartingAt] = useState<number | null>(null)
+  const [schedStartPhase, setSchedStartPhase] = useFlowMessage('')
+  const scheduleBusy = schedStartingAt !== null || Boolean(schedStatus?.running)
 
   // ── 電路串接 ──
   const [cascadeResult, setCascadeResult] = useState<any | null>(null)
   // 「載入外部 S 參數」的結果是使用者自己的檔案，不是工具產出：沒有 summary_path，
-  // 不給「開啟模擬資料夾」（後端也不會開）。串接（含手動接線）一定寫摘要（#0115）。
+  // 不給「開啟模擬資料夾」（後端也不會開）。串接（含手動接線）一定寫摘要。
   const cascadeIsToolOutput = Boolean(cascadeResult?.summary_path)
   const [cascadeBusy, setCascadeBusy] = useState(false)
-  const [cascadeMode, setCascadeMode] = useState<'tool' | 'external'>('tool')
+  const [cascadeMode, setCascadeMode] = useSessionState<'tool' | 'external'>('cascadeMode', 'tool')
   const [schematicGraph, setSchematicGraph] = useState<CascadeGraph | null>(null)
   const [circuitBusy, setCircuitBusy] = useState(false)
   const circuitBusyRef = useRef(false)
-  const [circuitExportMode, setCircuitExportMode] = useState<'complete' | 'segments'>('complete')
+  const [circuitExportMode, setCircuitExportMode] = useSessionState<'complete' | 'segments'>('circuitExportMode', 'complete')
   const [circuitResult, setCircuitResult] = useState<any | null>(null)
   const [circuitError, setCircuitError] = useFlowMessage('')
   const [eyeSuggestion, setEyeSuggestion] = useState<any | null>(null)
   const [eyeSuggestionError, setEyeSuggestionError] = useFlowMessage('')
   const [eyeSuggestionRevision, setEyeSuggestionRevision] = useState(0)
-  const [eyeMode, setEyeMode] = useState<'single' | 'differential'>('differential')
-  const [eyeDataRate, setEyeDataRate] = useState('1')
-  const [eyeRiseTime, setEyeRiseTime] = useState('200')
-  const [eyeInputP, setEyeInputP] = useState('')
-  const [eyeInputN, setEyeInputN] = useState('')
-  const [eyeOutputP, setEyeOutputP] = useState('')
-  const [eyeOutputN, setEyeOutputN] = useState('')
+  const [eyeMode, setEyeMode] = useSessionState<'single' | 'differential'>('eyeMode', 'differential')
+  const [eyeDataRate, setEyeDataRate] = useSessionState('eyeDataRate', '1')
+  const [eyeRiseTime, setEyeRiseTime] = useSessionState('eyeRiseTime', '200')
+  const [eyeInputP, setEyeInputP] = useSessionState('eyeInputP', '')
+  const [eyeInputN, setEyeInputN] = useSessionState('eyeInputN', '')
+  const [eyeOutputP, setEyeOutputP] = useSessionState('eyeOutputP', '')
+  const [eyeOutputN, setEyeOutputN] = useSessionState('eyeOutputN', '')
   // 一鍵眼圖背景工作：輪詢狀態，完成後在「眼圖」分頁顯示 AEDT 產的 JPG
   const [eyeJob, setEyeJob] = useState<any | null>(null)
   const [eyeImageRevision, setEyeImageRevision] = useState(0)
   // TDR 阻抗定位：背景求解 + 劇變位置映射到 Layout
   const [tdrSuggestion, setTdrSuggestion] = useState<any | null>(null)
-  const [tdrMode, setTdrMode] = useState<'single' | 'differential'>('single')
-  const [tdrInputP, setTdrInputP] = useState('')
-  const [tdrInputN, setTdrInputN] = useState('')
-  const [tdrOutputP, setTdrOutputP] = useState('')
-  const [tdrOutputN, setTdrOutputN] = useState('')
-  const [tdrDkHint, setTdrDkHint] = useState('')
-  const [tdrNet, setTdrNet] = useState('')          // 被探測的訊號網路（路徑長度與標記映射用）
-  const [tdrFlipStart, setTdrFlipStart] = useState(false) // 起點在走線的另一端
+  const [tdrSuggestionError, setTdrSuggestionError] = useState<unknown>(null)
+  const [tdrSuggestionLoading, setTdrSuggestionLoading] = useState(false)
+  const [tdrSuggestionRevision, setTdrSuggestionRevision] = useState(0)
+  const [tdrMode, setTdrMode] = useSessionState<'single' | 'differential'>('tdrMode', 'single')
+  const [tdrInputP, setTdrInputP] = useSessionState('tdrInputP', '')
+  const [tdrInputN, setTdrInputN] = useSessionState('tdrInputN', '')
+  const [tdrOutputP, setTdrOutputP] = useSessionState('tdrOutputP', '')
+  const [tdrOutputN, setTdrOutputN] = useSessionState('tdrOutputN', '')
+  const [tdrDkHint, setTdrDkHint] = useSessionState('tdrDkHint', '')
+  const [tdrNet, setTdrNet] = useSessionState('tdrNet', '')          // 被探測的訊號網路（路徑長度與標記映射用）
+  const [tdrFlipStart, setTdrFlipStart] = useSessionState('tdrFlipStart', false) // 起點在走線的另一端
   const [tdrPath, setTdrPath] = useState<any | null>(null) // /api/tdr/path 結果
   const [tdrJob, setTdrJob] = useState<any | null>(null)
-  const [tdrAnalysisIdx, setTdrAnalysisIdx] = useState(0)  // A 法／B 法切換
+  const [tdrAnalysisIdx, setTdrAnalysisIdx] = useSessionState('tdrAnalysisIdx', 0)  // A 法／B 法切換
   const [tdrMarkers, setTdrMarkers] = useState<TdrMarkerSpan[] | null>(null)
   const [tdrMapError, setTdrMapError] = useFlowMessage('')
   // 量測波形匯入（乙路）：示波器 CSV → 錨點指認 → 同一套劇變定位
-  const [tmCsvPath, setTmCsvPath] = useState('')
+  const [tmCsvPath, setTmCsvPath] = useSessionState('tmCsvPath', '')
   const [tmPreview, setTmPreview] = useState<any | null>(null)
   // 時間單位：auto＝由表頭與取樣間隔判定；0.1 這種步長在 ps 與 ns 下數字一樣，
   // 判不出來時後端會拒絕並要求明選，這個下拉就是那條路。
-  const [tmTimeUnit, setTmTimeUnit] = useState<'auto' | 's' | 'ms' | 'us' | 'ns' | 'ps'>('auto')
-  const [tmT0, setTmT0] = useState('')       // 板端入口（ns）
+  const [tmTimeUnit, setTmTimeUnit] = useSessionState<'auto' | 's' | 'ms' | 'us' | 'ns' | 'ps'>('tmTimeUnit', 'auto')
+  const [tmT0, setTmT0] = useSessionState('tmT0', '')       // 板端入口（ns）
   /** TDR 這次用的穿透路徑，換成 Touchstone 的 0 起算 Port 索引給證據徽章：
    *  多埠檔的因果性只有指定了「哪個輸出對哪個輸入」才量得到。名稱對不到
    *  索引（還沒選、或選的不在這份檔裡）就不傳，徽章維持「未判定」。 */
@@ -824,99 +937,68 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cascadeResult?.port_names, tdrMode, tdrInputP, tdrInputN, tdrOutputP, tdrOutputN])
 
-  const [tmTEnd, setTmTEnd] = useState('')   // 線尾反射（ns）
-  const [tmRise, setTmRise] = useState('')   // 歐姆／rho 波形的儀器上升時間（ps）
+  const [tmTEnd, setTmTEnd] = useSessionState('tmTEnd', '')   // 線尾反射（ns）
+  const [tmRise, setTmRise] = useSessionState('tmRise', '')   // 歐姆／rho 波形的儀器上升時間（ps）
   const [tmBusy, setTmBusy] = useState(false)
   const [tmError, setTmError] = useFlowMessage('')
 
   // 截面阻抗（Q2D）：在 Layout 上框工作範圍、拉一條切線，從 EDB 還原截面。
-  // 工作範圍同時是二維模型的側向截斷邊界，不只是畫面上的框（ADR-0051）。
+  // 工作範圍同時是二維模型的側向截斷邊界，不只是畫面上的框。
   const [xsMode, setXsMode] = useState<CrossSectionMode>('none')
   const [xsRegion, setXsRegion] = useState<CrossSectionRegion | null>(null)
   const [xsCut, setXsCut] = useState<CrossSectionCut | null>(null)
   const [xsScan, setXsScan] = useState<CrossSectionScan | null>(null)
   const [xsBusy, setXsBusy] = useState(false)
   const [xsError, setXsError] = useFlowMessage('')
-  const [xsResolutionUm, setXsResolutionUm] = useState('2')
-  const [xsHeightUm, setXsHeightUm] = useState('')   // 導體到參考面，判側向截斷用
-  const [xsRoleOverrides, setXsRoleOverrides] = useState<Record<string, string>>({})
+  const [xsResolutionUm, setXsResolutionUm] = useSessionState('xsResolutionUm', '2')
+  const [xsHeightUm, setXsHeightUm] = useSessionState('xsHeightUm', '')   // 導體到參考面，判側向截斷用
+  const [xsRoleOverrides, setXsRoleOverrides] = useSessionState<Record<string, string>>('xsRoleOverrides', {})
   const [xsSavedCuts, setXsSavedCuts] = useState<any[]>([])
   const [xsCutsSource, setXsCutsSource] = useState('')
   /** 這片板子的切線集是不是「真的讀回來過」。
    *
-   *  存檔是整份覆寫（ADR-0053 的 sidecar 就是一個檔），所以在沒讀成功的
+   *  存檔是整份覆寫（ 的 sidecar 就是一個檔），所以在沒讀成功的
    *  情況下存一條切線，等於把這片板子先前存的全部切線刪掉。讀不到有兩種：
    *  「還沒標註過」後端回的是 `{"cuts": []}`（成功，旗標為 true），
    *  真正的失敗才會落到 catch——那時候不准存。 */
   const [xsCutsLoaded, setXsCutsLoaded] = useState(false)
-  const [xsSolveMode, setXsSolveMode] = useState('standard')
-  const [xsFrequency, setXsFrequency] = useState('8GHz')
-  const [xsWidenCheck, setXsWidenCheck] = useState(false)
+  const [xsSolveMode, setXsSolveMode] = useSessionState('xsSolveMode', 'standard')
+  const [xsFrequency, setXsFrequency] = useSessionState('xsFrequency', '8GHz')
+  const [xsWidenCheck, setXsWidenCheck] = useSessionState('xsWidenCheck', false)
   const [xsJob, setXsJob] = useState<any | null>(null)
   const [xsResultIdx, setXsResultIdx] = useState(0)
   // TDR 捷徑（第 4 期）：把劇變的距離或沿線取樣直接換成切線
   const [xsFromTdrBusy, setXsFromTdrBusy] = useState(false)
-  const [xsSampleSpacingMm, setXsSampleSpacingMm] = useState('10')
-  const [xsHalfWidthUm, setXsHalfWidthUm] = useState('7000')
+  const [xsSampleSpacingMm, setXsSampleSpacingMm] = useSessionState('xsSampleSpacingMm', '10')
+  const [xsHalfWidthUm, setXsHalfWidthUm] = useSessionState('xsHalfWidthUm', '7000')
+  useLengthField('expansionMm', expansionMm, 'mm', { min: 0 })
+  useLengthField('bdTargetStubMil', bdTargetStubMil, 'mil', { min: 0 })
+  useLengthField('bdDiameterIncMil', bdDiameterIncMil, 'mil', { min: 0 })
+  useLengthField('cleanupGuardMm', cleanupGuardMm, 'mm', { min: 0.1 })
+  useLengthField('xsResolutionUm', xsResolutionUm, 'um', { min: 0, positive: true })
+  useLengthField('xsHeightUm', xsHeightUm, 'um', { min: 0, optional: true })
+  useLengthField('xsSampleSpacingMm', xsSampleSpacingMm, 'mm', { min: 0, positive: true })
+  useLengthField('xsHalfWidthUm', xsHalfWidthUm, 'um', { min: 0, positive: true })
   const [xsCompare, setXsCompare] = useState<ComparisonResult | null>(null)
   const [spChartRef, spChartHeight] = useMeasuredHeight<HTMLDivElement>()
+  const [tdrChartBoxRef, tdrChartBoxHeight] = useMeasuredHeight<HTMLDivElement>()
+  const viewportHeight = useViewportHeight()
   // 外部檔案接線模式
-  const [extFiles, setExtFiles] = useState<ExtFileInfo[]>([])
-  const [extConns, setExtConns] = useState<ExtConn[]>([])
-  const [extShorts, setExtShorts] = useState<ExtShort[]>([])
+  const [extFiles, setExtFiles] = useSessionState<ExtFileInfo[]>('extFiles', [])
+  const [extConns, setExtConns] = useSessionState<ExtConn[]>('extConns', [])
+  const [extShorts, setExtShorts] = useSessionState<ExtShort[]>('extShorts', [])
   // 純粹用來讓「求解中」的段耗時每秒跳動；不打 API，只觸發重繪
   const [nowTick, setNowTick] = useState(() => Date.now() / 1000)
 
-  /** 使用者自己定過工作頻率（手打或套設定檔）就不再由掃頻表推導。
-   *
-   *  這個旗標存在的原因：設定檔存的是 sweeps **與** solutionFreq，套用時兩個
-   *  都寫下去，而下面這個 effect 會被新的 sweeps 觸發、立刻把剛套上的
-   *  solutionFreq 用掃頻表重算掉——訊息還說「已套用 N 個欄位」。 */
-  const solutionFreqTouched = useRef(false)
-  const pickSolutionFreq = (value: string) => {
-    solutionFreqTouched.current = true
-    setSolutionFreq(value)
-  }
-
-  useEffect(() => {
-    if (solutionFreqTouched.current) return
-    if (sweeps.length > 0) {
-      const startGHz = parseFreqToGHz(sweeps[0].start);
-      const endGHz = parseFreqToGHz(sweeps[sweeps.length - 1].end);
-      if (endGHz > startGHz) {
-        setSolutionFreq(((endGHz - startGHz) / 2).toString());
-      } else if (endGHz > 0) {
-        setSolutionFreq((endGHz / 2).toString());
-      }
-    }
-  }, [sweeps])
-
-  // 切面的接地縫合檢查需要知道要解到幾 GHz——縫合間距的可信上限與頻率相關。
-  // 取目前掃頻設定的最高頻；讀不到就送 null，後端會退回不看頻率的舊規則。
-  const targetFmaxGHz = useMemo(() => {
-    if (!sweeps.length) return null
-    const end = parseFreqToGHz(sweeps[sweeps.length - 1].end)
-    return Number.isFinite(end) && end > 0 ? end : null
-  }, [sweeps])
+  const targetFmaxGHz = simulationReady ? Number(maxFrequencyGHz) : null
 
   /** 後端介面版號與前端對不上（＝後端沒重啟）。 */
   const [staleBackend, setStaleBackend] = useState<number | null>(null)
-  /** 判斷頻寬：求解器建議用的「這次要用到幾 GHz」（#0120，ADR-0070）。
-   *
-   *  為什麼不能直接用掃頻上限：掃頻常常開得比需要的寬（留給 TDR、留餘裕），
-   *  而求解器要不要用 HFSS 取決於「你要用到幾 GHz」。DDR3L-1866 的邊緣拐點
-   *  約 2～3.5 GHz，掃到 10 GHz 只是保險，不代表 10 GHz 的精度要成立。
-   *  來源是「依規範／依資料率自訂」二選一，規則在 bandwidthSource.ts；
-   *  切面驗收一律用掃頻上限（targetFmaxGHz），兩個值不混用。 */
-  const [bandwidthState, setBandwidthState] = useState<BandwidthState>(INITIAL_BANDWIDTH_STATE)
-  /** 導出依據與切換說明（顯示在判斷頻寬區塊下方）。 */
-  const [bandwidthNote, setBandwidthNote] = useState<string>('')
-  const solverBandwidth = useMemo(
-    () => resolveSolverBandwidth(bandwidthState, targetFmaxGHz),
-    [bandwidthState, targetFmaxGHz])
-  /** await 之後讀最新值用：套用設定檔、導出期間使用者可能又改了欄位。 */
-  const bandwidthStateRef = useRef(bandwidthState)
-  bandwidthStateRef.current = bandwidthState
+  // 判斷頻寬由選定規範導出；切面驗收仍用完整掃頻上限。
+  const solverBandwidth: ResolvedBandwidth = {
+    ghz: simulationReady ? simulationResolved.solver_bandwidth_ghz : null,
+    source: specName ? 'spec' : 'sweep', invalidOverride: false, staleRate: false,
+  }
   /** 目前混合求解表的建議是用幾 GHz 算的（undefined＝不知道，例如舊檔）。
    *  和現在的判斷頻寬不同時提示重新評估：分段後再改頻寬，建議不會自己更新。 */
   const [segPlanBandwidthGHz, setSegPlanBandwidthGHz] = useState<number | null | undefined>(undefined)
@@ -924,7 +1006,7 @@ export default function App() {
   // ── 預覽場景 ──
   const [fullScene, setFullScene] = useState<PreviewData | null>(null)
   const [cutScene, setCutScene] = useState<PreviewData | null>(null)
-  const [activeView, setActiveView] = useState<ViewMode>('full')
+  const [activeView, setActiveView] = useSessionState<ViewMode>('activeView', 'full')
   // AEDT 版本：整條流程共用一個版本，載入電路板之後就鎖住。
   // 求解機只有舊版時，要在載入前先把版本對齊過去——用新版 EDB 去撞舊版
   // 求解器不會失敗，只會讓疊構被誤讀，S 參數靜默出錯。
@@ -951,9 +1033,9 @@ export default function App() {
       setAedtVersion(d.current)
       setAedtVersions(d.supported || [])
       alert(t.appFlow.switchedToAedt(d.current)
-        + t.appFlow.startAgainFromImportOriginalBoardAn)
+        + t.appFlow.startAgainFromImportOriginalBoardAn, 'info')
     } catch (e) {
-      alert(t.appFlow.failedToSwitchVersion + errorText(e, lang))
+      alert(t.appFlow.failedToSwitchVersion + errorText(e, lang), 'error')
       void refreshAedtVersion()
     }
   }
@@ -964,7 +1046,7 @@ export default function App() {
   // ——載入板子、改看串接後的 .sNp、指向另一份 segments.json——就各自長出一個
   // report_workspace，快照散在好幾個資料夾裡，事後根本找不到是哪一個。
   // 要換位置仍然可以，在報告中心的工作區欄位改就好。
-  const [reportWorkspace, setReportWorkspace] = useState(loadReportWorkspace)
+  const [reportWorkspace, setReportWorkspace] = useSessionState('reportWorkspace', loadReportWorkspace)
   // 用 useCallback 包住：這個函式當成 prop 傳給報告中心與快照按鈕，每次
   // App 重繪（日誌一行、輪詢一次就會重繪）都換一個新的函式參考，下游的
   // memo 與 effect 相依就跟著全數失效。它本身不依賴任何 state。
@@ -995,7 +1077,50 @@ export default function App() {
    *  基準（背鑽用 outputPath＝裁切的輸出），結果「裁切→換疊構→背鑽」產生的
    *  檔名是 ..._Cutout_backdrill，把中間的疊構更換整個吃掉——檔名是這條加工鏈
    *  唯一的紀錄，漏一環之後就分不出哪個檔套過疊構。 */
-  const [workingPath, setWorkingPath] = useState('')
+  const [workingPath, setWorkingPath] = useSessionState('workingPath', '')
+  const backdrillInputKey = JSON.stringify([workingPath, [...signalNets].sort(),
+    bdTargetStubMil, bdDrillOversize, bdDiameterIncMil])
+  const backdrillInputKeyRef = useRef(backdrillInputKey)
+  backdrillInputKeyRef.current = backdrillInputKey
+  useEffect(() => { setBdResult(null) }, [backdrillInputKey])
+  // 報告只採用實際載入的板路徑，不能把裁切後 workingPath 當成原板。
+  const [reportBoardPath, setReportBoardPath] = useState('')
+  const [reportWorkSources, setReportWorkSources] = useState<WorkSource[]>([])
+  // 原板 → 目前 session 檔的加工鏈，只由工具完成的步驟累加；分段完成時隨工作一起記下。
+  const [reportLineage, setReportLineage] = useState<WorkLineage | null>(null)
+  const reportBoardEpoch = useRef(0)
+  const boardAnalysisEpoch = useRef(0)
+  const stackupDiffEpoch = useRef(0)
+  const reportGeometryBindings = useRef<Partial<Record<'cut' | 'cleanup' | 'segment' | 'schematic' | 'cascade', string>>>({})
+  const reportGeometryContext = JSON.stringify([reportBoardEpoch.current, reportBoardPath, signalNets, refNets])
+  const reportCascadeContext = JSON.stringify([reportGeometryContext, normalizeUserPath(schedMetaPath),
+    cascadeMode, extFiles, extConns, extShorts])
+  const reportJobBindings = useRef<Partial<Record<'eye' | 'tdr' | 'xs', ReportJobBinding>>>({})
+  const reportSourceContext = JSON.stringify([reportBoardEpoch.current, reportBoardPath,
+    workingPath, cascadeResult?.output_path, reportCascadeContext, schedMetaPath, signalNets, refNets])
+  const reportEyeContext = JSON.stringify([reportSourceContext, eyeMode, eyeDataRate,
+    eyeRiseTime, eyeInputP, eyeInputN, eyeOutputP, eyeOutputN])
+  const reportTdrContext = JSON.stringify([reportSourceContext, tdrMode, tdrInputP,
+    tdrInputN, tdrOutputP, tdrOutputN, tdrDkHint, tdrNet, tdrFlipStart, tdrPath,
+    tmCsvPath, tmTimeUnit, tmT0, tmTEnd, tmRise])
+  const reportXsContext = JSON.stringify([reportSourceContext, xsFrequency, xsSolveMode,
+    xsWidenCheck, xsSavedCuts, xsRegion, xsCut, xsRoleOverrides, xsResolutionUm, xsHeightUm])
+  const reportCompareContext = JSON.stringify([reportXsContext, reportTdrContext, tdrAnalysisIdx])
+  const reportComparisonBinding = useRef('')
+  const reportMarkerContext = JSON.stringify([reportTdrContext, tdrAnalysisIdx])
+  const reportMarkerBinding = useRef('')
+  const [reportCutoutRecord, setReportCutoutRecord] = useState<PreprocessingRecord | null>(null)
+  const [reportCleanupRecord, setReportCleanupRecord] = useState<PreprocessingRecord | null>(null)
+  const [reportQualityRecord, setReportQualityRecord] = useState<PreprocessingRecord | null>(null)
+  const captureBeforeAnalysis = async (family: string, paths: string[], inputs: unknown) => {
+    try {
+      return await captureReportSourceEvidence(`t-${hashText(paths.map(path => normalizeUserPath(path).toLowerCase()).join('|'))}`,
+        `${family}-${hashText(JSON.stringify(inputs))}`, paths)
+    } catch {
+      // 收據失敗不阻止原工程動作；報告會逐項列「分析開始收據未保存」。
+      return undefined
+    }
+  }
   // 疊構更換屬於「準備」階段（載入的子項），必須在裁切之前就能用——換疊構會
   // 改變層厚與層數，裁切與 Port 都得建立在最終疊構上。因此它的門檻是「板子
   // 載入了」，不是「裁切完成了」。
@@ -1004,30 +1129,21 @@ export default function App() {
   // ── UI 狀態 ──
   // 後端送結構化紀錄 {text, level, text_en}；本機補進來的錯誤仍是純文字。
   const [logs, setLogs] = useState<(LogEntry | string)[]>([])
-  const [isLoading, setIsLoading] = useState(false)
   const [loadingMsg, setLoadingMsg] = useFlowMessage(t => t.appFlow.processing)
-  const [showLogs, setShowLogs] = useState(true)
-  // #0088 小修 10：進眼圖頁時日誌先摺疊；要看再從「檢視 → 顯示系統日誌」打開。
+  const [showLogs, setShowLogs] = useSessionState('showLogs', true)
+  // ：進眼圖頁時日誌先摺疊；要看再從「檢視 → 顯示系統日誌」打開。
   useEffect(() => { if (activeView === 'models') setShowLogs(false) }, [activeView])
-  // Ansys 授權對照（ADR-0062）：按鈕變灰與「說明 → Ansys 授權對照」共用同一份狀態。
+  // Ansys 授權對照：按鈕變灰與「說明 → Ansys 授權對照」共用同一份狀態。
   const [licensePanelOpen, setLicensePanelOpen] = useState(false)
   const { status: licenseStatus } = useAnsysLicense()
   const [openMenu, setOpenMenu] = useState<string | null>(null)
 
-  const logBoxRef = useRef<HTMLDivElement | null>(null)
+  const { logBoxRef, onLogScroll } = useLogAutoScroll(logs, showLogs)
   // 載入遮罩內的日誌尾巴用獨立 ref：遮罩顯示時把系統日誌整個蓋住，使用者在
   // 長時間操作（例如讀取大型 EDB）期間看不到任何進度，只能乾等一個籠統的
   // 訊息。這個 ref 對應的框在遮罩顯示時才存在，所以需要自己的自動捲動邏輯。
   const loadingLogBoxRef = useRef<HTMLDivElement | null>(null)
   const signalFileRef = useRef<HTMLInputElement | null>(null)
-
-  // 新日誌進來時自動捲到最底；使用者往上捲閱讀時不打擾
-  useEffect(() => {
-    const box = logBoxRef.current
-    if (!box) return
-    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60
-    if (nearBottom) box.scrollTop = box.scrollHeight
-  }, [logs])
 
   useEffect(() => {
     const box = loadingLogBoxRef.current
@@ -1043,11 +1159,8 @@ export default function App() {
 
     const connect = () => {
       ws = new WebSocket(`ws://${window.location.host}/ws/logs`)
-      ws.onmessage = (event) => setLogs(prev => {
-        const next = [...prev, parseLogMessage(String(event.data))]
-        // 超過上限就從頭砍掉，最舊的先走。求解中的人看的是最後幾行。
-        return next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next
-      })
+      ws.onmessage = (event) => setLogs(prev =>
+        appendLogEntry(prev, parseLogMessage(String(event.data)), MAX_LOG_LINES))
       ws.onclose = () => {
         if (!closed) retry = window.setTimeout(connect, 2000)
       }
@@ -1066,11 +1179,15 @@ export default function App() {
     describeApiErrorText(data, res, lang)
 
   const api = async (url: string, body?: any) => {
+    const latestSimulation = simulationInputRef.current
+    body = simulationPayload(url, body, latestSimulation, latestSimulation.ready,
+      t.simulationSetup.pending)
+    body = lengthRequest(url, body, unit)
     const res = await fetch(url, body === undefined
       ? undefined
       : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     // 後端在極少數情況會回非 JSON 內容（例如回應序列化失敗時，Starlette
-    // 會回純文字 "Internal Server Error"）。直接 res.json() 會拋出
+    // 會回純文字 "Internal Server Error"）。直接 res.json 會拋出
     // 「Unexpected token」這種對使用者毫無意義的訊息，掩蓋真正的錯誤，
     // 故改為先取文字再嘗試解析。
     const text = await res.text()
@@ -1079,21 +1196,39 @@ export default function App() {
       data = text ? JSON.parse(text) : null
     } catch {
       if (!res.ok) {
-        throw flowError(t => t.appFlow.serverErrorHttp(res.status, text.slice(0, 300)))
+        throw flowError(t => t.appFlow.serverErrorHttp(res.status, ''))
       }
-      throw flowError(t => t.appFlow.invalidServerResponseNotJson(text.slice(0, 300)))
+      throw flowError(t => t.appFlow.invalidServerResponseNotJson(''))
     }
     // 後端啟用本機 token 而這個分頁沒有 cookie（自己打網址、或 cookie 被清掉）。
     // 訊息要說出下一步，不能只有「HTTP 401」。
     if (res.status === 401) {
-      throw flowError((t, lang) => pickText(data, 'detail', lang) || t.appFlow.backendAccessDenied401UseTheTool)
+      throw flowError((t, lang) => t.appFlow.backendAccessDenied401UseTheTool(restartHint(lang)))
     }
-    // 帶上後端的訊息代碼（卡 0087）：要依錯誤種類決定行為的地方看 code，不比對文字。
+    // 帶上後端的訊息代碼：要依錯誤種類決定行為的地方看 code，不比對文字。
     if (!res.ok) throw Object.assign(new Error(describeApiError(data, res)), {
-      code: data?.code, detail_en: describeApiErrorText(data, res, 'en'),
+      user_safe: true, detail: describeApiError(data, res), code: data?.code, detail_en: describeApiErrorText(data, res, 'en'),
+      status: res.status,
     })
     return data
   }
+
+  useEffect(() => {
+    let current = true
+    setSimulationFailure('')
+    void api('/api/simulation-settings/resolve', {
+      spec_name: specName, max_frequency_ghz: Number(maxFrequencyGHz),
+    }).then(data => {
+      if (current) setSimulationResolved({ ...data, inputKey: simulationKey })
+    }).catch(error => {
+      if (current) setSimulationFailure(errorText(error, lang))
+    })
+    return () => { current = false }
+  }, [specName, maxFrequencyGHz])
+
+  // 要使用者決定的不可逆操作一律用工具自己的確認框，不用瀏覽器原生 confirm
+  // （會跳「127.0.0.1:8765 說」，看起來像網頁出錯； A）。
+  const { request: confirmRequest, askConfirm, settle: settleConfirm } = useConfirmDialog()
 
   const confirmOutputOverwrite = async (
     path: string,
@@ -1102,22 +1237,18 @@ export default function App() {
     const status = await api('/api/output_path/status', { path })
     if (!status.exists) return false
     const targets = (status.targets as string[]).map(target => `• ${target}`).join('\n')
-    const accepted = confirm(
-      t.appFlow.overwriteWarning(actionLabel)
-      + `${targets}\n\n`
-      + t.appFlow.overwritePermanent
-      + t.appFlow.overwriteConfirm,
-    )
+    const accepted = await askConfirm({
+      title: t.appFlow.overwriteTitle,
+      message: t.appFlow.overwriteWarning(actionLabel)
+        + `${targets}\n\n`
+        + t.appFlow.overwritePermanent
+        + t.appFlow.overwriteConfirm,
+      confirmLabel: t.appFlow.overwriteProceed,
+      cancelLabel: t.appFlow.confirmCancel,
+      destructive: true,
+    })
     return accepted ? true : null
   }
-
-  /** 後端拒絕覆寫既有分段結果時，訊息裡一定有的那句話。
-   *
-   *  認訊息不是好辦法（措辭一改這裡就靜靜失效），但那道閘門目前只有
-   *  HTTP 500 + 一段中文可認；等後端給得出可辨識的標記（例如 409）就換掉。
-   *  這裡不是輪詢迴圈——認錯了最壞的情況是回到「拒絕，請自己清資料夾」，
-   *  不會像輪詢那樣卡住不結束。 */
-  const SEGMENT_EXISTS_MARK = messagesFor('zh-TW').appFlow.previousSegmentationResults
 
   /** 送出分段（`/api/segment/run` 或 `run-single`），被「資料夾裡已經有
    *  上一批」擋下就問一次。
@@ -1139,31 +1270,37 @@ export default function App() {
     try {
       return await api(endpoint, { ...payload, overwrite_existing: false })
     } catch (error) {
-      const message = errorText(error, lang)
-      const code = (error as { code?: string })?.code
-      if (code ? !code.startsWith('segment.previous_results_present')
-        : !message.includes(SEGMENT_EXISTS_MARK)) throw error
-      if (!confirm(
-        t.appFlow.deleteTheseSegmentNAedbFoldersIncluding(message)
-        + t.appFlow.solvedResultsAndAedtresultsAndRerunDeleted)) {
-        return null
-      }
+      // 後端用 409＋專用代碼表示「已有上一次的結果，要使用者決定」（ A）。
+      const { status, code } = error as { status?: number; code?: string }
+      if (status !== 409 || !code?.startsWith('segment.previous_results_present')) throw error
+      // 後端寫的理由照原樣給使用者看；去掉 `[HTTP 409 / 代碼]` 前綴，那是給客服看的。
+      const reason = errorText(error, lang).replace(/^\[[^\]]*\]\s*/, '')
+      const accepted = await askConfirm({
+        title: t.appFlow.previousSegmentationTitle,
+        message: t.appFlow.deleteTheseSegmentNAedbFoldersIncluding(reason)
+          + t.appFlow.solvedResultsAndAedtresultsAndRerunDeleted,
+        confirmLabel: t.appFlow.deleteAndRerun,
+        cancelLabel: t.appFlow.confirmCancel,
+        destructive: true,
+      })
+      if (!accepted) return null
       return await api(endpoint, { ...payload, overwrite_existing: true })
     }
   }
 
   useEffect(() => {
+    // 輸入不合法時不問後端（會回 400），畫面由 SolverCoresField 說明。
+    if (solverCoresValue === null) return
     const controller = new AbortController()
-    const cores = parseInt(solverCores, 10) || 12
     const memory = parseInt(solverMemoryPercent, 10) || 90
-    fetch(`/api/system/solver_resources?num_cores=${cores}&memory_percent=${memory}`, {
+    fetch(`/api/system/solver_resources?num_cores=${solverCoresValue}&memory_percent=${memory}`, {
       signal: controller.signal,
     })
       .then(response => response.ok ? response.json() : null)
       .then(data => { if (data) setSolverResourcePreview(data) })
       .catch(() => {})
     return () => controller.abort()
-  }, [solverCores, solverMemoryPercent])
+  }, [solverCoresValue, solverMemoryPercent])
 
   const handleBrowseInput = async () => {
     try {
@@ -1218,13 +1355,13 @@ export default function App() {
   // useState 的初值只在第一次 render 取用，所以不需要 useMemo。
   const [splitSizes] = useState(loadMainSplit)
   const [logSplitSizes] = useState(loadLogSplit)
-  // #0088 小修 10：模型頁把左側面板收起來，收起時 Allotment 回報的寬度是 0，
+  // ：模型頁把左側面板收起來，收起時 Allotment 回報的寬度是 0，
   // 存下去會讓下次開啟時左側消失，所以模型頁不存。
   const saveSplitSizes = (sizes: number[]) => { if (activeView !== 'models') saveMainSplit(sizes) }
   const saveLogSplitSizes = (sizes: number[]) => saveLogSplit(sizes)
 
   /** 上一次自動填進各輸出路徑欄位的建議值；用來分辨「使用者自己改過」。 */
-  const autoSuggested = useRef<Record<string, string>>({})
+  const autoSuggested = useSessionRef<Record<string, string>>('autoSuggested', {})
 
   /** 去掉副檔名——只動檔名那一段，不會咬到目錄。
    *
@@ -1265,7 +1402,9 @@ export default function App() {
         const version = Number(status?.api_contract_version ?? 0)
         setStaleBackend(version === API_CONTRACT_VERSION ? null : version)
         // 後端是新的一次啟動 → 報告工作區從頭開始，不帶上一輪的舊快照。
-        if (resetReportWorkspaceIfNewInstance(String(status?.instance_id || ''))) {
+        // 例外：使用者關窗時選了「儲存並關閉」，這次是還原那個工作階段。
+        if (resetReportWorkspaceIfNewInstance(String(status?.instance_id || ''))
+            && !hasRestoredFields()) {
           setReportWorkspace('')
         }
       } catch { /* 連不上就讓其他地方去報，不在這裡疊一層 */ }
@@ -1275,9 +1414,15 @@ export default function App() {
   // 版本與建置資訊：標題列顯示、「關於本工具」列全部、支援包 manifest 也帶。
   const [backendVersion, setBackendVersion] = useState<any>(null)
   useEffect(() => {
-    void api('/api/version').then(setBackendVersion).catch(() => { /* 舊後端沒有這個端點 */ })
+    void api('/api/version').then(v => {
+      // 安裝版沒有 start.bat：記住型態，之後連不上後端也說得出怎麼重開。
+      rememberInstallKind(v?.install_kind)
+      setBackendVersion(v)
+    }).catch(() => { /* 舊後端沒有這個端點 */ })
   }, [])
 
+  const [aboutOpen, setAboutOpen] = useState(false)
+  const [aboutText, setAboutText] = useState('')
   const showAbout = () => {
     const v = backendVersion
     const lines = [
@@ -1286,31 +1431,23 @@ export default function App() {
     ]
     if (v) {
       if (v.app_version !== __APP_VERSION__) {
-        lines.push(t.appFlow.backendVersionDiffersFromFrontendCloseThe(v.app_version, __APP_VERSION__))
+        lines.push(t.appFlow.backendVersionDiffersFromFrontendCloseThe(v.app_version, __APP_VERSION__, restartHint(lang)))
       }
-      const build = v.build || {}
-      lines.push(t.appFlow.build(build.commit || t.appFlow.unknown, build.built_at ? t.appFlow.label(build.built_at) : ''))
-      lines.push(t.appFlow.pythonPyedbPyaedt(v.python || '?', v.packages?.pyedb || '?', v.packages?.pyaedt || '?'))
+      lines.push(t.appFlow.build(v.build_id || t.appFlow.unknown, ''))
       lines.push(t.appFlow.aedtVersionThisWorkflow(v.aedt_version_in_use || '?'))
-      lines.push('')
     }
-    lines.push(
-      t.appFlow.boardCutoutAndAutomaticPortCreation,
-      t.appFlow.stackupReplacementBackdrillAndLayoutCleanup,
-      t.appFlow.nSegmentSplittingAndMixedHfssSiwave,
-      t.appFlow.remoteSolvePackageNoPythonRequiredOn,
-      t.appFlow.sParameterCascadingTdrAndEyeDiagrams,
-      '',
-      t.appFlow.providedByJeffHongSeniorTechnicalEngineer,
-    )
-    alert(lines.join('\n'))
+    lines.push(t.appFlow.providedByJeffHongSeniorTechnicalEngineer)
+    setAboutText(lines.join('\n'))
+    setAboutOpen(true)
   }
 
-  /** 一鍵支援包：日誌、設定檔、版本 manifest、AEDT 傾印與 pyaedt 記錄打成 zip，
+  /** 一鍵支援包：日誌、設定摘要、版本 manifest 與 pyaedt 記錄打成 zip（AEDT 傾印要另外勾選），
    *  然後在檔案總管開它所在的資料夾。不含模型檔與求解結果。 */
-  const makeSupportBundle = async () => {
+  const [supportDialogOpen, setSupportDialogOpen] = useState(false)
+  const makeSupportBundle = async (plaintextReview = false, includeAedtDumps = false) => {
+    setSupportDialogOpen(false)
     try {
-      const result = await api('/api/support/bundle', {})
+      const result = await api('/api/support/bundle', { plaintext_review: plaintextReview, include_aedt_dumps: includeAedtDumps })
       const failure = await revealPath(result.path)
       const skipped = (result.skipped || []).length
       alert(
@@ -1318,35 +1455,24 @@ export default function App() {
         t.appFlow.attachments((result.included || []).length) + (skipped ? t.appFlow.skippedSeeManifestJson(skipped) : '') +
         t.appFlow.excludesModelFilesAedbTouchstoneFilesAnd +
         (failure ? t.appFlow.failedToOpenFolder(failure) : ''),
+        'success',
       )
     } catch (e) {
-      alert(t.appFlow.failedToCreateSupportBundle + errorText(e, lang))
+      alert(t.appFlow.failedToCreateSupportBundle + errorText(e, lang), 'error')
     }
   }
 
   // 工具視窗只有一個視窗；要多開分頁對照時，由後端帶著 token 開系統預設瀏覽器
-  // （卡片 #0073）。純瀏覽器模式本來就能自己開分頁，選單不顯示這一項。
+  // 。純瀏覽器模式本來就能自己開分頁，選單不顯示這一項。
   const desktopShell = useDesktopShell()
   const openInBrowser = async () => {
     try {
       await api('/api/open_in_browser', {})
     } catch (e) {
-      alert(t.appFlow.failedToOpenInBrowser + errorText(e, lang))
+      alert(t.appFlow.failedToOpenInBrowser + errorText(e, lang), 'error')
     }
   }
 
-  const openLogFolder = async () => {
-    try {
-      const status = await api('/api/support/status')
-      const failure = await revealPath(status.log_dir)
-      if (failure) alert(failure)
-      if (!status.file_logging_active) {
-        alert(t.appFlow.warningLogsForThisRunWereNot(status.log_file))
-      }
-    } catch (e) {
-      alert(t.appFlow.failedToQueryLogLocation + errorText(e, lang))
-    }
-  }
 
   // 動過的輸出路徑建議都要跟著長出新的一節，檔名才完整記錄做過哪些加工。
   useEffect(() => {
@@ -1366,17 +1492,50 @@ export default function App() {
     try {
       const data = await api('/api/browse_stackup')
       // 換了疊構檔，舊的差異分析就不作數了。
-      if (data.path) { setStackupFilePath(data.path); setStackupDiff(null) }
+      if (data.path) { setStackupFilePath(data.path); invalidateStackupDiff() }
     } catch (e) { reportBrowseFailure('stackupFile', e) }
   }
 
+  const invalidateStackupDiff = () => {
+    stackupDiffEpoch.current += 1
+    setStackupDiff(null)
+    setStackupConfirmRemoval(false)
+  }
+
+  const invalidateBoardAnalysis = () => {
+    boardAnalysisEpoch.current += 1
+    setDdrResult(null)
+    setDdrRoles([])
+    setDdrBusy(false)
+    setRefSuggestions(null)
+    invalidateStackupDiff()
+    setBdResult(null)
+  }
+
   const applyLoadResult = (data: any, path: string) => {
+    invalidateBoardAnalysis()
+    reportBoardEpoch.current += 1
+    setReportBoardPath(path)
+    setReportWorkSources(rememberedWorkSources(path))
+    setReportLineage(startLineage(path))
+    reportJobBindings.current = {}
+    reportGeometryBindings.current = {}
+    setReportCutoutRecord(null)
+    setReportCleanupRecord(null)
+    setReportQualityRecord(null)
+    setSchedMetaPath('')
+    setCascadeResult(null)
+    setSchematicGraph(null)
+    setEyeJob(null)
+    setTdrJob(null)
+    setXsJob(null)
+    setXsCompare(null)
     setAllNets(data.nets)
     setComponents(data.components || [])
     // 自動建議參考網路（GND / VSS / GROUND，精確匹配優先）
     const suggestedRefs = suggestReferenceNets(data.nets as string[])
     setRefNets(suggestedRefs)
-    // 板上已經有元件端 Port（#0122 情境 2）：Port 已經講清楚是哪幾條訊號，
+    // 板上已經有元件端 Port：Port 已經講清楚是哪幾條訊號，
     // 不用再手動選一次（原本沒選就被「請先選擇訊號網路」擋下）。
     const ports = readExistingPorts(data.existing_ports)
     const prefilled = signalNetsFromPorts(ports, data.nets as string[], suggestedRefs)
@@ -1393,12 +1552,6 @@ export default function App() {
     setCleanupAfterScene(null)
     setSegAnalysis(null)
     setSegRun(null); setSegFollowPlan(null)
-    // 換了一片板子＝重新開始。「使用者定過」的兩個旗標是綁在上一片板的
-    // 決定上（工作頻率跟著那片板的掃頻表、網格方法跟著那片板的分段），
-    // 不清掉的話新板子的掃頻表推導與 segments.json 回寫都會被永久凍結，
-    // 而畫面上沒有任何跡象說明為什麼欄位不動了。
-    solutionFreqTouched.current = false
-    hfssMeshMethodTouched.current = false
     setActiveView('full')
     if (path) {
       setInputPath(path)
@@ -1407,16 +1560,35 @@ export default function App() {
     }
   }
 
+  // 載入會先關掉舊 EDB；開始嘗試時就撤掉舊板，失敗也不能繼續使用 A 的畫面。
+  const clearLoadedBoard = () => {
+    applyLoadResult({ nets: [], components: [] }, '')
+    setFullScene(null)
+    setWorkingPath('')
+    setBdResult(null)
+    segmentModeSyncer.setBackend(null)
+  }
+
   /** `direct` 預設跟著入口勾選；「切換成不裁切並重新載入」那顆鈕會明講 true，
    *  因為同一個事件裡改的入口勾選要到下一次重繪才反映到 directSegmentMode。 */
-  const handleLoadFile = async (direct: boolean = directSegmentMode, path: string = inputPath) => {
-    if (!path) { alert(t.appFlow.enterAFilePath); return }
+  /** `opts.resume`：重新開窗還原工作階段，後端還開著同一片板就直接接回、
+   *  不重開 EDB。`opts.quiet`：失敗不跳 alert，改回傳錯誤文字（還原流程自己顯示）。 */
+  const handleLoadFile = async (direct: boolean = directSegmentMode, path: string = inputPath,
+                                opts: { resume?: boolean; quiet?: boolean;
+                                        restoreOriginalPath?: string; restoreIsCut?: boolean } = {})
+    : Promise<{ ok: true; data: any } | { ok: false; error: string }> => {
+    if (!path) { alert(t.appFlow.enterAFilePath); return { ok: false, error: t.appFlow.enterAFilePath } }
+    clearLoadedBoard()
     setLoadingMsg((t) => direct
       ? t.appFlow.loadingFileAsAChannelWithoutCutout
       : t.appFlow.loadingEdbLargeFilesMayTakeSeveral)
     setIsLoading(true)
     try {
-      const started = await api('/api/load', { path, for_segmentation: direct })
+      const started = await api('/api/load', {
+        path, for_segmentation: direct, resume: opts.resume === true,
+        restore_original_path: opts.restoreOriginalPath ?? null,
+        restore_is_cut: opts.restoreIsCut ?? null,
+      })
       const jobId = started.job_id as string
       let data: any = null
       let transientErrors = 0
@@ -1439,6 +1611,7 @@ export default function App() {
         }
       }
       applyLoadResult(data, data.path || path)
+      segmentModeSyncer.setBackend(backendDirectAfterLoad(data, direct))
       const normalized = data.path || path
       setWorkingPath(normalized)
       if (direct) {
@@ -1453,14 +1626,18 @@ export default function App() {
       setFullScene(data.preview)
       // 載入之後版本就鎖住了，把選單狀態同步過來，免得它看起來還能改。
       setAedtLocked(true)
+      return { ok: true, data }
     } catch (e) {
-      alert(t.appFlow.loadFailed + errorText(e, lang))
+      // 載入失敗時後端可能已關掉上一片板：模式改回未知，不拿它來比入口。
+      segmentModeSyncer.setBackend(null)
+      if (!opts.quiet) alert(t.appFlow.loadFailed + errorText(e, lang), 'error')
+      return { ok: false, error: errorText(e, lang) }
     } finally {
       setIsLoading(false)
     }
   }
 
-  /** 勾著「局部裁切」載入、板上卻已經有元件端 Port（#0122）：一鍵取消局部
+  /** 勾著「局部裁切」載入、板上卻已經有元件端 Port：一鍵取消局部
    *  裁切、記住這個選擇，再以不裁切模式重新載入（後端同路徑捷徑，不重開 EDB）。 */
   const switchToNoCutoutAndReload = async () => {
     const next = enabledTasks.filter(key => key !== 'cutout')
@@ -1471,6 +1648,7 @@ export default function App() {
   }
 
   const handleReloadOriginal = async () => {
+    clearLoadedBoard()
     setLoadingMsg((t) => t.appFlow.reloadingOriginalFile)
     setIsLoading(true)
     try {
@@ -1481,36 +1659,43 @@ export default function App() {
       // 都繼續掛著那串已經不成立的加工節（檔名是這條加工鏈唯一的紀錄）。
       const original = String(data.path || '')
       applyLoadResult(data, original)
+      segmentModeSyncer.setBackend(backendDirectAfterLoad(data, directSegmentMode))
       setWorkingPath(original)
       const full = await api('/api/preview', { nets: [] })
       setFullScene(full)
     } catch (e) {
-      alert(t.appFlow.reloadFailed + errorText(e, lang))
+      alert(t.appFlow.reloadFailed + errorText(e, lang), 'error')
     } finally {
       setIsLoading(false)
     }
   }
 
   const handleCutout = async () => {
+    if (edbActionRef.current) return
+    if (!validLengths()) return
     if (signalNets.length === 0) { alert(t.appFlow.selectSignalNetsFirst); return }
     if (refNets.length === 0) { alert(t.appFlow.selectReferenceNetsFirstEGGnd); return }
     if (!outputPath) { alert(t.appFlow.setAnOutputPath); return }
     const comps = Object.keys(checkedComps).filter(c => checkedComps[c])
-    let overwriteExisting: boolean | null
-    try {
-      overwriteExisting = await confirmOutputOverwrite(outputPath, t.appFlow.cutout)
-    } catch (e) {
-      alert(t.appFlow.unableToCheckOutputPath + errorText(e, lang)); return
-    }
-    if (overwriteExisting === null) return
+    edbActionRef.current = true
     setLoadingMsg((t) => t.appFlow.preparingCutout)
     setIsLoading(true)
     setCutoutStopping(false)
     try {
+      let overwriteExisting: boolean | null
+      try {
+        overwriteExisting = await confirmOutputOverwrite(outputPath, t.appFlow.cutout)
+      } catch (e) {
+        alert(t.appFlow.unableToCheckOutputPath + errorText(e, lang), 'error'); return
+      }
+      if (overwriteExisting === null) return
+      const beforeScene = cutScene || fullScene
+      const reportEvidence = await captureBeforeAnalysis('cutout', [workingPath],
+        [signalNets, refNets, expansionMm, extentType, comps])
       const started = await api('/api/cutout', {
         signal_nets: signalNets,
         reference_nets: refNets,
-        expansion_mm: parseFloat(expansionMm) || 2,
+        expansion_mm: Number(expansionMm),
         extent_type: extentType,
         port_components: comps,
         port_type: portType,
@@ -1559,8 +1744,12 @@ export default function App() {
           if (transientErrors >= 3) throw error
         }
       }
+      reportGeometryBindings.current.cut = reportGeometryContext
+      invalidateBoardAnalysis()
       setCutScene(data.preview)
       const actualExtent = String(data.actual_extent_type || extentType)
+      setReportCutoutRecord({ context: reportGeometryContext, source_evidence: reportEvidence,
+        data: { before: beforeScene, boundary: data.estimated_boundary_mm || null, extent_type: actualExtent } })
       setActualCutoutExtentType(actualExtent)
       if (actualExtent !== extentType) {
         setExtentType(actualExtent)
@@ -1574,6 +1763,8 @@ export default function App() {
       }
       setActiveView('cut')
       setWorkingPath(data.output_path)
+      // 裁切直接在 session 目前開著的檔上做，輸入就是發出請求時的 workingPath。
+      setReportLineage(previous => appendLineage(previous, 'cutout', workingPath, data.output_path))
       setCleanupAnalysis(null)
       setCleanupBeforeScene(null)
       setCleanupAfterScene(null)
@@ -1581,8 +1772,9 @@ export default function App() {
       setSegAnalysis(null)
       setSegRun(null); setSegFollowPlan(null)
     } catch (e) {
-      alert(t.appFlow.cutoutFailed77 + errorText(e, lang))
+      alert(t.appFlow.cutoutFailed77 + errorText(e, lang), 'error')
     } finally {
+      edbActionRef.current = false
       setCutoutJobId('')
       setCutoutStopping(false)
       setIsLoading(false)
@@ -1592,22 +1784,24 @@ export default function App() {
   // 已裁切好的檔案：跳過裁切，只建立元件端 Port 與求解器設定。
   // 直接匯入模式若不做這一步，通道頭尾不會有元件端 Port，分段與求解都白做。
   const handlePortsSetup = async () => {
+    if (edbActionRef.current) return
     if (signalNets.length === 0) { alert(t.appFlow.selectSignalNetsFirst); return }
     if (refNets.length === 0) { alert(t.appFlow.selectReferenceNetsFirstEGGnd); return }
     const comps = Object.keys(checkedComps).filter(c => checkedComps[c])
     if (comps.length === 0) { alert(t.appFlow.selectEndpointComponentsForPortCreationFirst); return }
     if (!portsOutputPath) { alert(t.appFlow.setAnOutputPath); return }
-    let overwriteExisting: boolean | null
-    try {
-      overwriteExisting = await confirmOutputOverwrite(portsOutputPath, t.appFlow.portAndSolverSetup)
-    } catch (e) {
-      alert(t.appFlow.unableToCheckOutputPath + errorText(e, lang)); return
-    }
-    if (overwriteExisting === null) return
+    edbActionRef.current = true
     setLoadingMsg((t) => t.appFlow.preparingPortCreation)
     setIsLoading(true)
     setCutoutStopping(false)
     try {
+      let overwriteExisting: boolean | null
+      try {
+        overwriteExisting = await confirmOutputOverwrite(portsOutputPath, t.appFlow.portAndSolverSetup)
+      } catch (e) {
+        alert(t.appFlow.unableToCheckOutputPath + errorText(e, lang), 'error'); return
+      }
+      if (overwriteExisting === null) return
       const started = await api('/api/ports_setup', {
         signal_nets: signalNets,
         reference_nets: refNets,
@@ -1653,9 +1847,12 @@ export default function App() {
           if (transientErrors >= 3) throw error
         }
       }
+      reportGeometryBindings.current.cut = reportGeometryContext
+      invalidateBoardAnalysis()
       setCutScene(data.preview)
       setActiveView('cut')
       setWorkingPath(data.output_path)
+      setReportLineage(previous => appendLineage(previous, 'ports', data.source_path || workingPath, data.output_path))
       setCleanupAnalysis(null)
       setCleanupBeforeScene(null)
       setCleanupAfterScene(null)
@@ -1666,10 +1863,12 @@ export default function App() {
         t.appFlow.createdComponentPortsComponents(names.length, data.port_component_count)
         + t.appFlow.output(data.output_path)
         + t.appFlow.theNextNSegmentSplitAndSolve,
+        'success',
       )
     } catch (e) {
-      alert(t.appFlow.portCreationFailed93 + errorText(e, lang))
+      alert(t.appFlow.portCreationFailed93 + errorText(e, lang), 'error')
     } finally {
+      edbActionRef.current = false
       setCutoutJobId('')
       setCutoutStopping(false)
       setIsLoading(false)
@@ -1685,26 +1884,30 @@ export default function App() {
     try {
       const data = await api('/api/stackup/export',
         { output_path: suggested, file_format: stackupExportFormat })
-      alert(t.appFlow.exportedLayers(data.layer_count, data.output_path))
+      alert(t.appFlow.exportedLayers(data.layer_count, data.output_path), 'success')
       if (!stackupFilePath) setStackupFilePath(data.output_path)
     } catch (e) {
-      alert(t.appFlow.stackupExportFailed + errorText(e, lang))
+      alert(t.appFlow.stackupExportFailed + errorText(e, lang), 'error')
     } finally { setIsLoading(false) }
   }
 
   const handleStackupAnalyze = async () => {
     if (!stackupFilePath) { alert(t.appFlow.specifyAStackupFileFirst); return }
+    const epoch = boardAnalysisEpoch.current
+    const diffEpoch = ++stackupDiffEpoch.current
     setIsLoading(true); setLoadingMsg((t) => t.appFlow.comparingStackupDifferences)
     try {
       const data = await api('/api/stackup/analyze', { file_path: stackupFilePath })
+      if (epoch !== boardAnalysisEpoch.current || diffEpoch !== stackupDiffEpoch.current) return
       setStackupDiff(data)
       setStackupConfirmRemoval(false)
       suggestOutputPath('stackup', '_stackup.aedb',
                         stackupOutputPath, setStackupOutputPath)
     } catch (e) {
+      if (epoch !== boardAnalysisEpoch.current || diffEpoch !== stackupDiffEpoch.current) return
       setStackupDiff(null)
-      alert(t.appFlow.stackupAnalysisFailed + errorText(e, lang))
-    } finally { setIsLoading(false) }
+      alert(t.appFlow.stackupAnalysisFailed + errorText(e, lang), 'error')
+    } finally { if (epoch === boardAnalysisEpoch.current) setIsLoading(false) }
   }
 
   const handleStackupApply = async () => {
@@ -1742,15 +1945,18 @@ export default function App() {
           if (transientErrors >= 3) throw error
         }
       }
+      reportGeometryBindings.current.cut = reportGeometryContext
+      invalidateBoardAnalysis()
       setCutScene(data.preview)
       setActiveView('cut')
       setWorkingPath(data.output_path)
+      setReportLineage(previous => appendLineage(previous, 'stackup', data.source_path || workingPath, data.output_path))
       setStackupDiff(null)
       setSegAnalysis(null); setSegRun(null); setSegFollowPlan(null)
       alert(t.appFlow.stackupReplacedLayersLayers(data.layer_count_before, data.layer_count_after)
-        + t.appFlow.outputReport(data.output_path, data.report_path))
+        + t.appFlow.outputReport(data.output_path, data.report_path), 'success')
     } catch (e) {
-      alert(t.appFlow.stackupReplacementFailed111 + errorText(e, lang))
+      alert(t.appFlow.stackupReplacementFailed111 + errorText(e, lang), 'error')
     } finally {
       setCutoutJobId(''); setCutoutStopping(false); setIsLoading(false)
     }
@@ -1758,6 +1964,7 @@ export default function App() {
 
   // ── 6d 背鑽 ────────────────────────────────────────
   const handleBackdrillAnalyze = async () => {
+    if (!validLengths()) return
     if (signalNets.length === 0) { alert(t.appFlow.selectSignalNetsFirst); return }
     // 不能用 `parseFloat(x) || 5`：使用者填的 0 會被靜默改成 5 mil。
     const stubMil = Number(bdTargetStubMil)
@@ -1768,6 +1975,11 @@ export default function App() {
     if (bdDrillOversize && (bdDiameterIncMil.trim() === '' || !Number.isFinite(incMil) || incMil < 0)) {
       alert(t.appFlow.drillDiameterIncrementMustBeANumber); return
     }
+    const epoch = boardAnalysisEpoch.current
+    const inputKey = backdrillInputKey
+    const isCurrent = () => epoch === boardAnalysisEpoch.current
+      && inputKey === backdrillInputKeyRef.current
+    setBdResult(null)
     setIsLoading(true); setLoadingMsg((t) => t.appFlow.analyzingSignalViaStubs)
     try {
       const data = await api('/api/backdrill/analyze', {
@@ -1775,13 +1987,15 @@ export default function App() {
         target_stub_mil: stubMil,
         diameter_increment_mil: bdDrillOversize ? incMil : 0,
       })
-      setBdResult(data)
+      if (!isCurrent()) return
+      setBdResult({ ...data, input_key: inputKey })
       suggestOutputPath('backdrill', '_backdrill.aedb',
                         bdOutputPath, setBdOutputPath)
     } catch (e) {
+      if (!isCurrent()) return
       setBdResult(null)
-      alert(t.appFlow.backdrillAnalysisFailed + errorText(e, lang))
-    } finally { setIsLoading(false) }
+      alert(t.appFlow.backdrillAnalysisFailed + errorText(e, lang), 'error')
+    } finally { if (epoch === boardAnalysisEpoch.current) setIsLoading(false) }
   }
 
   const toggleBackdrillStub = (entryIndex: number, stubIndex: number) => {
@@ -1798,14 +2012,35 @@ export default function App() {
   }
 
   const handleBackdrillApply = async () => {
-    if (!bdResult) { alert(t.appFlow.runAnalysisFirst); return }
+    if (!validLengths()) return
+    if (!bdResult || !bdResult.analysis_key || bdResult.input_key !== backdrillInputKeyRef.current) {
+      setBdResult(null)
+      alert(t.appFlow.runAnalysisFirst); return
+    }
     if (!bdOutputPath) { alert(t.appFlow.setAnOutputPath); return }
     if ((bdResult.warnings || []).length > 0
-        && !window.confirm(t.appFlow.applyBackdrillWithThisRetainedStubAnyway(pickList(bdResult, 'warnings', lang).join('\n')))) return
+        && !await confirm(t.appFlow.applyBackdrillWithThisRetainedStubAnyway(pickList(bdResult, 'warnings', lang, unit).join('\n')))) return
+    // F3：覆寫既有背鑽一律走工具自己的置中確認窗（await），取消就不送；後端另有 StrictBool 旗標把關
+    const requiresExistingOverride = bdResult.entries.some((entry: any) => (entry.stubs || []).some((stub: any) => {
+      const existing = stub.existing_backdrill
+      if (stub.selected === false || !existing?.exists) return false
+      return stub.drill_depth_mm == null || existing.depth_mm == null
+        || stub.drill_diameter_mm == null || existing.drill_diameter_mm == null
+        || Number(stub.drill_depth_mm) < Number(existing.depth_mm) - 1e-9
+        || Number(stub.drill_diameter_mm) < Number(existing.drill_diameter_mm) - 1e-9
+    }))
+    if (requiresExistingOverride && !await confirm(t.appFlow.confirmExistingBackdrillOverride)) return
+    // 確認框開著時頁面仍在跑（不像原生 confirm 會凍結）：回答後再核一次分析仍對應目前輸入。
+    if (bdResult.input_key !== backdrillInputKeyRef.current) { setBdResult(null); alert(t.appFlow.runAnalysisFirst); return }
     setLoadingMsg((t) => t.appFlow.preparingBackdrill); setIsLoading(true); setCutoutStopping(false)
     try {
       const started = await api('/api/backdrill/apply', {
         output_path: bdOutputPath, entries: bdResult.entries,
+        analysis_key: bdResult.analysis_key,
+        signal_nets: signalNets,
+        target_stub_mil: Number(bdTargetStubMil),
+        diameter_increment_mil: bdDrillOversize ? Number(bdDiameterIncMil) : 0,
+        confirm_existing_backdrill_override: requiresExistingOverride,
       })
       const jobId = started.job_id as string
       setCutoutJobId(jobId)
@@ -1829,15 +2064,19 @@ export default function App() {
           if (transientErrors >= 3) throw error
         }
       }
+      reportGeometryBindings.current.cut = reportGeometryContext
+      invalidateBoardAnalysis()
       setCutScene(data.preview)
       setActiveView('cut')
       setWorkingPath(data.output_path)
+      setReportLineage(previous => appendLineage(previous, 'backdrill', data.source_path || workingPath, data.output_path))
       setBdResult(null)
       setSegAnalysis(null); setSegRun(null); setSegFollowPlan(null)
       alert(t.appFlow.backdrillCompleteSectionsSucceededFailed(data.applied_count, data.failed_count)
-        + t.appFlow.outputReport(data.output_path, data.report_path))
+        + t.appFlow.outputReport(data.output_path, data.report_path),
+        Number(data.failed_count) > 0 ? 'warning' : 'success')
     } catch (e) {
-      alert(t.appFlow.backdrillFailed127 + errorText(e, lang))
+      alert(t.appFlow.backdrillFailed127 + errorText(e, lang), 'error')
     } finally {
       setCutoutJobId(''); setCutoutStopping(false); setIsLoading(false)
     }
@@ -1851,12 +2090,13 @@ export default function App() {
       await api(`/api/cutout/stop?job_id=${encodeURIComponent(cutoutJobId)}`, {})
     } catch (e) {
       setCutoutStopping(false)
-      alert(t.appFlow.failedToStopCutout + errorText(e, lang))
+      alert(t.appFlow.failedToStopCutout + errorText(e, lang), 'error')
     }
   }
 
   // ── Layout 保守清理 ────────────────────────────────────
   const applyCleanupRecommendedSettings = () => {
+    resetLengths({ cleanupGuardMm: '0.2' })
     setCleanupMode('em_field')
     setCleanupGuardMm('0.2')
     setCleanupIsolationDb('40')
@@ -1866,6 +2106,7 @@ export default function App() {
   }
 
   const handleCleanupAnalyze = async () => {
+    if (!validLengths()) return
     if (!canSegment) { alert(t.appFlow.completeCutoutFirstOrLoadTheChannel); return }
     if (signalNets.length === 0 || refNets.length === 0) {
       alert(t.appFlow.selectSignalAndReferenceNetsFirst); return
@@ -1876,65 +2117,75 @@ export default function App() {
       const data = await api('/api/cleanup/analyze', {
         signal_nets: signalNets,
         reference_nets: refNets,
-        guard_mm: parseFloat(cleanupGuardMm) || (cleanupMode === 'em_field' ? 0.2 : 2),
+        guard_mm: Number(cleanupGuardMm),
         mode: cleanupMode,
         isolation_db: parseFloat(cleanupIsolationDb) || 40,
       })
       setCleanupAnalysis(data)
       setActiveView(cutScene ? 'cut' : 'full')
     } catch (e) {
-      alert(t.appFlow.layoutCleanupAnalysisFailed + errorText(e, lang))
+      alert(t.appFlow.layoutCleanupAnalysisFailed + errorText(e, lang), 'error')
     } finally {
       setIsLoading(false)
     }
   }
 
   const handleCleanupRun = async () => {
+    if (!validLengths()) return
     if (!cleanupAnalysis) { alert(t.appFlow.analyzeCleanupCandidatesFirst); return }
     if (!cleanupOutputPath) { alert(t.appFlow.setACleanupOutputPath); return }
     let overwriteExisting: boolean | null
     try {
       overwriteExisting = await confirmOutputOverwrite(cleanupOutputPath, t.appFlow.layoutCleanup)
     } catch (e) {
-      alert(t.appFlow.unableToCheckOutputPath + errorText(e, lang)); return
+      alert(t.appFlow.unableToCheckOutputPath + errorText(e, lang), 'error'); return
     }
     if (overwriteExisting === null) return
     setLoadingMsg((t) => t.appFlow.savingACopyAndCleaningLayoutThis)
     setIsLoading(true)
     try {
       const beforeScene = cutScene || fullScene
+      const reportEvidence = await captureBeforeAnalysis('cleanup', [workingPath],
+        [signalNets, refNets, cleanupMode, cleanupGuardMm, cleanupIsolationDb])
       const data = await api('/api/cleanup/run', {
         signal_nets: signalNets,
         reference_nets: refNets,
-        guard_mm: parseFloat(cleanupGuardMm) || (cleanupMode === 'em_field' ? 0.2 : 2),
+        guard_mm: Number(cleanupGuardMm),
         mode: cleanupMode,
         isolation_db: parseFloat(cleanupIsolationDb) || 40,
         output_path: cleanupOutputPath,
         overwrite_existing: overwriteExisting,
       })
+      reportGeometryBindings.current.cut = reportGeometryContext
+      invalidateBoardAnalysis()
       setCutScene(data.preview)
+      reportGeometryBindings.current.cleanup = reportGeometryContext
       setCleanupBeforeScene(beforeScene)
       setCleanupAfterScene(data.preview)
       setCleanupAnalysis(data)
+      setReportCleanupRecord({ context: reportGeometryContext, source_evidence: reportEvidence, data })
       setCleanupCompareMode('overlay')
       setCleanupDiffKind('all')
       setCleanupDiffLayer('')
       setCleanupFocusRegion(null)
       setWorkingPath(data.output_path)
+      setReportLineage(previous => appendLineage(previous, 'cleanup', data.source_path || workingPath, data.output_path))
       setSegAnalysis(null)
       setSegRun(null); setSegFollowPlan(null)
       setActiveView('cleanup')
     } catch (e) {
-      alert(t.appFlow.layoutCleanupFailed + errorText(e, lang))
+      alert(t.appFlow.layoutCleanupFailed + errorText(e, lang), 'error')
     } finally {
       setIsLoading(false)
     }
   }
 
   // ── N 段分割 ───────────────────────────────────
-  /** manualCuts 為空＝用自動位置（「回到自動刀線」走的就是這條路）。 */
+  /** manualCuts 為空＝用自動位置（「回到自動刀線」走的就是這條路）。
+   *  allowRelease＝使用者已在確認框接受「手動放行 D 級」。 */
   const runComplexityAnalyze = async (
     manualCuts?: { axis: number; position_mm: number }[],
+    allowRelease = false,
   ) => {
     if (!canSegment) { alert(t.appFlow.completeCutoutFirstOrLoadTheChannel140); return }
     if (signalNets.length === 0) { alert(t.appFlow.selectSignalNetsInSelectNetsFirst); return }
@@ -1943,29 +2194,33 @@ export default function App() {
       : t.appFlow.detectingComplex3dRegionsAndPlanningCuts)
     setIsLoading(true)
     try {
+      const reportEvidence = await captureBeforeAnalysis('segment-quality', [workingPath],
+        [signalNets, refNets, segmentQuality, targetFmaxGHz, solverBandwidth.ghz, manualCuts, allowRelease])
       const data: ComplexityAnalysis = await api(
         '/api/segment/analyze-complexity', {
           signal_nets: signalNets,
           reference_nets: refNets,
           quality_threshold: segmentQuality,
-          // 兩個頻率分開送（ADR-0070）：切面以掃頻上限驗收，判斷頻寬只給求解器建議。
+          // 兩個頻率分開送：切面以掃頻上限驗收，判斷頻寬只給求解器建議。
           target_fmax_ghz: targetFmaxGHz,
           required_bandwidth_ghz: solverBandwidth.ghz,
           cuts: manualCuts || [],
+          allow_stitch_release: allowRelease,
         })
       setComplexityAnalysis(data)
+      setReportQualityRecord({ context: reportGeometryContext, source_evidence: reportEvidence, data })
       setSegAnalysis(null)          // 兩種分析互斥，避免畫面同時出現兩組刀
       // 新的分析取代上一次的執行結果（等分分析一向如此）：留著的話整體視圖
-      // 畫新刀、分段頁籤卻還是舊段；整片求解之後預覽也回不到分段（卡 0121）。
+      // 畫新刀、分段頁籤卻還是舊段；整片求解之後預覽也回不到分段。
       setSegRun(null); setSegFollowPlan(null)
       setActiveView('segments')
       // 拖曳時不彈視窗——面板上的紅字已經說明白了，每拖一次跳一個 modal
       // 只會讓人沒辦法連續微調。
-      if (!data.feasible && !manualCuts?.length) {
-        alert(t.appFlow.unableToCreateAnExecutableSegmentation + pickText(data, 'reason', lang))
+      if (!data.feasible && !manualCuts?.length && !allowRelease) {
+        alert(t.appFlow.unableToCreateAnExecutableSegmentation + pickText(data, 'reason', lang, unit))
       }
     } catch (e) {
-      alert(t.appFlow.complexityBasedSegmentationAnalysisFailed + errorText(e, lang))
+      alert(t.appFlow.complexityBasedSegmentationAnalysisFailed + errorText(e, lang), 'error')
     } finally {
       setIsLoading(false)
     }
@@ -1973,16 +2228,30 @@ export default function App() {
 
   const handleComplexityAnalyze = () => runComplexityAnalyze()
 
-  /** 在預覽圖上把某把刀拖到新位置：整份重算，等級與分段都會跟著更新。 */
+  /** 在預覽圖上把某把刀拖到新位置：整份重算，等級與分段都會跟著更新。
+   *  已確認過的放行設定沿用，不必每拖一次再確認。 */
   const handleCutDrag = (cutIndex: number, positionMm: number) => {
     if (!complexityAnalysis) return
-    runComplexityAnalyze(complexityAnalysis.cuts.map((cut, index) => ({
-      axis: cut.axis,
-      position_mm: index === cutIndex ? positionMm : cut.position_mm,
-    })))
+    runComplexityAnalyze(moveComplexityCut(complexityAnalysis, cutIndex, positionMm),
+      Boolean(complexityAnalysis.allow_stitch_release))
   }
 
-  const handleSegmentAnalyze = async () => {
+  /** 手動放行 D 級（縫合不足）：一定先跳確認、講清楚可信頻率。
+   *  按「分析」重新來過會回到不放行，要放行得再確認一次。 */
+  const handleStitchRelease = async (mode: 'axis' | 'complexity', allow: boolean) => {
+    const analysis = mode === 'axis' ? segAnalysis : complexityAnalysis
+    if (!analysis) return
+    if (allow) {
+      const { limit, target } = releaseConfirmNumbers(analysis, targetFmaxGHz)
+      if (!await confirm(t.appView.stitchReleaseConfirm(limit, target))) return
+    }
+    if (mode === 'axis') runSegmentAnalyze(allow)
+    else runComplexityAnalyze(undefined, allow)
+  }
+
+  const handleSegmentAnalyze = () => runSegmentAnalyze(false)
+
+  const runSegmentAnalyze = async (allowRelease: boolean) => {
     const n = parseInt(nSegments, 10)
     if (!canSegment) { alert(t.appFlow.runLocalCutoutFirstOrLoadAn); return }
     if (signalNets.length === 0) { alert(t.appFlow.selectSignalNetsInSelectNetsFirst147); return }
@@ -1990,6 +2259,8 @@ export default function App() {
     setLoadingMsg((t) => t.appFlow.analyzingCutPositions)
     setIsLoading(true)
     try {
+      const reportEvidence = await captureBeforeAnalysis('segment-quality', [workingPath],
+        [n, signalNets, refNets, segmentQuality, targetFmaxGHz, allowRelease])
       const data = await api('/api/segment/analyze', {
         n_segments: n,
         signal_nets: signalNets,
@@ -1999,15 +2270,17 @@ export default function App() {
         // 後端的 SegmentAnalyzeRequest 也沒有這個欄位（pydantic 安靜丟掉）。
         // 真正會把它寫進 segments.json 的是 /api/segment/run 與 run-single。
         target_fmax_ghz: targetFmaxGHz,
+        allow_stitch_release: allowRelease,
       })
       setSegAnalysis(data)
+      setReportQualityRecord({ context: reportGeometryContext, source_evidence: reportEvidence, data })
       setComplexityAnalysis(null)
       setShowSegmentSafetyOverlay(true)
       setShowSegmentCutDiagnostics(true)
       setSegRun(null); setSegFollowPlan(null)
       setActiveView('segments')
     } catch (e) {
-      alert(t.appFlow.segmentationAnalysisFailed + errorText(e, lang))
+      alert(t.appFlow.segmentationAnalysisFailed + errorText(e, lang), 'error')
     } finally {
       setIsLoading(false)
     }
@@ -2021,9 +2294,10 @@ export default function App() {
     if (!metadataPath) { alert(t.appFlow.runNSegmentSplittingFirstOrEnter); return }
     const outDir = normalizeUserPath(packDir)
     if (!outDir) { alert(t.appFlow.specifyANewOutputFolderForThe); return }
+    if (solverCoresValue === null) { alert(t.solverCores.invalid); return }
     setPackBusy(true)
     try {
-      // 走 api()：它會先取文字再解析，非 JSON 的回應（舊後端讓 POST 撞上
+      // 走 api：它會先取文字再解析，非 JSON 的回應（舊後端讓 POST 撞上
       // StaticFiles 得到 405 的那種）才不會變成「Unexpected token '<'」，
       // 422 的 detail 陣列也才不會印成 [object Object]。
       const data = await api('/api/remote/pack', {
@@ -2033,7 +2307,7 @@ export default function App() {
         sweeps,
         error_tolerance_pct: parseFloat(errorTolerance) || 0.1,
         siwave_num_interp_points: 150,
-        num_cores: parseInt(solverCores, 10) || 12,
+        num_cores: solverCoresValue,
         segment_indices: [],
       })
       const packedTxt = (data.packed || [])
@@ -2048,12 +2322,13 @@ export default function App() {
         t.appFlow.next +
         t.appFlow.step1WaitForCopyingToFinishThen +
         t.appFlow.step2DoubleClickRunAllBatOn +
-        t.appFlow.step3CopyTheResultsFolderBackWhen
+        t.appFlow.step3CopyTheResultsFolderBackWhen,
+        'success',
       )
       // 換成新的時間戳：同一個資料夾再匯出一次會被後端擋下。
       setPackDir(suggestPackDir(metadataPath))
     } catch (e: any) {
-      alert(t.appFlow.failedToCreateSolvePackage + (e?.message || errorText(e, lang)))
+      alert(t.appFlow.failedToCreateSolvePackage + (e?.message || errorText(e, lang)), 'error')
     } finally {
       setPackBusy(false)
     }
@@ -2085,10 +2360,11 @@ export default function App() {
       const missTxt = (data.missing || []).length
         ? t.appFlow.missingSegments + (data.missing as any[]).join(t.appFlow.listSeparator)
         : ''
-      alert(t.appFlow.retrieved + (okTxt || t.appFlow.none) + badTxt + unusableTxt + missTxt)
+      alert(t.appFlow.retrieved + (okTxt || t.appFlow.none) + badTxt + unusableTxt + missTxt,
+        okTxt && !badTxt && !unusableTxt && !missTxt ? 'success' : 'warning')
       await loadSegmentSolverPlan(metadataPath, false)
     } catch (e: any) {
-      alert(t.appFlow.failedToRetrieveResults + (e?.message || errorText(e, lang)))
+      alert(t.appFlow.failedToRetrieveResults + (e?.message || errorText(e, lang)), 'error')
     } finally {
       setIngestBusy(false)
     }
@@ -2108,18 +2384,27 @@ export default function App() {
   const loadFunctions: AnsysFunction[] = /\.tgz\s*"?$/i.test(inputPath) ? ['odbpp_import'] : []
   const loadBlock = licenseBlock(licenseStatus, loadFunctions)
   const handleScheduleStart = async () => {
+    if (schedStartRef.current || schedStatus?.running || cascadeBusy || circuitBusyRef.current) return
     const metadataPath = normalizeUserPath(schedMetaPath)
     if (!metadataPath) { alert(t.appFlow.runNSegmentSplittingFirstOrEnter); return }
+    if (solverCoresValue === null) { alert(t.solverCores.invalid); return }
     setSchedMetaPath(metadataPath)
+    // 同步 ref 擋下同一影格的重複點擊；狀態立即顯示，涵蓋讀取計畫的等待。
+    schedStartRef.current = true
+    setSchedStartingAt(Date.now() / 1000)
+    setSchedStartPhase((t) => t.operationFeedback.loadingPlan)
     try {
       let plans = segmentSolverPlans
-      if (plans.length === 0) {
+      if (plans.length === 0 || (loadedPlanPath.current !== metadataPath
+          && normalizeUserPath(segRun?.metadata_path || '') !== metadataPath)) {
         const loaded = await loadSegmentSolverPlan(metadataPath, false)
+        if (!loaded) return
         plans = loaded?.segments || []
       }
       const segmentSolvers = Object.fromEntries(
         plans.map((plan: SegmentSolverPlan) => [plan.index, plan.requested_solver])
       )
+      setSchedStartPhase((t) => t.operationFeedback.startingSchedule)
       const s = await api('/api/schedule/start', {
         metadata_path: metadataPath,
         solver: plans.length > 0 ? 'mixed' : 'hfss',
@@ -2129,7 +2414,7 @@ export default function App() {
         error_tolerance_pct: parseFloat(errorTolerance) || 0.1,
         siwave_num_interp_points: 150,
         hfss_mesh_method: hfssMeshMethod,
-        num_cores: parseInt(solverCores, 10) || 12,
+        num_cores: solverCoresValue,
         memory_percent: parseInt(solverMemoryPercent, 10) || 90,
         solution_freq: parseFloat(solutionFreq) || 25,
         max_passes: parseInt(maxPasses, 10) || 20,
@@ -2141,7 +2426,10 @@ export default function App() {
       })
       setSchedStatus(s)
     } catch (e) {
-      alert(t.appFlow.failedToStartSchedule + errorText(e, lang))
+      alert(t.appFlow.failedToStartSchedule + errorText(e, lang), 'error')
+    } finally {
+      schedStartRef.current = false
+      setSchedStartingAt(null)
     }
   }
 
@@ -2149,42 +2437,53 @@ export default function App() {
     try {
       const s = await api('/api/schedule/stop', {})
       setSchedStatus(s)
-      // SIwave 段沒有中途停止的方法，要等它解完（#0074）：照實告訴使用者在等什麼。
+      // SIwave 段沒有中途停止的方法，要等它解完：照實告訴使用者在等什麼。
       if (s?.stop_message) alert(t.appFlow.stopRequested + s.stop_message)
     } catch (e) {
-      alert(t.appFlow.stopFailed + errorText(e, lang))
+      alert(t.appFlow.stopFailed + errorText(e, lang), 'error')
     }
   }
 
-  /** 上一次成功讀進來的 segments.json。換了一份就要把「使用者選過網格方法」
-   *  的旗標清掉：那個選擇屬於上一份分段，留著會讓新檔的網格方法永遠回寫不
-   *  進來（下拉顯示 PhiPlus，實際用的是新檔裡寫的另一個值）。 */
+  /** 只保留最近一次成功載入的路徑；過時回應不得覆蓋較新的分段來源。 */
   const loadedPlanPath = useRef('')
+  const segPlanLoadRequest = useRef(0)
+  const [segPlanLoadError, setSegPlanLoadError] = useState<unknown>(null)
 
-  const loadSegmentSolverPlan = async (metadataPath = schedMetaPath, showError = true) => {
+  const loadSegmentSolverPlan = async (metadataPath = schedMetaPath, showError = true,
+                                       _opts: { restoring?: boolean } = {}) => {
     const path = normalizeUserPath(metadataPath)
+    const request = ++segPlanLoadRequest.current
+    setSegPlanLoadError(null)
+    // 檔案重載是新的呈現來源，不能沿用舊刀位或舊 EDB 的分段按鈕。
+    // 先撤銷整組狀態，失敗時也不會留下「新路徑＋舊執行結果」。
+    loadedPlanPath.current = ''
+    setSegAnalysis(null)
+    setComplexityAnalysis(null)
+    setSegRun(null)
+    setActiveSegIdx(-1)
+    setSegmentSolverPlans([])
+    setSegPlanBandwidthGHz(undefined)
+    setSegFollowPlan(null)
     if (!path) return null
     try {
       const data = await api(`/api/schedule/plan?metadata_path=${encodeURIComponent(path)}`)
-      // 讀成功了才算「換過檔」——讀失敗時清掉旗標只是白白丟掉使用者的選擇。
-      if (path !== loadedPlanPath.current) hfssMeshMethodTouched.current = false
+      if (request !== segPlanLoadRequest.current) return null
+      if (!Array.isArray(data.segments) || data.segments.length === 0) {
+        throw flowError(t => t.appFlow.noUsableSegments)
+      }
       loadedPlanPath.current = path
       setSegmentSolverPlans(data.segments || [])
       setSegPlanBandwidthGHz(data.segments?.length
         ? (data.segments[0].required_bandwidth_ghz ?? undefined) : undefined)
       setShowSolverRegionOverlay(true)
       // 載入的檔案就是要求解的東西，預覽改跟著它；畫面上的分析段數對不上時
-      // 改畫檔案自己的切點，不留舊段（卡 0121）。
+      // 改畫檔案自己的切點，不留舊段。
       setSegFollowPlan({ source: 'file', direction: data.direction, positions_mm: data.positions_mm || [] })
-      // 回寫分段當時使用的網格方法，避免重新載入後靜默改用預設值。
-      // 反過來，使用者這一輪已經自己選過的話就不能蓋掉他——這個端點對舊檔
-      // 一律回預設值，無條件採用等於把手選悄悄改回 PhiPlus。
-      if (data.hfss_mesh_method && !hfssMeshMethodTouched.current) {
-        setHfssMeshMethod(data.hfss_mesh_method)
-      }
       return data
     } catch (error) {
-      if (showError) alert(t.appFlow.failedToLoadMixedSolverPlan + errorText(error, lang))
+      if (request !== segPlanLoadRequest.current) return null
+      setSegPlanLoadError(error)
+      if (showError) alert(t.appFlow.failedToLoadMixedSolverPlan + errorText(error, lang), 'error')
       return null
     }
   }
@@ -2219,7 +2518,7 @@ export default function App() {
       setSegmentSolverPlans(data.segments || plans)
     } catch (error) {
       await loadSegmentSolverPlan(metadataPath, false)
-      alert(t.appFlow.failedToSaveMixedSolverPlan + errorText(error, lang))
+      alert(t.appFlow.failedToSaveMixedSolverPlan + errorText(error, lang), 'error')
     }
   }
 
@@ -2232,7 +2531,7 @@ export default function App() {
     if (
       requestedSolver === 'siwave'
       && current.recommended_solver === 'hfss'
-      && !confirm(t.appFlow.segmentHasA3dElectromagneticComplexityScore(index, current.complexity_score))
+      && !await confirm(t.publicUi.changeSolver)
     ) return
     const next = segmentSolverPlans.map(plan => plan.index === index
       ? {
@@ -2252,7 +2551,7 @@ export default function App() {
     if (
       preset === 'siwave'
       && segmentSolverPlans.some(plan => plan.recommended_solver === 'hfss')
-      && !confirm(t.appFlow.hfssIsRecommendedForSomeSegmentsDue)
+      && !await confirm(t.appFlow.hfssIsRecommendedForSomeSegmentsDue)
     ) return
     // 「全部改 HFSS／SIwave」是對每一段都下指令，整批都算明確指派。
     //
@@ -2276,17 +2575,21 @@ export default function App() {
   }
 
   const handlePreciseBoundaryPreview = async () => {
+    if (!validLengths()) return
     if (signalNets.length === 0) { alert(t.appFlow.selectSignalNetsFirst); return }
     if (refNets.length === 0) { alert(t.appFlow.selectReferenceNetsFirstEGGnd); return }
     setLoadingMsg((t) => t.appFlow.analyzingTheExactBoundaryWithThePyedb)
     setIsLoading(true)
+    setCutoutStopping(false)
+    setBoundaryPreviewStartedAt(Date.now() / 1000)
     try {
-      const data = await api('/api/cutout/preview_boundary', {
+      const data = await runBoundaryPreviewJob(api, {
         signal_nets: signalNets,
         reference_nets: refNets,
-        expansion_mm: parseFloat(expansionMm) || 2,
+        expansion_mm: Number(expansionMm),
         extent_type: extentType,
-      })
+      }, { started: job => setCutoutJobId(job.job_id) })
+      if (!data) return
       const actualExtent = String(data.actual_extent_type || extentType)
       setPreciseBoundaryPreview(data.estimated_boundary_mm || null)
       setPreciseBoundaryPreviewKey(
@@ -2305,8 +2608,11 @@ export default function App() {
         )
       }
     } catch (e) {
-      alert(t.appFlow.exactCutoutBoundaryAnalysisFailed + errorText(e, lang))
+      alert(t.appFlow.exactCutoutBoundaryAnalysisFailed + errorText(e, lang), 'error')
     } finally {
+      setBoundaryPreviewStartedAt(null)
+      setCutoutJobId('')
+      setCutoutStopping(false)
       setIsLoading(false)
     }
   }
@@ -2324,7 +2630,7 @@ export default function App() {
       })
       setSchedStatus(status)
     } catch (e) {
-      alert(t.appFlow.failedToStartTouchstoneReExport + errorText(e, lang))
+      alert(t.appFlow.failedToStartTouchstoneReExport + errorText(e, lang), 'error')
     }
   }
 
@@ -2332,6 +2638,10 @@ export default function App() {
   const CASC_COLORS = ['#00e5ff', '#7ee787', '#ff8c00', '#e040fb', '#ffd600', '#ff5252']
 
   const handleCascadeRun = async () => {
+    if (schedStartRef.current || schedStatus?.running) {
+      alert(t.operationFeedback.waitForSolve)
+      return
+    }
     if (circuitBusyRef.current) {
       alert(t.appFlow.circuitQuickeyeIsProcessingWaitUntilIt)
       return
@@ -2339,21 +2649,28 @@ export default function App() {
     const metadataPath = normalizeUserPath(schedMetaPath)
     if (!metadataPath) { alert(t.appFlow.completeNSegmentSplittingAndScheduledSimulation); return }
     // 分段求解器混用時，串接要把各段內插到共同頻點（B03，Beta）；請求本身看不出來，這裡先問。
-    if (mixedSolverCascade && !confirmBetaUse(['B03'])) return
+    if (mixedSolverCascade && !await confirmBetaUse(['B03'])) return
     setSchedMetaPath(metadataPath)
     setCascadeBusy(true)
     try {
       const data = await api('/api/cascade/run', {
         metadata_path: metadataPath, output_path: '',
-        // 混合求解報告的語言：報告中心選過就照選的，否則跟介面語言（卡 0087）。
+        // 混合求解報告的語言：報告中心選過就照選的，否則跟介面語言。
         report_locale: effectiveReportLocale(lang),
       })
+      reportGeometryBindings.current.cascade = reportCascadeContext
+      if (cascadeMode === 'tool' && schedMetaPath && data.output_path) {
+        setReportWorkSources(previous => rememberWorkSource(previous, {
+          metadata_path: normalizeUserPath(schedMetaPath), board_path: reportBoardPath,
+          cascade_touchstone: data.output_path, channel_touchstone: data.output_path,
+        }))
+      }
       setCascadeResult(data)
       // 右側已經掛著的 IBIS／AMI／多道精靈要重讀「本階段的完整通道」，
       // 否則剛串好的這一份要等重新整理才會出現在捷徑裡。
       notifyCascadedChannelChanged()
     } catch (e) {
-      alert(t.appFlow.circuitCascadeFailed + errorText(e, lang))
+      alert(t.appFlow.circuitCascadeFailed + errorText(e, lang), 'error')
     } finally {
       setCascadeBusy(false)
     }
@@ -2368,6 +2685,13 @@ export default function App() {
     setCascadeBusy(true)
     try {
       const data = await api('/api/cascade/load_external', { path })
+      reportGeometryBindings.current.cascade = reportCascadeContext
+      if (cascadeMode === 'tool' && schedMetaPath && data.output_path) {
+        setReportWorkSources(previous => rememberWorkSource(previous, {
+          metadata_path: normalizeUserPath(schedMetaPath), board_path: reportBoardPath,
+          cascade_touchstone: data.output_path, channel_touchstone: data.output_path,
+        }))
+      }
       setCascadeResult(data)
       notifyCascadedChannelChanged()
       setActiveView('sparam')
@@ -2377,7 +2701,7 @@ export default function App() {
           + t.appFlow.andSymmetricPositiveNegativeNamesEG)
       }
     } catch (e) {
-      alert(t.appFlow.failedToLoadSParameterFile + errorText(e, lang))
+      alert(t.appFlow.failedToLoadSParameterFile + errorText(e, lang), 'error')
     } finally {
       setCascadeBusy(false)
     }
@@ -2400,36 +2724,33 @@ export default function App() {
         far: spData?.far || '',
         source: cascadeResult?.output_path || '',
       })
-      alert(t.appFlow.exportedCurves(data.series_count, data.output_path))
+      alert(t.appFlow.exportedCurves(data.series_count, data.output_path), 'success')
     } catch (e) {
-      alert(t.appFlow.excelExportFailed + errorText(e, lang))
+      alert(t.appFlow.excelExportFailed + errorText(e, lang), 'error')
     } finally {
       setSpExporting(false)
     }
   }
 
   const handleCascadeExportAs = async () => {
-    const metadataPath = normalizeUserPath(schedMetaPath)
-    if (!metadataPath) return
+    const sourcePath = cascadeResult?.output_path
+    if (cascadeBusy || !sourcePath) return
+    setCascadeBusy(true)
     try {
       // 帶著這次串接的產出當預設檔名與目錄開啟——檔名裡的埠數與日期
       // 正是之後辨識這個檔的依據，每次要人自己想一個並不合理。
-      const suggested = cascadeResult?.output_path || ''
+      const suggested = sourcePath
       const selected = await api(
         '/api/browse_touchstone_output'
         + (suggested ? `?suggested=${encodeURIComponent(suggested)}` : ''))
       if (!selected.path) return
-      setCascadeBusy(true)
-      const data = await api('/api/cascade/run', {
-        metadata_path: metadataPath,
+      const data = await api('/api/cascade/export_touchstone', {
+        source_path: sourcePath,
         output_path: selected.path,
-        report_locale: effectiveReportLocale(lang),
       })
-      setCascadeResult(data)
-      notifyCascadedChannelChanged()
-      alert(t.appFlow.completeTouchstoneExportedCascadeSummary(data.output_path, data.summary_path))
+      alert(t.appFlow.touchstoneCopyExported(data.output_path), 'success')
     } catch (e) {
-      alert(t.appFlow.touchstoneExportFailed + errorText(e, lang))
+      alert(t.appFlow.touchstoneExportFailed + errorText(e, lang), 'error')
     } finally {
       setCascadeBusy(false)
     }
@@ -2454,7 +2775,7 @@ export default function App() {
     try {
       const selected = await api('/api/browse_circuit_output')
       if (!selected.path) return
-      if (!confirm(
+      if (!await confirm(
         t.appFlow.startASeparateAedtCircuitSessionAnd(circuitExportMode === 'segments' ? t.appFlow.nSegmentDemonstration : t.appFlow.completeChannel, selected.path),
       )) return
       setCircuitResult(null)
@@ -2467,10 +2788,10 @@ export default function App() {
         overwrite: true,
       })
       setCircuitResult(data)
-      alert(t.appFlow.pyaedtCircuitProjectExported(data.output_path))
+      alert(t.appFlow.pyaedtCircuitProjectExported(data.output_path), 'success')
     } catch (e) {
       setCircuitError((_t, lang) => errorText(e, lang))
-      alert(t.appFlow.circuitExportFailed + errorText(e, lang))
+      alert(t.appFlow.circuitExportFailed + errorText(e, lang), 'error')
     } finally {
       circuitBusyRef.current = false
       setCircuitBusy(false)
@@ -2489,6 +2810,7 @@ export default function App() {
       alert(t.appFlow.dataRateAndRiseTimeMustBe)
       return
     }
+    if (solverCoresValue === null) { alert(t.solverCores.invalid); return }
     const selectedPorts = eyeMode === 'differential'
       ? [eyeInputP, eyeInputN, eyeOutputP, eyeOutputN]
       : [eyeInputP, eyeOutputP]
@@ -2499,7 +2821,7 @@ export default function App() {
     const mapping = eyeMode === 'differential'
       ? t.appFlow.label218(eyeInputP, eyeInputN, eyeOutputP, eyeOutputN)
       : `${eyeInputP} → ${eyeOutputP}`
-    if (!confirm(
+    if (!await confirm(
       t.appFlow.confirmQuickeyeSettings +
       t.appFlow.mode(eyeMode === 'differential' ? t.appFlow.differential : t.appFlow.singleEnded) +
       t.appFlow.dataRateGbps(dataRate) +
@@ -2515,6 +2837,8 @@ export default function App() {
       setCircuitResult(null)
       setCircuitError('')
       setEyeImageRevision(0)
+      const reportEvidence = await captureBeforeAnalysis('quickeye', [cascadeResult.output_path],
+        [eyeMode, dataRate, riseTime, eyeInputP, eyeInputN, eyeOutputP, eyeOutputN])
       await api('/api/circuit/quick_eye', {
         touchstone_path: cascadeResult.output_path,
         mode: eyeMode,
@@ -2525,12 +2849,16 @@ export default function App() {
         output_p: eyeOutputP,
         output_n: eyeOutputN,
         confirmed: true,
-        num_cores: Number(solverCores) || 12,
+        num_cores: solverCoresValue,
       })
+      // 啟動回應沒有 started_at，立即讀取該次 job 身分；日後全域輪詢不能重新綁定。
+      const reportEyeState = await api('/api/circuit/quick_eye/status')
+      reportJobBindings.current.eye = { context: reportEyeContext, startedAt: reportEyeState.started_at, evidence: reportEvidence }
+      setEyeJob(reportEyeState)
       setActiveView('eye')
     } catch (e) {
       setCircuitError((_t, lang) => errorText(e, lang))
-      alert(t.appFlow.failedToStartEyeAnalysis + errorText(e, lang))
+      alert(t.appFlow.failedToStartEyeAnalysis + errorText(e, lang), 'error')
       circuitBusyRef.current = false
       setCircuitBusy(false)
     }
@@ -2554,10 +2882,11 @@ export default function App() {
     setSchedMetaPath(metadataPath)
     try {
       const g = await api('/api/cascade/preview', { metadata_path: metadataPath })
+      reportGeometryBindings.current.schematic = reportCascadeContext
       setSchematicGraph(g)
       setActiveView('schematic')
     } catch (e) {
-      alert(t.appFlow.previewFailed + errorText(e, lang))
+      alert(t.appFlow.previewFailed + errorText(e, lang), 'error')
     }
   }
 
@@ -2570,7 +2899,7 @@ export default function App() {
       const info = await api('/api/cascade/inspect_files', { paths: allPaths })
       setExtFiles(info.files)
     } catch (e) {
-      alert(t.appFlow.fileParsingFailed + errorText(e, lang))
+      alert(t.appFlow.fileParsingFailed + errorText(e, lang), 'error')
     }
   }
 
@@ -2585,14 +2914,15 @@ export default function App() {
         alert(t.appFlow.cannotSuggestConnectionsAutomaticallyPortNamesDo)
       }
     } catch (e) {
-      alert(t.appFlow.automaticSuggestionFailed + errorText(e, lang))
+      alert(t.appFlow.automaticSuggestionFailed + errorText(e, lang), 'error')
     }
   }
 
   // 外部檔案：本地建立示意圖（不打後端）
   const handleExtPreview = () => {
     if (extFiles.length === 0) return
-    setSchematicGraph({
+    reportGeometryBindings.current.schematic = reportCascadeContext
+      setSchematicGraph({
       blocks: extFiles.map(f => ({ label: f.name, sub_label: `${f.n_ports} port`, ports: f.port_names })),
       connections: extConns.map(c => ({
         a: { block: c.a_file, port: c.a_port },
@@ -2604,6 +2934,10 @@ export default function App() {
   }
 
   const handleExtRun = async () => {
+    if (schedStartRef.current || schedStatus?.running) {
+      alert(t.operationFeedback.waitForSolve)
+      return
+    }
     if (circuitBusyRef.current) {
       alert(t.appFlow.circuitQuickeyeIsProcessingWaitUntilIt)
       return
@@ -2618,9 +2952,16 @@ export default function App() {
         shorts: extShorts,
         output_path: '',
       })
+      reportGeometryBindings.current.cascade = reportCascadeContext
+      if (cascadeMode === 'tool' && schedMetaPath && data.output_path) {
+        setReportWorkSources(previous => rememberWorkSource(previous, {
+          metadata_path: normalizeUserPath(schedMetaPath), board_path: reportBoardPath,
+          cascade_touchstone: data.output_path, channel_touchstone: data.output_path,
+        }))
+      }
       setCascadeResult(data)
     } catch (e) {
-      alert(t.appFlow.circuitCascadeFailed + errorText(e, lang))
+      alert(t.appFlow.circuitCascadeFailed + errorText(e, lang), 'error')
     } finally {
       setCascadeBusy(false)
     }
@@ -2757,7 +3098,7 @@ export default function App() {
    *  每個 Preview2D 各有一份 `visibleNets`，所以在完整 Layout 篩到只剩要看的
    *  那條之後，切到 TDR 分頁仍然是整片板子——阻抗標記被其他銅箔蓋住，
    *  而使用者以為自己已經篩過了。共用一個開關，兩邊就會一起變。 */
-  const [layoutOnlySelectedNets, setLayoutOnlySelectedNets] = useState(false)
+  const [layoutOnlySelectedNets, setLayoutOnlySelectedNets] = useSessionState('layoutOnlySelectedNets', false)
   // 分段切面位置 → 排除區輸入（axis 0 = X 座標上的縱切）
   const tdrCuts = complexityAnalysis
     ? complexityAnalysis.cuts.map(c => ({
@@ -2772,12 +3113,15 @@ export default function App() {
   useEffect(() => {
     const touchstonePath = cascadeResult?.output_path
     setTdrSuggestion(null)
+    setTdrSuggestionError(null)
+    setTdrSuggestionLoading(false)
     setTdrJob(null)
     setTdrMarkers(null)
     setTdrMapError('')
     setTdrAnalysisIdx(0)
     if (!touchstonePath || !show.tdr) return
     let cancelled = false
+    setTdrSuggestionLoading(true)
     api('/api/tdr/suggest', { touchstone_path: touchstonePath })
       .then(suggestion => {
         if (cancelled) return
@@ -2791,10 +3135,13 @@ export default function App() {
         setTdrOutputP(suggestion.suggested_mapping?.output_p || '')
         setTdrOutputN(suggestion.suggested_mapping?.output_n || '')
       })
-      .catch(() => { if (!cancelled) setTdrSuggestion(null) })
+      .catch(error => {
+        if (!cancelled) setTdrSuggestionError(error)
+      })
+      .finally(() => { if (!cancelled) setTdrSuggestionLoading(false) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cascadeResult, show.tdr])
+  }, [cascadeResult, show.tdr, tdrSuggestionRevision])
 
   // 介電常數由疊構自動取得（厚度加權平均），不讓使用者填——
   // 填錯的 Dk 會給出看起來很篤定、位置卻整段平移的標記。
@@ -2898,11 +3245,12 @@ export default function App() {
         if (cancelled) return
         const methodTag = analysis.method === 'group_delay' ? 'A'
           : analysis.method === 'end_anchor' ? t.appFlow.anchor : 'B'
+        reportMarkerBinding.current = reportMarkerContext
         setTdrMarkers(result.markers.map((m: any, i: number): TdrMarkerSpan => ({
           points: m.points,
           distance_mm: m.distance_mm,
           excluded: m.excluded,
-          label: t.appFlow.mm(methodTag, i + 1, m.distance_mm.toFixed(1))
+          label: `${methodTag}${i + 1}`
             + (m.excluded ? t.appFlow.cutPlaneSeam : ''),
         })))
       })
@@ -2940,16 +3288,18 @@ export default function App() {
     const mapping = tdrMode === 'differential'
       ? t.appFlow.label218(tdrInputP, tdrInputN, tdrOutputP, tdrOutputN)
       : `${tdrInputP} → ${tdrOutputP}`
-    const ok = window.confirm(
+    const ok = await confirm(
       t.appFlow.confirmTdrSettings +
       t.appFlow.mode(tdrMode === 'differential' ? t.appFlow.differential : t.appFlow.singleEnded) +
       t.appFlow.probe(mapping) +
       t.appFlow.riseTimePsDerivedFromBandwidth(Number(tdrSuggestion.rise_time_ps).toFixed(2)) +
-      (lengthMm ? t.appFlow.channelLengthMmMethodAGroupDelay(Number(lengthMm).toFixed(2)) : '') +
+      (lengthMm ? t.appFlow.channelLengthMmMethodAGroupDelay(length(Number(lengthMm))) : '') +
       (dk !== null ? t.appFlow.dielectricConstantMethodBStackupDk(dk) : '') +
       t.appFlow.startBackgroundSolving)
     if (!ok) return
     try {
+      const reportEvidence = await captureBeforeAnalysis('tdr', [cascadeResult.output_path],
+        [tdrMode, tdrInputP, tdrInputN, tdrOutputP, tdrOutputN, dk, lengthMm, tdrSuggestion.rise_time_ps])
       const snapshot = await api('/api/tdr/start', {
         touchstone_path: cascadeResult.output_path,
         mode: tdrMode,
@@ -2961,11 +3311,12 @@ export default function App() {
         path_length_mm: lengthMm,
         confirmed: true,
       })
+      reportJobBindings.current.tdr = { context: reportTdrContext, startedAt: snapshot.started_at, evidence: reportEvidence }
       setTdrJob(snapshot)
       setTdrMarkers(null)
       setActiveView('tdr')
     } catch (e) {
-      alert(t.appFlow.failedToStartTdr + errorText(e, lang))
+      alert(t.appFlow.failedToStartTdr + errorText(e, lang), 'error')
     }
   }
 
@@ -2995,6 +3346,8 @@ export default function App() {
     setTmError('')
     setTmBusy(true)
     try {
+      const reportEvidence = await captureBeforeAnalysis('tdr-measured', [tmCsvPath.trim()],
+        [t0, tEnd, tdrPath?.length_mm, tdrDkHint, tmRise, tmTimeUnit])
       const result = await api('/api/tdr/measured/analyze', {
         csv_path: tmCsvPath.trim(),
         t0_ns: t0,
@@ -3004,6 +3357,7 @@ export default function App() {
         rise_time_ps: tmRise.trim() ? Number(tmRise) : null,
         time_unit: tmTimeUnit,
       })
+      reportJobBindings.current.tdr = { context: reportTdrContext, evidence: reportEvidence }
       // 塞進與模擬路同一個結果槽：曲線、劇變表、Layout 標記與
       // 「取此處截面」全部重用。輪詢只在 running 時覆寫，不會蓋掉它。
       setTdrAnalysisIdx(0)
@@ -3025,7 +3379,7 @@ export default function App() {
   //
   // 掃描不呼叫 AEDT：花掉一份 Q2D 授權才發現截面不能用，是最貴的學法。
 
-  // 換板子就把上一片的標註清掉，再讀回這一片自己的（ADR-0053）。留著舊的
+  // 換板子就把上一片的標註清掉，再讀回這一片自己的。留著舊的
   // 會讓人以為新板已經標註過。
   //
   // 相依要看 `fullScene` 而不是只看 `inputPath`：路徑欄一填好 inputPath 就變了，
@@ -3080,6 +3434,7 @@ export default function App() {
   const runCrossSectionScan = async (
     overrides: Record<string, string> = xsRoleOverrides,
   ) => {
+    if (!validLengths()) return
     if (!xsRegion || !xsCut) {
       setXsError((t) => t.appFlow.drawAWorkingRegionOnLayoutThen)
       return
@@ -3093,7 +3448,7 @@ export default function App() {
         coordinate_mm: xsCut.coordinateMm,
         x0_mm: xsRegion.x0Mm, y0_mm: xsRegion.y0Mm,
         x1_mm: xsRegion.x1Mm, y1_mm: xsRegion.y1Mm,
-        name: `XS_${xsCut.axis.toUpperCase()}_${xsCut.coordinateMm.toFixed(3)}`,
+        name: `XS_${xsCut.axis.toUpperCase()}_${length(xsCut.coordinateMm)}`,
         reference_nets: refNets,
         excluded_nets: [],
         role_overrides: overrides,
@@ -3139,10 +3494,11 @@ export default function App() {
     }
   }
 
+  const xsReadable = Boolean(xsJob?.result || xsJob?.running)
+
   // 背景求解狀態輪詢（仿眼圖與 TDR）。開頁時也問一次：工作是後端在跑的，
   // 重新整理之後前端沒有這一下就接不上，進度會整個消失。
   useEffect(() => {
-    if (!show.crosssection) return
     let cancelled = false
     const poll = async () => {
       try {
@@ -3155,7 +3511,7 @@ export default function App() {
       } catch { /* 後端還沒起來就下次再問 */ }
     }
     poll()
-    // 沒有工作在跑就不要一直問。開頁那一次（上面的 `poll()`）已經接上後端
+    // 沒有工作在跑就不要一直問。開頁那一次（上面的 `poll`）已經接上後端
     // 既有的工作；之後 running 為 false 還每 8 秒問一次，是在對一個永遠不會
     // 變的答案發請求——實測閒置 17 分鐘打了 132 次，後端日誌整片都是它，
     // 真正在發生的事反而看不到。TDR 與眼圖那兩條輪詢本來就是這個形狀。
@@ -3169,7 +3525,7 @@ export default function App() {
   useEffect(() => {
     // 這裡刻意**不先清空**。重算只要一百毫秒，先清空會讓整塊對照消失再出現，
     // 在輪詢的節奏下就是規律的閃爍。算好再換掉，畫面才不會跳。
-    if (!show.crosssection || !show.tdr) { setXsCompare(null); return }
+    if (!betaEnabled || !show.crosssection || !show.tdr) return
     const solved = ((xsJob?.result?.cuts || []) as any[])
       .filter(c => c.solved && c.single_ended
         && Object.keys(c.single_ended).length > 0)
@@ -3195,12 +3551,15 @@ export default function App() {
       resolution_mm: analysis.resolution_mm || 0,
       signal_nets: [tdrNet],
     })
-      .then(data => { if (!cancelled) setXsCompare(data) })
+      .then(data => { if (!cancelled) {
+        reportComparisonBinding.current = reportCompareContext
+        setXsCompare(data)
+      } })
       .catch(() => { /* 對不起來就不顯示，不用打擾使用者 */ })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [xsJob?.result, tdrJob?.result, tdrAnalysisIdx, tdrPath, tdrNet,
-      show.crosssection, show.tdr])
+      show.crosssection, show.tdr, betaEnabled])
 
   /** 截面阻抗快照要帶進報告的數字。圖上的字縮小後未必讀得出來。 */
   const crossSectionReportMetadata = (): Record<string, any> => {
@@ -3235,8 +3594,8 @@ export default function App() {
     }
     if (xsScan) {
       meta[metadataLabels.currentCuts] = `${xsScan.cut.name || ''} `
-        + `${xsScan.cut.axis.toUpperCase()} = ${xsScan.cut.coordinate_mm.toFixed(3)} mm`
-      meta[metadataLabels.sampleSpacing] = `${xsScan.resolution_um.toFixed(1)} µm`
+        + `${xsScan.cut.axis.toUpperCase()} = ${length(xsScan.cut.coordinate_mm)} ${unit}`
+      meta[metadataLabels.sampleSpacing] = `${length(xsScan.resolution_um, 'um')} ${unit}`
       meta[metadataLabels.conductorCount] = xsScan.plan.conductor_count
     }
     if (xsCompare?.summary?.comparable) {
@@ -3244,7 +3603,7 @@ export default function App() {
       meta[metadataLabels.comparisonWithTdr] = t.appFlow.comparableCuts(s.comparable)
         + t.appFlow.medianDifference((s.median_delta_ohm ?? 0).toFixed(4))
         + t.appFlow.maximum(((s.worst_relative ?? 0) * 100).toFixed(2), s.worst ?? '')
-      meta[metadataLabels.tdrSpatialResolution] = `${s.resolution_mm.toFixed(3)} mm`
+      meta[metadataLabels.tdrSpatialResolution] = `${length(s.resolution_mm)} ${unit}`
     }
     return meta
   }
@@ -3253,7 +3612,7 @@ export default function App() {
     if (!xsRegion || !xsCut) return null
     return {
       name: xsScan?.cut?.name
-        || `XS_${xsCut.axis.toUpperCase()}_${xsCut.coordinateMm.toFixed(3)}`,
+        || `XS_${xsCut.axis.toUpperCase()}_${length(xsCut.coordinateMm)}`,
       axis: xsCut.axis,
       coordinate_mm: xsCut.coordinateMm,
       region: {
@@ -3272,12 +3631,14 @@ export default function App() {
     // 這不是禮貌性確認：accurate 在導體內部解場，時間是 standard 的三倍以上。
     const label = { fast: t.appFlow.quick, standard: t.appFlow.standard, accurate: t.appFlow.highAccuracy }[xsSolveMode]
       || xsSolveMode
-    if (!window.confirm(
+    if (!await confirm(
       t.appFlow.solveCuts(cuts.length)
-      + cuts.map(c => t.appFlow.mm294(c.name, c.axis.toUpperCase(), c.coordinate_mm.toFixed(3))).join('\n')
+      + cuts.map(c => t.appFlow.mm294(c.name, c.axis.toUpperCase(), length(c.coordinate_mm))).join('\n')
       + t.appFlow.accuracyAdaptiveFrequency(label, xsFrequency)
       + t.appFlow.aedtWillOpenAndUseOneQ2d)) return
     try {
+      const reportEvidence = await captureBeforeAnalysis('crosssection', [workingPath],
+        [cuts, refNets, xsFrequency, xsSolveMode, xsWidenCheck])
       const snapshot = await api('/api/cross-section/solve', {
         cuts,
         reference_nets: refNets,
@@ -3285,6 +3646,7 @@ export default function App() {
         solve_mode: xsSolveMode,
         widen_factor: xsWidenCheck ? WIDEN_FACTOR : 0,
       })
+      reportJobBindings.current.xs = { context: reportXsContext, startedAt: snapshot.started_at, evidence: reportEvidence }
       setXsJob(snapshot)
       setXsResultIdx(0)
       setActiveView('crosssection')
@@ -3338,7 +3700,7 @@ export default function App() {
         setXsError('')
       }
     } catch (e) {
-      alert(t.appFlow.failedToCreateCut + errorText(e, lang))
+      alert(t.appFlow.failedToCreateCut + errorText(e, lang), 'error')
     } finally {
       setXsFromTdrBusy(false)
     }
@@ -3346,6 +3708,7 @@ export default function App() {
 
   /** 「沿線取樣 N 條」：一次鋪一排，角度過不了的跳過並回報。 */
   const handleSampleAlongTrace = async () => {
+    if (!validLengths()) return
     const base = tdrShortcutPayload()
     if (!base) { alert(t.appFlow.loadTheBoardAndCalculateTheTdr); return }
     const spacing = Number(xsSampleSpacingMm)
@@ -3378,17 +3741,17 @@ export default function App() {
       // 跳過幾條一定要講出來——靜靜略過會讓人以為那一段沒問題，
       // 而那一段正好是最可能有問題的地方。
       setXsError((t, lang) => {
-        const parts = [t.appFlow.createdCutsAlongThePathActualSpacing(cuts.length, data.actual_spacing_mm.toFixed(2))]
-        if (data.note) parts.push(pickText(data, 'note', lang))
+        const parts = [t.appFlow.createdCutsAlongThePathActualSpacing(cuts.length, length(data.actual_spacing_mm))]
+        if (data.note) parts.push(pickText(data, 'note', lang, unit))
         if (skipped.length) {
           parts.push(t.appFlow.samplePointsWereSkippedBecauseTheAngle(skipped.length)
-            + skipped.map((s: any) => t.appFlow.mm311(s.distance_mm.toFixed(1), s.angle_deg?.toFixed(0) ?? '?')).join(t.appFlow.listSeparator)
+            + skipped.map((s: any) => t.appFlow.mm311(length(s.distance_mm), s.angle_deg?.toFixed(0) ?? '?')).join(t.appFlow.listSeparator)
             + t.appFlow.theseLocationsAreBendsA2dCross)
         }
   return parts.join('\n')
       })
     } catch (e) {
-      alert(t.appFlow.samplingAlongThePathFailed + errorText(e, lang))
+      alert(t.appFlow.samplingAlongThePathFailed + errorText(e, lang), 'error')
     } finally {
       setXsFromTdrBusy(false)
     }
@@ -3420,7 +3783,8 @@ export default function App() {
   // nowTick 停在開頁那一刻，減去比它晚的 started_at 得到負數，再被
   // Math.max(0, …) 夾成 0。看起來像計時器壞了，實際上是它根本沒在跳。
   const anyJobRunning = Boolean(
-    schedStatus?.running || eyeJob?.running || tdrJob?.running || xsJob?.running)
+    scheduleBusy || eyeJob?.running || tdrJob?.running || xsJob?.running
+    || boundaryPreviewStartedAt !== null)
   useEffect(() => {
     if (!anyJobRunning) return
     setNowTick(Date.now() / 1000)          // 立刻對時，不要先顯示一秒的 0
@@ -3440,6 +3804,163 @@ export default function App() {
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // ── 關窗保存／放棄工作階段────────────────────────────────────────
+  //
+  // 開窗：main.tsx 已讀回快照，各欄位初值就是快照的值；這裡再把板子接回來
+  // （後端還開著就不重開 EDB），載入流程會重設網路與輸出路徑，所以載完再
+  // 整批套回一次，最後讀分段計畫顯示各段求解狀態。排程還在跑的話，上面的
+  // /api/schedule/status 已經接上輪詢。還原完成前不自動保存，免得半途的狀態
+  // 蓋掉完整的快照。
+  const [sessionNotices, setSessionNotices] = useState<
+    { kind: 'ok' | 'warn'; text: (t: Messages) => string }[]>([])
+  const pushSessionNotice = (kind: 'ok' | 'warn', text: (t: Messages) => string) =>
+    setSessionNotices(list => [...list, { kind, text }])
+  const [autosaveError, setAutosaveError] = useState('')
+  const [closeRequest, setCloseRequest] = useState<CloseRequestPayload | null>(null)
+  const sessionReady = useRef(false)
+  const sessionClosing = useRef(false)
+  const sessionOwnerLost = useRef(false)
+  const restoreStarted = useRef(false)
+  const autosaver = useMemo(() => createAutosaver(async () => {
+    try {
+      await putSessionSnapshot(sessionData())
+      setAutosaveError('')
+    } catch (error) {
+      if ((error as { status?: number })?.status === 409) {
+        // 另一個視窗後來連上，快照歸它；這個視窗不再寫（後端也會擋）。
+        if (!sessionOwnerLost.current) {
+          sessionOwnerLost.current = true
+          pushSessionNotice('warn', tt => tt.closeSession.otherWindow)
+        }
+        return
+      }
+      setAutosaveError(error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  }, SESSION_AUTOSAVE_MS), [])
+  useEffect(() => onSessionChange(() => {
+    if (sessionReady.current && !sessionClosing.current && !sessionOwnerLost.current) autosaver.markDirty()
+  }), [autosaver])
+
+  // 分段結果：存的時候拿掉預覽幾何。
+  const segRunRef = useRef(segRun)
+  segRunRef.current = segRun
+  useEffect(() => registerSessionField('segRun', () => {
+    const run = segRunRef.current
+    return run ? { ...run, previews: run.previews.map(() => null) } : null
+  }, value => setSegRun(value as SegmentRunResult | null), null), [])
+  useEffect(() => { notifySessionChange() }, [segRun])
+
+  // ：S 參數結果路徑存進快照，重開時以檢視端點接回（到期也可看）。
+  useSparamViewPersistence(cascadeResult, sessionReady)
+
+  // 心跳：背景工作做完時，後端要等連著的視窗都不在了才收尾（重開的視窗、
+  // 瀏覽器分頁都靠這個留住後端）。關窗流程開始後就不再送。
+  useEffect(() => {
+    const beat = () => {
+      if (!sessionClosing.current) void sendSessionHeartbeat().catch(() => undefined)
+    }
+    const timer = window.setInterval(beat, HEARTBEAT_MS)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  // 純瀏覽器模式攔不到 X：離開頁面時把最新狀態送出去（keepalive，頁面關了也送得到）。
+  useEffect(() => {
+    const onPageHide = () => {
+      if (!sessionReady.current || sessionClosing.current || sessionOwnerLost.current) return
+      autosaver.stop()
+      void putSessionSnapshot(sessionData(), true).catch(() => undefined)
+    }
+    window.addEventListener('pagehide', onPageHide)
+    return () => window.removeEventListener('pagehide', onPageHide)
+  }, [autosaver])
+
+  useEffect(() => {
+    if (restoreStarted.current) return   // StrictMode 開發模式會跑兩次，板子只接一次
+    restoreStarted.current = true
+    const attach = getAttachResult()
+    void (async () => {
+      try {
+        if (attach.status === 'corrupt' || attach.status === 'unsupported') {
+          pushSessionNotice('warn', tt => tt.closeSession.snapshotUnusable(
+            attach.error || attach.status, attach.set_aside || ''))
+        }
+        if (attach.was_detached && attach.jobs?.length) {
+          const names = attach.jobs.map(job => (lang === 'en' && job.label_en) || job.label)
+          pushSessionNotice('ok', tt => tt.closeSession.backgroundJobs(names.join(tt.appFlow.listSeparator)))
+        }
+        if (attach.status !== 'ok' || !attach.snapshot) return
+        const snapshot = attach.snapshot
+        const fields = snapshot.data?.fields || {}
+        const savedAt = new Date(snapshot.saved_at)
+        const when = Number.isNaN(savedAt.getTime()) ? snapshot.saved_at : savedAt.toLocaleString(lang)
+        pushSessionNotice('ok', tt => tt.closeSession.restoredAt(when))
+        const board = typeof fields.workingPath === 'string' ? fields.workingPath : ''
+        if (board) {
+          const direct = typeof snapshot.board?.segment_ready === 'boolean'
+            ? snapshot.board.segment_ready : fields.directSegmentMode === true
+          const loaded = await handleLoadFile(direct, board, {
+            resume: true, quiet: true,
+            // 後端重啟過時照快照接回裁切狀態，「重新載入原始檔」才回得到最初的板子。
+            restoreOriginalPath: snapshot.board?.original_path,
+            restoreIsCut: snapshot.board?.is_cut,
+          })
+          if (!loaded.ok) {
+            const reason = loaded.error
+            pushSessionNotice('warn', tt => tt.closeSession.restoreBoardFailed(reason))
+          }
+          // 載入會重設網路、元件勾選、輸出路徑與頁面：套回快照。
+          applySessionFields(fields)
+          if (loaded.ok && (snapshot.board?.is_cut || fields.activeView === 'cut')) {
+            setCutScene(loaded.data.preview)
+          }
+        }
+        // 板子接不回（例如授權到期）也照樣接回既有 S 參數；只讀檔，不重跑串接。
+        const sparam = await restoreSparamView(fields, (url, body) => api(url, body))
+        if (sparam?.ok) {
+          setCascadeResult(sparam.data)
+          notifyCascadedChannelChanged()
+        } else if (sparam) {
+          const reason = errorText(sparam.error, lang)
+          pushSessionNotice('warn', tt => tt.closeSession.restoreSparamFailed(reason))
+        }
+        const plan = typeof fields.schedMetaPath === 'string' ? fields.schedMetaPath : ''
+        if (plan) await loadSegmentSolverPlan(plan, false, { restoring: true })
+      } finally {
+        sessionReady.current = true
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 視窗外殼按 X：顯示儲存／放棄對話框（純瀏覽器模式不會被呼叫）。
+  useEffect(() => installCloseRequestHandler(payload => {
+    setCloseRequest(payload)
+    return true
+  }), [])
+
+  const closeWindowWith = async (action: 'save' | 'discard') => {
+    sessionClosing.current = true
+    autosaver.stop()
+    try {
+      const { keep_backend, preferences_saved } = await closeSession(action, action === 'save' ? sessionData() : undefined)
+      // 訊息視窗不會擋住程式往下走：要等使用者按確定再關窗，不然還沒看到視窗就沒了。
+      if (preferences_saved === false) await alertMessageAndWait(t.userPreferences.saveError)
+      if (!(await finishShellClose(keep_backend))) throw new Error('pywebview finish_close')
+    } catch (error) {
+      // 視窗留著：重新連上（後端已讓這個視窗退休，不重連就不能再自動保存）。
+      sessionClosing.current = false
+      await attachSession()
+      autosaver.resume()
+      throw error
+    }
+  }
+
+  const cancelWindowClose = () => {
+    setCloseRequest(null)
+    cancelShellClose()
+  }
 
   // 段的狀態要靠輪詢才會更新：setSchedStatus 原本只在啟動、停止與重新匯出
   // 時被呼叫，畫面因此一直停在啟動當下的快照（每一段都「等待中」），要按了
@@ -3472,30 +3993,52 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schedStatus?.running])
 
+  // 排程跑完：分段表重讀 segments.json，各段的失敗原因才會出現。
+  const schedWasRunning = useRef(false)
+  useEffect(() => {
+    const running = Boolean(schedStatus?.running)
+    const finished = schedWasRunning.current && !running
+    schedWasRunning.current = running
+    const path = schedStatus?.metadata_path
+    if (finished && path && path === schedMetaPath) loadSegmentSolverPlan(path, false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schedStatus?.running])
+
   const handleComplexityRun = async () => {
     if (!complexityAnalysis?.feasible) {
       alert(t.appFlow.completeAnExecutableComplexityAnalysisFirst); return
     }
     if (!segOutputDir) { alert(t.appFlow.setASegmentOutputFolder); return }
+    const releases = complexityAnalysis.manual_d_release || []
+    if (releases.length && !await confirm(releaseHasNoGuarantee(releases)
+      ? t.appFlow.stitchReleaseNoGuaranteeRunConfirm(releases.length)
+      : t.appFlow.stitchReleaseRunConfirm(releases.length, releaseRunLimit(releases)))) return
     setLoadingMsg(
       (t) => t.appFlow.splittingIntoSegmentsEachSegmentRequiresA(complexityAnalysis.segments.length))
     setIsLoading(true)
     try {
       const data = await runSegmentJob('/api/segment/run', {
+        mode: 'complexity',
         signal_nets: signalNets,
         reference_nets: refNets,
-        // 執行前重驗證要和分析同一個切面頻率；判斷頻寬寫進每段建議（ADR-0070）。
+        // 執行前重驗證要和分析同一個切面頻率；判斷頻寬寫進每段建議。
         target_fmax_ghz: targetFmaxGHz,
         required_bandwidth_ghz: solverBandwidth.ghz,
         bandwidth_source: solverBandwidth.source,
-        cuts: complexityAnalysis.cuts.map(cut => ({
-          axis: cut.axis, position_mm: cut.position_mm,
-        })),
+        cuts: complexityCutRequests(complexityAnalysis),
         output_dir: segOutputDir,
         quality_threshold: segmentQuality,
         hfss_mesh_method: hfssMeshMethod,
+        // 重驗證要用分析時同一個放行設定；放行紀錄由後端重算後寫進 segments.json。
+        allow_stitch_release: Boolean(complexityAnalysis.allow_stitch_release),
       })
       if (!data) return               // 使用者不想覆寫舊結果
+      reportGeometryBindings.current.segment = reportGeometryContext
+      setReportQualityRecord(current => current?.context === reportGeometryContext
+        ? { ...current, data: { ...current.data, metadata_path: data.metadata_path } } : null)
+      // 分段在 session 當時開著的檔（workingPath）上做；鏈尾對得上才記 lineage。
+      setReportWorkSources(previous => rememberWorkSource(previous, segmentedWorkSource(
+        reportBoardPath, data.metadata_path, reportLineage, workingPath, refNets)))
       setSegRun(data)
       setActiveSegIdx(-1)
       setActiveView('segments')
@@ -3508,90 +4051,23 @@ export default function App() {
         path: segment.path,
         ...(segment.solver_plan || {}),
         box_mm: segment.box_mm,
+        manual_d_release: segmentReleases(data.cut_pairs, segment.index),
       })))
       setSegPlanBandwidthGHz(solverBandwidth.ghz)
       setSegFollowPlan({ source: 'run' })
       setShowSolverRegionOverlay(true)
     } catch (e) {
-      alert(t.appFlow.complexityBasedSplittingFailed + errorText(e, lang))
+      alert(t.appFlow.complexityBasedSplittingFailed + errorText(e, lang), 'error')
     } finally {
       setIsLoading(false)
     }
   }
 
-  /** 「依資料率自訂」：由資料率導出判斷頻寬，並顯示憑什麼是這個數字。
-   *  只寫進資料率那一邊，規範帶入的值不動（#0120）。 */
-  const deriveBandwidth = async () => {
-    const rate = normalizeDataRate(bandwidthState.rateInput)
-    if (rate === null) { alert(t.appFlow.enterADataRateFirst1866Or); return }
-    try {
-      const data = await api('/api/bandwidth/derive', { data_rate_gbps: rate })
-      const ghz = Number(data.usable_bandwidth_ghz)
-      setBandwidthState(prev => ({
-        ...prev, mode: 'rate', rate: { rateGbps: rate, ghz, basis: data.basis || '' },
-      }))
-      // 掃頻上限一併處理（HANDOFF 第 8 條）：固定 50 GHz 對 DDR3L-1866
-      // 是白算五倍頻寬。表還是預設形狀才提議帶入，而且先問過（#0120：
-      // 不靜默覆蓋）；使用者改過的表不動，只附建議。寫入時再檢查一次形狀，
-      // 等待回應期間表被改過就不動。
-      const cap = Number(data.sweep_max_ghz)
-      let note = ''
-      if (cap > 0) {
-        const end = `${Math.round(cap * 100) / 100}GHz`
-        const current = sweeps.length ? sweeps[sweeps.length - 1].end : ''
-        if (sweepsFollowDefault(sweeps) && current !== end) {
-          if (confirm(t.appFlow.deriveChangesSweepConfirm(current, end))) {
-            setSweeps(prev => sweepsFollowDefault(prev)
-              ? [...prev.slice(0, 2), { ...prev[2], end }] : prev)
-            note = t.appFlow.theFinalSweepUpperLimitNowUses(end)
-          } else {
-            note = t.appFlow.sweepLeftUnchangedSuggest(end)
-          }
-        } else if (sweeps.some(row => row.end !== end)) {
-          note = t.appFlow.youHaveEditedTheSweepTableSo(end)
-        }
-      }
-      setBandwidthNote((data.basis || '') + note)
-    } catch (e) {
-      alert(t.appFlow.bandwidthDerivationFailed + errorText(e, lang))
-    }
-  }
-
-  /** 判斷頻寬的來源寫成一句話（畫面與切換說明共用）。 */
-  const bandwidthSourceText = (resolved: ResolvedBandwidth, state: BandwidthState = bandwidthState) => {
-    switch (resolved.source) {
-      case 'override':
-        return state.overrideOrigin.startsWith('legacy:')
-          ? t.appView.bandwidthSourceLegacy(state.overrideOrigin.slice('legacy:'.length))
-          : t.appView.bandwidthSourceOverride
-      case 'spec':
-        return t.appView.bandwidthSourceSpec(
-          lang === 'en' ? state.spec?.labelEn || '' : state.spec?.label || '')
-      case 'rate':
-        return t.appView.bandwidthSourceRate(state.rate?.rateGbps ?? '')
-      case 'sweep':
-        return t.appView.bandwidthSourceSweep
-      default:
-        return t.appView.bandwidthSourceNone
-    }
-  }
-
-  /** 「12 GHz，規範 DDR4-3200」：確認框與切換說明共用。 */
-  const describeBandwidth = (ghz: number | null, source: ResolvedBandwidth['source'], s: BandwidthState) => {
-    const text = bandwidthSourceText({ ghz, source, invalidOverride: false, staleRate: false }, s)
-    return ghz === null ? text : t.appView.bandwidthWithSource(ghz, text)
-  }
-
-  /** 二選一的切換：兩邊的值都保留，切換後講清楚判斷頻寬從什麼變成什麼。 */
-  const pickBandwidthMode = (mode: BandwidthMode) => {
-    const before = bandwidthStateRef.current
-    const { state, change } = switchBandwidthMode(before, mode, targetFmaxGHz)
-    if (!change) return
-    setBandwidthState(prev => switchBandwidthMode(prev, mode, targetFmaxGHz).state)
-    setBandwidthNote(t.appFlow.bandwidthSwitched(
-      describeBandwidth(change.fromGhz, change.fromSource, before),
-      describeBandwidth(change.toGhz, change.toSource, state)))
-  }
+  const bandwidthSourceText = (_resolved: ResolvedBandwidth) => specName
+    ? t.appView.bandwidthSourceSpec(lang === 'en'
+      ? simulationResolved?.spec_label_en || specName
+      : simulationResolved?.spec_label || specName)
+    : t.appView.bandwidthSourceSweep
 
   /** 依目前的頻寬重算每段的求解器建議。
    *
@@ -3612,7 +4088,7 @@ export default function App() {
       setSegPlanBandwidthGHz(data.required_bandwidth_ghz ?? null)
       return data
     } catch (e) {
-      alert(t.appFlow.solverReassessmentFailed + errorText(e, lang))
+      alert(t.appFlow.solverReassessmentFailed + errorText(e, lang), 'error')
     }
   }
 
@@ -3640,6 +4116,12 @@ export default function App() {
         bandwidth_source: solverBandwidth.source,
       })
       if (!data) return               // 使用者不想覆寫舊結果
+      reportGeometryBindings.current.segment = reportGeometryContext
+      setReportQualityRecord(current => current?.context === reportGeometryContext
+        ? { ...current, data: { ...current.data, metadata_path: data.metadata_path } } : null)
+      // 分段在 session 當時開著的檔（workingPath）上做；鏈尾對得上才記 lineage。
+      setReportWorkSources(previous => rememberWorkSource(previous, segmentedWorkSource(
+        reportBoardPath, data.metadata_path, reportLineage, workingPath, refNets)))
       setSegRun(data)
       setActiveSegIdx(-1)
       setActiveView('segments')
@@ -3649,14 +4131,15 @@ export default function App() {
         path: segment.path,
         ...(segment.solver_plan || {}),
         box_mm: segment.box_mm,
+        manual_d_release: segmentReleases(data.cut_pairs, segment.index),
       })))
       setSegPlanBandwidthGHz(solverBandwidth.ghz)
       // 整片也要看得到求解器：預覽改成整塊一個區域，跟著表格 S1 的「指定」
-      // 變色；上一次分析的段與切面線不再疊上來（卡 0121）。
+      // 變色；上一次分析的段與切面線不再疊上來。
       setSegFollowPlan({ source: 'run' })
       setShowSolverRegionOverlay(true)
     } catch (e) {
-      alert(t.appFlow.wholeChannelSetupFailed + errorText(e, lang))
+      alert(t.appFlow.wholeChannelSetupFailed + errorText(e, lang), 'error')
     } finally {
       setIsLoading(false)
     }
@@ -3669,7 +4152,7 @@ export default function App() {
       const looser = segAnalysis.threshold_report.filter(r => r.feasible)
       alert(looser.length
         ? t.appFlow.noFeasibleCombinationOfCutsMeetsGrade(segAnalysis.quality_threshold)
-          + t.appFlow.relaxingTo(looser.map(r => t.appFlow.gradeMaximumSegmentMm(r.grade, r.max_segment_mm!.toFixed(1))).join(t.appFlow.listSeparator))
+          + t.appFlow.relaxingTo(looser.map(r => t.appFlow.gradeMaximumSegmentMm(r.grade, length(r.max_segment_mm!))).join(t.appFlow.listSeparator))
           + t.appFlow.isFeasibleChangeAcceptableGradeAndAnalyze
         : t.appFlow.noFeasibleCutsExistEvenAtGrade)
       return
@@ -3679,12 +4162,16 @@ export default function App() {
       return
     }
     if (segAnalysis.balance_warning
-        && !confirm(t.appFlow.segmentsAreSolvedSequentiallyTheLargestSegment(segAnalysis.balance_warning))) {
+        && !await confirm(t.appFlow.segmentsAreSolvedSequentiallyTheLargestSegment(pickText(segAnalysis, 'balance_warning', lang, unit)))) {
       return
     }
     if (segAnalysis.cuts.some(c => !c.valid || c.clearance_ok === false || c.poly_hit || c.risk_hit)) {
-      if (!confirm(t.appFlow.someCutPositionsHaveWarningsNonUnique)) return
+      if (!await confirm(t.appFlow.someCutPositionsHaveWarningsNonUnique)) return
     }
+    const releases = segAnalysis.manual_d_release || []
+    if (releases.length && !await confirm(releaseHasNoGuarantee(releases)
+      ? t.appFlow.stitchReleaseNoGuaranteeRunConfirm(releases.length)
+      : t.appFlow.stitchReleaseRunConfirm(releases.length, releaseRunLimit(releases)))) return
     setLoadingMsg((t) => t.appFlow.splittingIntoSegmentsEachSegmentRequiresA341(segAnalysis.cuts.length + 1))
     setIsLoading(true)
     try {
@@ -3696,12 +4183,19 @@ export default function App() {
         output_dir: segOutputDir,
         quality_threshold: segmentQuality,
         hfss_mesh_method: hfssMeshMethod,
-        // 原本兩個頻率都沒送：重驗證退回顆數規則，建議要靠事後重評補（#0120）。
+        // 原本兩個頻率都沒送：重驗證退回顆數規則，建議要靠事後重評補。
         target_fmax_ghz: targetFmaxGHz,
         required_bandwidth_ghz: solverBandwidth.ghz,
         bandwidth_source: solverBandwidth.source,
+        allow_stitch_release: Boolean(segAnalysis.allow_stitch_release),
       })
       if (!data) return               // 使用者不想覆寫舊結果
+      reportGeometryBindings.current.segment = reportGeometryContext
+      setReportQualityRecord(current => current?.context === reportGeometryContext
+        ? { ...current, data: { ...current.data, metadata_path: data.metadata_path } } : null)
+      // 分段在 session 當時開著的檔（workingPath）上做；鏈尾對得上才記 lineage。
+      setReportWorkSources(previous => rememberWorkSource(previous, segmentedWorkSource(
+        reportBoardPath, data.metadata_path, reportLineage, workingPath, refNets)))
       setSegRun(data)
       setActiveSegIdx(-1)   // 執行完先顯示整體視圖（完整板 + 切割線），方便確認每段位置
       setActiveView('segments')
@@ -3711,12 +4205,13 @@ export default function App() {
         path: segment.path,
         ...(segment.solver_plan || {}),
         box_mm: segment.box_mm,
+        manual_d_release: segmentReleases(data.cut_pairs, segment.index),
       })))
       setSegPlanBandwidthGHz(solverBandwidth.ghz)
       setSegFollowPlan({ source: 'run' })
       setShowSolverRegionOverlay(true)
     } catch (e) {
-      alert(t.appFlow.segmentSplittingFailed + errorText(e, lang))
+      alert(t.appFlow.segmentSplittingFailed + errorText(e, lang), 'error')
     } finally {
       setIsLoading(false)
     }
@@ -3739,98 +4234,66 @@ export default function App() {
   const [profileNames, setProfileNames] = useState<string[]>([])
   /** 內建規格（DDR、PCIe…，後端 settings_profiles.BUILTIN_PROFILES）：唯讀、不能刪。 */
   const [builtinProfiles, setBuiltinProfiles] = useState<ProfileListItem[]>([])
-  const builtinProfileNames = builtinProfiles.map(p => p.name)
-  const [selectedProfile, setSelectedProfile] = useState('')
+  const [selectedProfile, setSelectedProfile] = useSessionState('selectedProfile', '')
   const [profileMsg, setProfileMsg] = useFlowMessage('')
-  /** 存進設定檔的欄位。語意欄位對（getter, setter）——套用是**合併**：
-   *  舊設定檔缺的欄位保持現值，訊息講套用了哪些，不做無聲的重設。 */
-  const profileFields: Record<string, [() => any, (v: any) => void]> = {
-    sweepType: [() => sweepType, setSweepType],
-    sweeps: [() => sweeps, setSweeps],
-    // 套設定檔算是使用者定過這個值：套完之後掃頻表一變不可以把它算掉。
-    solutionFreq: [() => solutionFreq, pickSolutionFreq],
-    errorTolerance: [() => errorTolerance, setErrorTolerance],
-    maxPasses: [() => maxPasses, setMaxPasses],
-    maxDeltaS: [() => maxDeltaS, setMaxDeltaS],
-    maxRefinementPerPass: [() => maxRefinementPerPass, setMaxRefinementPerPass],
-    minConvergedPasses: [() => minConvergedPasses, setMinConvergedPasses],
-    hfssMeshMethod: [() => hfssMeshMethod, pickHfssMeshMethod],
-    expansionMm: [() => expansionMm, setExpansionMm],
-    extentType: [() => extentType, setExtentType],
-    portType: [() => portType, setPortType],
-  }
-  /** 判斷頻寬不走上面的逐欄合併：規範／資料率／覆寫三個值與來源要一起還原，
-   *  規則在 bandwidthSource.ts（#0120）。這兩個是舊設定檔就有的鍵，用來計數。 */
-  const legacyBandwidthKeys = ['dataRateGbps', 'usableBandwidthGHz']
   const refreshProfiles = async () => {
     try {
       const data = await api('/api/settings-profiles')
       const all = data.profiles || []
       setBuiltinProfiles(all.filter((p: any) => p.builtin))
-      setProfileNames(all.filter((p: any) => !p.builtin).map((p: any) => p.name))
+      const names = all.filter((p: any) => !p.builtin).map((p: any) => p.name)
+      setProfileNames(names)
+      if (selectedProfile && !names.includes(selectedProfile)) setSelectedProfile('')
     } catch { /* 清單失敗不打斷畫面 */ }
   }
   useEffect(() => { void refreshProfiles() }, [])
   const saveProfile = async () => {
-    const name = window.prompt(t.appFlow.profileNameEGDdr3l1866Standard)
+    if (!simulationReady) return
+    if (solverCoresValue === null) { alert(t.solverCores.invalid); return }
+    const name = (await promptMessage(t.appFlow.profileNameEGDdr3l1866Standard))?.trim()
     if (!name) return
-    const settings: Record<string, any> = {}
-    for (const [key, [get]] of Object.entries(profileFields)) settings[key] = get()
-    Object.assign(settings, bandwidthProfileSettings(bandwidthState))
-    const fieldCount = Object.keys(profileFields).length + legacyBandwidthKeys.length
+    const settings = { specName, maxFrequencyGHz: Number(maxFrequencyGHz), solverCores }
+    const fieldCount = 3
     try {
-      await api('/api/settings-profiles/save', { name, settings })
+      // 先新增，由後端在鎖內判同名；不信任可能過期的前端選單。
+      try {
+        await api('/api/settings-profiles/save', { name, settings })
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'settings.exists') throw error
+        const saved = await confirmProfileOverwrite(api, message => confirm(message),
+          name, settings, t.simulationSetup, builtinProfiles, lang)
+        if (!saved) return
+      }
       await refreshProfiles()
       setSelectedProfile(name)
       setProfileMsg((t) => t.appFlow.savedFields(name, fieldCount))
-    } catch (e) { alert(t.appFlow.saveFailed + errorText(e, lang)) }
+    } catch (e) { alert(t.appFlow.saveFailed + errorText(e, lang), 'error') }
   }
   const applyProfile = async (name: string) => {
+    const epoch = ++simulationChoiceEpoch.current
     try {
       const data = await api('/api/settings-profiles/get', { name })
+      if (epoch !== simulationChoiceEpoch.current) return
       const settings = data.settings || {}
-      // 使用者已經選定判斷頻寬（規範、資料率或覆寫），而這份設定檔會把它換成
-      // 另一個值或來源時先問，不靜默換掉（#0120）；取消就整份不套用。
-      // 讀 ref：等待回應期間使用者可能又改了欄位。
-      const current = bandwidthStateRef.current
-      const profileSweeps = Array.isArray(settings.sweeps) ? settings.sweeps : null
-      const nextSweepMax = profileSweeps?.length
-        ? parseFreqToGHz(profileSweeps[profileSweeps.length - 1].end) || null
-        : targetFmaxGHz
-      const nextBandwidth = bandwidthFromProfile(current, name, data)
-      const before = resolveSolverBandwidth(current, targetFmaxGHz)
-      const after = resolveSolverBandwidth(nextBandwidth, nextSweepMax)
-      const userChosen = before.source === 'spec' || before.source === 'rate' || before.source === 'override'
-      if (userChosen && (before.source !== after.source || before.ghz !== after.ghz)
-          && !confirm(t.appFlow.profileReplacesBandwidthConfirm(
-            pickText(data, 'label', lang) || name,
-            describeBandwidth(after.ghz, after.source, nextBandwidth),
-            describeBandwidth(before.ghz, before.source, current)))) {
-        return
-      }
-      const applied: string[] = []
-      for (const [key, value] of Object.entries(settings)) {
-        const field = profileFields[key]
-        if (field && value !== undefined) { field[1](value); applied.push(key) }
-      }
-      applied.push(...legacyBandwidthKeys.filter(k => k in settings))
-      setBandwidthState(prev => bandwidthFromProfile(prev, name, data))
-      if (nextBandwidth !== current) setBandwidthNote('')
-      const skipped = [...Object.keys(profileFields), ...legacyBandwidthKeys]
-        .filter(k => !(k in settings))
-      setProfileMsg((t, lang) => t.appFlow.appliedFieldsFrom(name, applied.length)
-        + (skipped.length ? t.appFlow.fieldsMissingFromTheProfileWereLeft(skipped.length) : t.appFlow.label348)
-        + (data.note ? t.appFlow.indentedNote(pickText(data, 'note', lang)) : ''))
-    } catch (e) { alert(t.appFlow.applyFailed + errorText(e, lang)) }
+      setSpecName(String(settings.specName || ''))
+      setMaxFrequencyGHz(String(settings.maxFrequencyGHz))
+      setSolverCores(String(settings.solverCores ?? DEFAULT_SOLVER_CORES))
+      setProfileMsg((t) => t.appFlow.appliedFieldsFrom(name, 3))
+    } catch (e) { alert(t.appFlow.applyFailed + errorText(e, lang), 'error') }
+  }
+  const chooseSpec = async (name: string) => {
+    if (!name) { simulationChoiceEpoch.current++; setSpecName(''); return }
+    // get 等待期間不改兩欄；成功後一起套用，避免新規範搭配舊上限。
+    await applyProfile(name)
   }
   const deleteProfile = async (name: string) => {
-    if (!window.confirm(t.appFlow.deleteProfile(name))) return
+    if (!await confirm(t.appFlow.deleteProfile(name))) return
     try {
       await api('/api/settings-profiles/delete', { name })
       setSelectedProfile('')
       await refreshProfiles()
       setProfileMsg((t) => t.appFlow.deleted(name))
-    } catch (e) { alert(t.appFlow.deleteFailed + errorText(e, lang)) }
+    } catch (e) { alert(t.appFlow.deleteFailed + errorText(e, lang), 'error') }
   }
 
   /** 依平面銅面積建議參考網路（HANDOFF 第 9 條）。
@@ -3838,28 +4301,34 @@ export default function App() {
   const [refSuggestions, setRefSuggestions] = useState<
     { net: string; area_cm2: number; polygons: number }[] | null>(null)
   const suggestRefsByCopper = async () => {
+    const epoch = boardAnalysisEpoch.current
     try {
       const data = await api('/api/nets/reference-suggestions', {})
+      if (epoch !== boardAnalysisEpoch.current) return
       setRefSuggestions(data.suggestions || [])
     } catch (e) {
-      alert(t.appFlow.suggestionFailed + errorText(e, lang))
+      if (epoch !== boardAnalysisEpoch.current) return
+      alert(t.appFlow.suggestionFailed + errorText(e, lang), 'error')
     }
   }
 
   // DDR 自動分類。純字串處理，後端不開 AEDT、不讀 EDB，所以按下去就回來。
   const handleClassifyNets = async () => {
     if (allNets.length === 0) { alert(t.appFlow.loadABoardFirst); return }
+    const epoch = boardAnalysisEpoch.current
     setDdrBusy(true)
     try {
       const data = await api('/api/nets/classify', { nets: allNets })
+      if (epoch !== boardAnalysisEpoch.current) return
       setDdrResult(data)
       // 預設只勾資料、選通與遮罩：那是一個位元組通道實際要一起分析的東西。
       // 時脈與位址不預設勾選——它們是命令匯流排，跟資料的分析方式不同。
       setDdrRoles(['DQ', 'DQS_P', 'DQS_N', 'DM'])
     } catch (err: any) {
-      alert(t.appFlow.ddrAutomaticClassificationFailed + (err?.message || err))
+      if (epoch !== boardAnalysisEpoch.current) return
+      alert(t.appFlow.ddrAutomaticClassificationFailed + (err?.message || err), 'error')
     } finally {
-      setDdrBusy(false)
+      if (epoch === boardAnalysisEpoch.current) setDdrBusy(false)
     }
   }
 
@@ -3870,6 +4339,7 @@ export default function App() {
     const picked = (ddrResult.rows || [])
       .filter((r: any) => ddrRoles.includes(r.role))
       .map((r: any) => r.net)
+      .filter((net: string) => allNets.includes(net))
     if (picked.length === 0) { alert(t.appFlow.noNetsMatchTheSelectedRoles); return }
     setSignalNets(prev => {
       const merged = [...prev]
@@ -3888,7 +4358,7 @@ export default function App() {
     const picked: string[] = [
       ...(lane.data || []), ...(lane.mask || []),
       ...(lane.strobe_p || []), ...(lane.strobe_n || []),
-    ]
+    ].filter(net => allNets.includes(net))
     if (picked.length === 0) return
     setSignalNets(picked)
     setRefNets(prev => prev.filter(n => !picked.includes(n)))
@@ -3928,7 +4398,7 @@ export default function App() {
     if (missing.length > 0) {
       alert(t.appFlow.importedSignalNetsWereNotFoundIn(matched.length, missing.length, missing.slice(0, 12).join('\n'), missing.length > 12 ? '\n…' : ''))
     } else {
-      alert(t.appFlow.importedSignalNets(matched.length))
+      alert(t.appFlow.importedSignalNets(matched.length), 'success')
     }
   }
 
@@ -3963,26 +4433,51 @@ export default function App() {
   // ── 選單列 ────────────────────────────────────────────
   // 畫面區讀英文 API 欄位；沒有英文的舊資料保留原文。
   const viewField = (item: unknown, key: string): string => {
-    if (!item || typeof item !== 'object') return ''
-    const fields = item as Record<string, unknown>
-    const english = fields[`${key}_en`]
-    const value = lang === 'en' && typeof english === 'string' && english
-      ? english : fields[key]
-    return value == null ? '' : String(value)
+    return pickText(item, key, lang, unit)
   }
   const viewList = (item: unknown, key: string): string[] => {
-    if (!item || typeof item !== 'object') return []
-    const fields = item as Record<string, unknown>
-    const original = Array.isArray(fields[key]) ? (fields[key] as unknown[]).map(String) : []
-    const english = fields[`${key}_en`]
-    if (lang !== 'en' || !Array.isArray(english) || english.length !== original.length) return original
-    return original.map((value, index) => typeof english[index] === 'string' && english[index]
-      ? english[index] : value)
+    return pickList(item, key, lang, unit)
   }
-  const viewError = (error: unknown): string => viewField(error, 'detail')
+  /** 縫合上限、手動放行 D 級的狀態與按鈕；等分與複雜度兩個面板共用。 */
+  const renderStitchRelease = (
+    analysis: SegmentAnalysis | ComplexityAnalysis, mode: 'axis' | 'complexity',
+  ) => {
+    const releases = analysis.manual_d_release || []
+    return (
+      <>
+        {analysis.stitch_ceiling && (
+          <div className="status status--warn" style={{ marginTop: 6, fontSize: 11.5 }}
+            title={viewField(analysis.stitch_ceiling, 'text')}>
+            {t.appView.stitchCeilingShort(
+              analysis.stitch_ceiling.best_limit_ghz.toFixed(1),
+              Number(analysis.stitch_ceiling.target_fmax_ghz).toFixed(0))}
+          </div>
+        )}
+        {analysis.allow_stitch_release && (
+          <div className="status status--warn" style={{ marginTop: 6, fontSize: 11.5 }}
+            title={releases.map(entry => `${entry.axis === 1 ? 'Y' : 'X'}=${measure(entry.position_mm ?? 0)} ${releaseWarning(entry, lang, unit)}`).join('\n')}>
+            <b>{releases.length
+              ? t.appView.stitchReleaseActive(releases.length, releaseHasNoGuarantee(releases)
+                ? t.appView.stitchReleaseNoGuarantee
+                : t.appView.stitchReleaseUpTo(releaseRunLimit(releases)))
+              : t.appView.stitchReleaseNone}</b>
+          </div>
+        )}
+        {analysis.allow_stitch_release && (
+          <button className="btn" style={{ width: '100%', marginTop: 6 }}
+            onClick={() => handleStitchRelease(mode, false)}>{t.appView.stitchReleaseCancel}</button>
+        )}
+        {canOfferStitchRelease(analysis) && (
+          <button className="btn" style={{ width: '100%', marginTop: 6 }}
+            onClick={() => handleStitchRelease(mode, true)}>{t.appView.stitchReleaseOffer}</button>
+        )}
+      </>
+    )
+  }
+  const viewError = (error: unknown): string => safeUserMessage(error, lang)
     || (lang === 'en' ? viewField(error, 'message') : '')
     || (error instanceof Error ? error.message : String(error))
-  // 用穩定 id 當鍵、文字查語言檔（卡 0087）：以前拿中文標籤當物件鍵，切語言鍵就變了。
+  // 用穩定 id 當鍵、文字查語言檔：以前拿中文標籤當物件鍵，切語言鍵就變了。
   type MenuEntry = { id: string; label: string; action: () => void; disabled?: boolean; checked?: boolean }
   type Menu = { id: string; label: string; entries: MenuEntry[]; tail?: { heading: string; entries: MenuEntry[] } }
   const menus: Menu[] = [
@@ -4016,8 +4511,7 @@ export default function App() {
     { id: 'help', label: t.menu.help, entries: [
       { id: 'about', label: t.menu.about, action: showAbout },
       { id: 'licenses', label: t.menu.licenses, action: () => setLicensePanelOpen(true) },
-      { id: 'supportBundle', label: t.menu.supportBundle, action: () => void makeSupportBundle() },
-      { id: 'logFolder', label: t.menu.logFolder, action: () => void openLogFolder() },
+      { id: 'supportBundle', label: t.menu.supportBundle, action: () => setSupportDialogOpen(true) },
       ...(desktopShell ? [{ id: 'openInBrowser', label: t.menu.openInBrowser, action: () => void openInBrowser() }] : []),
     ] },
   ]
@@ -4040,7 +4534,7 @@ export default function App() {
   // （疊在自己的標題上）與浮水印（壓在曲線圖中央）。
   const isLayoutView = (['full', 'cut', 'segments'] as ViewMode[])
     .includes(activeView)
-  // 分段預覽、預覽標題與報告快照的段數共用同一份來源（卡 0121）。
+  // 分段預覽、預覽標題與報告快照的段數共用同一份來源。
   const segOverlayInput = {
     complexity: complexityAnalysis,
     axis: segAnalysis,
@@ -4062,8 +4556,8 @@ export default function App() {
       ? t.appView.segmentLayout(activeSegIdx + 1, segRun.segments.length)
       : segWholeBoard
         ? t.appView.wholeBoardOverview
-        : segRun
-          ? t.appView.segmentOverview(segRun.segments.length)
+        : segmentOverlayCount(segOverlayInput) !== null
+          ? t.appView.segmentOverview(segmentOverlayCount(segOverlayInput)!)
           : t.appView.nSegmentPreview,
     schematic: t.appView.cascadeSchematicYellowDotsShortedNodesDashed,
     sparam: t.appView.cascadedSParametersSwitchBetweenSingleEnded,
@@ -4098,7 +4592,7 @@ export default function App() {
   const fullEstimatedBoundary = preciseBoundaryPreviewKey === currentBoundaryKey
     ? preciseBoundaryPreview : null
   // 預估外框只在「完整 Layout」裁切前預覽用。裁切後分頁只畫裁切後的板子
-  // （#0062：預估與實際外框的比對填色實務上用不到，已移除）。
+  // （：預估與實際外框的比對填色實務上用不到，已移除）。
   const visibleEstimatedBoundary = activeView === 'full'
     ? fullEstimatedBoundary : null
   // 報告工作區的「預設位置」——只在還沒有工作區時用得到。
@@ -4147,6 +4641,73 @@ export default function App() {
     || (activeView === 'tdr' && tdrJob?.status === 'done')
     || (activeView === 'crosssection' && xsScan),
   )
+  // 一鍵收納所有快照：報告中心自己畫、自己拍，不切使用者的分頁。
+  // 段預覽只在屬於同一份 segments.json 時才交出去，其餘由後端讀段檔重建。
+  const reportChosenMetadataPath = schedMetaPath || segRun?.metadata_path || ''
+  const reportCollectMetadataPath = segRun
+    && normalizeUserPath(segRun.metadata_path || '') === normalizeUserPath(reportChosenMetadataPath)
+    && reportGeometryBindings.current.segment !== reportGeometryContext ? '' : reportChosenMetadataPath
+  const reportTdrResult = boundJobResult(tdrJob, reportJobBindings.current.tdr, reportTdrContext)
+  const reportEyeResult = boundJobResult(eyeJob, reportJobBindings.current.eye, reportEyeContext)
+  const reportXsResult = boundJobResult(xsJob, reportJobBindings.current.xs, reportXsContext, true)
+  const reportXsEvidence = reportXsResult ? reportJobBindings.current.xs?.evidence : undefined
+  const reportTdrEvidence = reportTdrResult ? reportJobBindings.current.tdr?.evidence : undefined
+  const reportEyeEvidence = reportEyeResult ? reportJobBindings.current.eye?.evidence : undefined
+  const reportCollectSources: ReportCollectSources = {
+    workSources: reportWorkSources.filter(row => sourcePathKey(row.board_path) === sourcePathKey(reportBoardPath)),
+    contextKey: JSON.stringify([reportSourceContext, reportEyeContext, reportTdrContext, reportXsContext]),
+    metadataPath: reportCollectMetadataPath,
+    cascadeTouchstone: reportGeometryBindings.current.cascade === reportCascadeContext
+      ? cascadeResult?.output_path || '' : '',
+    signalNets, refNets,
+    // 板子身分只在真的載入了板子時給；路徑欄打了字還沒載入不算。
+    boardPath: fullScene ? reportBoardPath : '',
+    board: fullScene,
+    cutout: reportGeometryBindings.current.cut === reportGeometryContext ? cutScene : null,
+    cleanupBefore: reportGeometryBindings.current.cleanup === reportGeometryContext ? cleanupBeforeScene : null,
+    cleanup: reportGeometryBindings.current.cleanup === reportGeometryContext ? cleanupAfterScene : null,
+    schematic: reportGeometryBindings.current.schematic === reportCascadeContext ? schematicGraph || null : null,
+    segmentPreviews: segRun && normalizeUserPath(segRun.metadata_path || '')
+      === normalizeUserPath(reportCollectMetadataPath)
+      && reportGeometryBindings.current.segment === reportGeometryContext ? (segRun.previews || []) : [],
+    tdrProfiles: reportTdrResult && reportTdrEvidence
+      ? (reportTdrResult.analyses || [])
+        .filter((analysis: any) => (analysis.distance_mm || []).length >= 2
+          && analysis.distance_mm.length === (reportTdrResult.impedance_ohm || []).length)
+        .map((analysis: any) => ({
+          label: `${reportTdrResult.probe || 'TDR'} (${analysis.method || ''})`,
+          distance_mm: analysis.distance_mm || [],
+          impedance_ohm: reportTdrResult.impedance_ohm || [],
+          source_evidence: reportTdrEvidence,
+        }))
+      : [],
+    eyeImages: reportEyeResult?.image_path && reportEyeEvidence
+      ? [{ label: 'QuickEye', path: String(reportEyeResult.image_path), source_evidence: reportEyeEvidence }] : [],
+    crossSectionCuts: reportXsResult?.cuts || [],
+    tdrResult: reportTdrResult,
+    eyeResult: reportEyeResult,
+    evidence: { xs: reportXsEvidence, tdr: reportTdrEvidence, eye: reportEyeEvidence },
+    // 原生 job 沒有可證明的通用 run_id 時，不猜 manifest 的 ID，也不把舊條件補回。
+    selectedRuns: Object.keys(reportJobBindings.current).length ? {} : null,
+    preprocessing: {
+      cutout: reportCutoutRecord?.context === reportGeometryContext ? reportCutoutRecord : null,
+      cleanup: reportCleanupRecord?.context === reportGeometryContext ? reportCleanupRecord : null,
+      quality: reportQualityRecord?.context === reportGeometryContext
+        && normalizeUserPath(reportQualityRecord.data.metadata_path || '') === normalizeUserPath(reportCollectMetadataPath)
+        ? reportQualityRecord : null,
+      hasCutout: !!reportCutoutRecord || (!!cutScene && !directSegmentMode), hasCleanup: !!cleanupAfterScene,
+      hasSegments: !!reportCollectMetadataPath, segmentCount: segRun?.segments.length,
+    },
+    views: supplementalViews(reportXsEvidence ? reportXsResult?.cuts || [] : [], reportXsEvidence && reportTdrEvidence
+      && reportComparisonBinding.current === reportCompareContext ? xsCompare : null,
+      reportTdrEvidence ? reportTdrResult : null, { scene: tdrScene,
+        markers: reportMarkerBinding.current === reportMarkerContext ? tdrMarkers : null },
+      effectiveReportLocale(lang), tdrAnalysisIdx).map(view => ({ ...view,
+        source_evidence: view.type === 'tdr_location' ? reportTdrEvidence : view.type === 'comparison'
+          ? { task_id: `${reportXsEvidence!.task_id}+${reportTdrEvidence!.task_id}`,
+            condition_id: `${reportXsEvidence!.condition_id}+${reportTdrEvidence!.condition_id}`,
+            files: [...reportXsEvidence!.files, ...reportTdrEvidence!.files] } : reportXsEvidence })),
+  }
   useReportStaleRevision(reportWorkspace, ['board'], fullScene, t.appView.fullBoardDataReloaded)
   useReportStaleRevision(reportWorkspace, ['cutout'], cutScene, t.appView.cutoutResultsUpdated)
   useReportStaleRevision(reportWorkspace, ['cleanup'], cleanupAfterScene, t.appView.layoutCleanupResultsUpdated)
@@ -4197,10 +4758,25 @@ export default function App() {
 
   return (
     <div className="app-shell" onClick={() => setOpenMenu(null)}>
+      {supportDialogOpen && <SupportBundleDialog onCreate={(plaintext, dumps) => void makeSupportBundle(plaintext, dumps)} onClose={() => setSupportDialogOpen(false)} />}
       {licensePanelOpen && <AnsysLicensePanel onClose={() => setLicensePanelOpen(false)} />}
+      {confirmRequest && <ConfirmDialog request={confirmRequest} onSettle={settleConfirm} />}
+      {closeRequest && (
+        <CloseSessionDialog request={closeRequest}
+          onSave={() => closeWindowWith('save')}
+          onDiscard={() => closeWindowWith('discard')}
+          onCancel={cancelWindowClose} />
+      )}
+      {aboutOpen && <div role="dialog" aria-modal="true" aria-label={t.menu.about}
+        style={{ position: 'fixed', inset: '15% 20%', zIndex: 10000, background: 'var(--panel-solid)', color: 'var(--text)', padding: 24, overflow: 'auto' }}>
+        <pre style={{ whiteSpace: 'pre-wrap', fontFamily: '"Calibri", "Microsoft JhengHei", sans-serif' }}>{aboutText}</pre>
+        <EulaPanel />
+
+        <button type="button" onClick={() => setAboutOpen(false)}>×</button>
+      </div>}
       {pickerOpen && (
         <TaskPicker
-          flags={show}
+          flags={makeFlags(enabledTasks)}
           onToggle={toggleTask}
           onSetAll={keys => setEnabledTasks([...keys])}
           onStart={closePicker}
@@ -4231,7 +4807,12 @@ export default function App() {
           display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center', justifyContent: 'center',
           zIndex: 9999, fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--accent)'
         }}>
-          <div style={{ maxWidth: '70vw', textAlign: 'center' }}>{loadingMsg}</div>
+          <div style={{ maxWidth: '70vw', textAlign: 'center' }}>
+            {boundaryPreviewStartedAt !== null && cutoutStopping
+              ? t.appFlow.stopRequestedWaitingForTheCurrentPyedb : loadingMsg}
+            {boundaryPreviewStartedAt !== null
+              && t.appView.elapsedS(Math.max(0, Math.floor(nowTick - boundaryPreviewStartedAt)))}
+          </div>
           {cutoutJobId && (
             <button className="btn" onClick={handleStopCutout} disabled={cutoutStopping}
               style={{ minWidth: 150, borderColor: 'var(--danger)', color: 'var(--danger)', background: '#fff' }}>
@@ -4260,20 +4841,25 @@ export default function App() {
           </div>
         </div>
       )}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {/* Beta 開關原本獨占標題上方一整列；1280×720 的筆電上每一列都在跟主要內容
+          搶高度，所以併進標題列右側。 */}
+      <header className="app-header">
         <div>
-          <h1 className="app-title">{t.appView.pcbSiDSimulationToolkit}<span className="app-version" title={backendVersion?.build?.commit ? t.appView.buildTip(backendVersion.build.commit) : t.appView.versionTip}>
+          <h1 className="app-title">{t.appView.pcbSiDSimulationToolkit}<span className="app-version" title={backendVersion?.build_id ? t.appView.buildTip(backendVersion.build_id) : t.appView.versionTip}>
               v{__APP_VERSION__}
             </span>
           </h1>
           <p className="app-sub">{t.appView.channelCutoutSegmentationAndEyeAnalysis}</p>
         </div>
-        <img
-          src="/logo.png"
-          alt={t.appView.cadmen}
-          style={{ height: '64px', objectFit: 'contain', marginLeft: '24px', display: 'block' }}
-          onError={(e) => { e.currentTarget.style.display = 'none' }}
-        />
+        <div className="app-header__aside">
+          <BetaSwitch />
+          <img
+            className="app-logo"
+            src="/logo.png"
+            alt={t.appView.cadmen}
+            onError={(e) => { e.currentTarget.style.display = 'none' }}
+          />
+        </div>
       </header>
 
       {/* 後端沒重啟。這條要擺在最上面而且不能關掉：版本對不上時後面每一個
@@ -4288,7 +4874,28 @@ export default function App() {
           <strong>{t.appView.theBackendIsOutdatedRestartTheTool}</strong>
           <div>{t.appView.theUiRequiresVersionTheBackendReports(API_CONTRACT_VERSION, staleBackend ? ` ${staleBackend}` : t.appView.noVersionReportedOlderBackend)}</div>
           <div>{t.appView.newFeaturesMayReturnMethodNotAllowed}</div>
-          <div>{t.appView.closeTheWindowAndRun}<code>start.bat</code>{t.appView.toRestart}</div>
+          <div>{t.appView.closeTheWindowAndRestart(restartHint(lang))}</div>
+        </div>
+      )}
+
+      {/* 工作階段還原結果與背景工作。 */}
+      {(sessionNotices.length > 0 || autosaveError) && (
+        <div style={{ margin: '6px 0', display: 'grid', gap: 4 }}>
+          {sessionNotices.map((notice, index) => (
+            <div key={index} className={notice.kind === 'warn' ? 'status status--err' : 'status status--ok'}
+              style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5 }}>
+              <span style={{ flex: 1 }}>{notice.text(t)}</span>
+              <button className="btn--mini"
+                onClick={() => setSessionNotices(list => list.filter((_, i) => i !== index))}>
+                {t.closeSession.dismiss}
+              </button>
+            </div>
+          ))}
+          {autosaveError && (
+            <div className="status status--err" style={{ fontSize: 12.5 }}>
+              {t.closeSession.autosaveFailed(autosaveError)}
+            </div>
+          )}
         </div>
       )}
 
@@ -4313,6 +4920,10 @@ export default function App() {
                     onClick={() => { setOpenMenu(null); entry.action() }}
                   >{entry.label}</button>
                 ))}
+                {menu.id === 'view' && <>
+                  <div className="menubar__sep" />
+                  <LengthUnitControl onSelect={() => setOpenMenu(null)} />
+                </>}
                 {menu.tail && <>
                   <div className="menubar__sep" />
                   <div className="menubar__heading">{menu.tail.heading}</div>
@@ -4331,11 +4942,12 @@ export default function App() {
           </div>
         ))}
       </nav>
+      <LengthUnitError />
 
       <main style={{ flex: 1, minHeight: 0 }}>
         <Allotment defaultSizes={splitSizes} onChange={saveSplitSizes}>
           {/* 左側：設定面板。眼圖頁用不到電路板設定，收起來讓精靈有完整高度與寬度
-              （#0088 實機走查：1600×950 視窗眼圖區只剩約 420 px）。 */}
+              （走查：1600×950 視窗眼圖區只剩約 420 px）。 */}
           <Allotment.Pane minSize={320} visible={activeView !== 'models'}>
             <div style={{ paddingRight: 7, height: '100%' }}>
               <div className="panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', height: '100%', gap: '12px', overflowY: 'auto' }}>
@@ -4410,7 +5022,7 @@ export default function App() {
                     {directSegmentMode ? t.appView.loadFileNoCutout : t.appView.loadBoard}
                   </button>
                   {loadFunctions.length > 0 && <LicenseTag functions={loadFunctions} />}
-                  {/* #0122：勾著「局部裁切」載入了一塊已經設好 Port 的板——多半是
+                  {/* ：勾著「局部裁切」載入了一塊已經設好 Port 的板——多半是
                       忘了去入口取消，接著會把已裁切的板再裁一次。 */}
                   {existingPorts.length > 0 && !directSegmentMode && !cutScene && (
                     <div className="panel-caveat" style={{ marginTop: 6 }} data-testid="existing-ports-switch">
@@ -4648,8 +5260,8 @@ export default function App() {
                   <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                     <div style={{ flex: 1 }}>
                       <div className="field-label">{t.appView.expansionMm}</div>
-                      <input aria-label={t.appView.expansionMm} type="number" className="input" min="0" step="0.5"
-                        value={expansionMm} onChange={e => setExpansionMm(e.target.value)} />
+                      <LengthInput aria-label={t.appView.expansionMm} className="input"
+                        value={expansionMm} onValue={setExpansionMm} fieldKey="expansionMm" source="mm" min={0} step={0.5} showStepper />
                     </div>
                     <div style={{ flex: 1 }}>
                       <div className="field-label">{t.appView.extentShape}</div>
@@ -4706,7 +5318,7 @@ export default function App() {
                   <button
                     className="btn--primary"
                     onClick={handleCutout}
-                    disabled={signalNets.length === 0 || refNets.length === 0}
+                    disabled={isLoading || signalNets.length === 0 || refNets.length === 0}
                     style={{ marginTop: 6 }}
                   >{t.appView.runCutout}</button>
                 </div>
@@ -4722,7 +5334,7 @@ export default function App() {
                   <div className="field-label" style={{ marginTop: 6 }}>{t.appView.stackupFile}</div>
                   <div className="field-row">
                     <input aria-label={t.appView.stackupFile} type="text" className="input" value={stackupFilePath}
-                      onChange={e => { setStackupFilePath(e.target.value); setStackupDiff(null) }}
+                      onChange={e => { setStackupFilePath(e.target.value); invalidateStackupDiff() }}
                       placeholder={t.appView.stackupFilePathXmlCsvJson} />
                     <button className="btn" onClick={handleBrowseStackup}>{t.appView.browse}</button>
                   </div>
@@ -4813,22 +5425,22 @@ export default function App() {
 
                   <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
                     <div className="field-label" style={{ minWidth: 66 }}>{t.appView.retainedStub}</div>
-                    <input aria-label={t.appView.retainedStub} type="number" className="input" style={{ width: 70 }} min="0" step="0.5"
-                      value={bdTargetStubMil} onChange={e => setBdTargetStubMil(e.target.value)} />
-                    <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>mil</span>
+                    <LengthInput aria-label={t.appView.retainedStub} className="input" style={{ width: 70 }}
+                      value={bdTargetStubMil} onValue={setBdTargetStubMil} fieldKey="bdTargetStubMil" source="mil" min={0} step={0.5} />
+                    <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>{unit}</span>
                     <label className="field-label" style={{ marginLeft: 8, display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}
                       title={t.appView.uncheckedDrillDiameterViaHoleCheckedViaTip}>
                       <input aria-label={t.appView.increaseDrillDiameter} type="checkbox" checked={bdDrillOversize}
                         onChange={e => setBdDrillOversize(e.target.checked)} />{t.appView.increaseDrillDiameter}</label>
-                    <input aria-label={t.appView.drillDiameterIncrement} type="number" className="input" style={{ width: 70 }} min="0" step="1"
-                      value={bdDiameterIncMil} onChange={e => setBdDiameterIncMil(e.target.value)}
-                      disabled={!bdDrillOversize} />
-                    <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>mil</span>
+                    <LengthInput aria-label={t.appView.drillDiameterIncrement} className="input" style={{ width: 70 }}
+                      value={bdDiameterIncMil} onValue={setBdDiameterIncMil}
+                      disabled={!bdDrillOversize} fieldKey="bdDiameterIncMil" source="mil" min={0} step={1} />
+                    <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>{unit}</span>
                   </div>
-                  <p className="panel-hint" style={{ marginTop: 2 }}>{t.appView.drillDiameter(bdDrillOversize ? t.appView.viaHoleMil(bdDiameterIncMil || 0) : t.appView.sameAsViaHole)}</p>
-                  {backdrillStubWarning(bdTargetStubMil) && (
+                  <p className="panel-hint" style={{ marginTop: 2 }}>{t.appView.drillDiameter(bdDrillOversize ? t.appView.viaHoleMil(length(Number(bdDiameterIncMil), 'mil')) : t.appView.sameAsViaHole)}</p>
+                  {backdrillStubWarning(bdTargetStubMil, unit) && (
                     <div className="status status--warn" style={{ marginTop: 6, fontSize: 11.5 }}>
-                      ⚠ {backdrillStubWarning(bdTargetStubMil)}
+                      ⚠ {backdrillStubWarning(bdTargetStubMil, unit)}
                     </div>
                   )}
 
@@ -4851,18 +5463,34 @@ export default function App() {
                               <th style={{ padding: '3px 5px' }}>{t.appView.fieldTo}</th>
                               <th style={{ padding: '3px 5px' }}>{t.appView.stubMm}</th>
                               <th style={{ padding: '3px 5px' }}>{t.appView.resonanceGhz}</th>
+                              <th style={{ padding: '3px 5px' }}>{t.appView.existingBackdrillDimensions}</th>
                             </tr>
                           </thead>
                           <tbody>
                             {bdResult.entries.map((entry: any, i: number) => (
-                              entry.stubs.length === 0 ? (
+                              <Fragment key={entry.id}>
+                              {(entry.existing_backdrills || []).filter((existing: any) => existing.exists).map((existing: any) => (
+                                <tr key={`${entry.id}-existing-${existing.side}`}>
+                                  <td style={{ padding: '3px 5px' }}>{t.appView.existingBackdrill}</td>
+                                  <td style={{ padding: '3px 5px' }}><span style={BD_NET_STYLE} title={entry.net}>{entry.net}</span></td>
+                                  <td style={{ padding: '3px 5px', textAlign: 'center' }}>{entry.connected_layers.join(',') || '—'}</td>
+                                  <td style={{ padding: '3px 5px', textAlign: 'center' }}>{existing.side === 'top' ? t.appView.top : t.appView.bottom}</td>
+                                  <td style={{ padding: '3px 5px', textAlign: 'center' }}>{existing.to_layer || '—'}</td>
+                                  <td style={{ padding: '3px 5px', textAlign: 'right' }}>{existing.remaining_stub_mm == null ? '—' : length(existing.remaining_stub_mm)}</td>
+                                  <td style={{ padding: '3px 5px' }}>—</td>
+                                  <td style={{ padding: '3px 5px' }}>
+                                    {existing.error ? t.appView.existingBackdrillUnknown : [existing.depth_mm, existing.drill_diameter_mm, existing.remaining_stub_mm].map(value => value == null ? '—' : length(value)).join(' / ')}
+                                  </td>
+                                </tr>
+                              ))}
+                              {entry.stubs.length === 0 && !(entry.existing_backdrills || []).some((existing: any) => existing.exists) ? (
                                 <tr key={`${entry.id}-none`} style={{ opacity: 0.5 }}>
                                   <td style={{ padding: '3px 5px' }}>—</td>
                                   <td style={{ padding: '3px 5px' }}>
                                     <span style={BD_NET_STYLE} title={entry.net}>{entry.net}</span></td>
                                   <td style={{ padding: '3px 5px', textAlign: 'center' }}>
                                     {entry.connected_layers.join(',') || '-'}</td>
-                                  <td colSpan={4} style={{ padding: '3px 5px' }}>{entry.note}</td>
+                                  <td colSpan={5} style={{ padding: '3px 5px' }}>{entry.note}</td>
                                 </tr>
                               ) : entry.stubs.map((stub: any, j: number) => (
                                 <tr key={`${entry.id}-${j}`}>
@@ -4878,11 +5506,13 @@ export default function App() {
                                     {stub.side === 'top' ? t.appView.top : t.appView.bottom}</td>
                                   <td style={{ padding: '3px 5px', textAlign: 'center' }}>{stub.to_layer}</td>
                                   <td style={{ padding: '3px 5px', textAlign: 'right' }}>
-                                    {stub.stub_mm?.toFixed(3)}</td>
+                                    {stub.stub_mm == null ? '—' : length(stub.stub_mm)}</td>
                                   <td style={{ padding: '3px 5px', textAlign: 'right' }}>
                                     {stub.resonance_ghz ? stub.resonance_ghz.toFixed(1) : '-'}</td>
+                                  <td style={{ padding: '3px 5px' }}>{stub.existing_backdrill?.exists ? t.appView.existingBackdrill : '—'}</td>
                                 </tr>
-                              ))
+                              ))}
+                              </Fragment>
                             ))}
                           </tbody>
                         </table>
@@ -4927,9 +5557,9 @@ export default function App() {
                   <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'flex-end' }}>
                     <div style={{ width: 110 }}>
                       <div className="field-label">{cleanupMode === 'em_field' ? t.appView.minimumProtectionMm : t.appView.protectionDistanceMm}</div>
-                      <input aria-label={cleanupMode === 'em_field' ? t.appView.minimumProtectionMm : t.appView.protectionDistanceMm} type="number" className="input" min="0.1" step="0.1"
-                        value={cleanupGuardMm} onChange={e => { setCleanupGuardMm(e.target.value); setCleanupAnalysis(null) }}
-                        disabled={!canSegment} />
+                      <LengthInput aria-label={cleanupMode === 'em_field' ? t.appView.minimumProtectionMm : t.appView.protectionDistanceMm} className="input"
+                        value={cleanupGuardMm} onValue={value => { setCleanupGuardMm(value); setCleanupAnalysis(null) }}
+                        disabled={!canSegment} fieldKey="cleanupGuardMm" source="mm" min={0.1} step={0.1} />
                     </div>
                     {cleanupMode === 'em_field' && (
                       <div style={{ width: 105 }}>
@@ -4949,7 +5579,7 @@ export default function App() {
                     <div className="cleanup-em-rules">
                       <div>{t.appView.emFactorHReferenceLayers(cleanupAnalysis.em_field.field_factor.toFixed(2), t.appView.joinList(cleanupAnalysis.em_field.reference_layers))}</div>
                       {Object.entries(cleanupAnalysis.em_field.layer_rules).map(([layer, rule]) => (
-                        <div key={layer}>{t.appView.hMmProtectionRadiusMm(layer, rule.reference_height_mm.toFixed(3), rule.same_layer_radius_mm.toFixed(3))}</div>
+                        <div key={layer}>{t.appView.hMmProtectionRadiusMm(layer, length(rule.reference_height_mm), length(rule.same_layer_radius_mm))}</div>
                       ))}
                     </div>
                   )}
@@ -5024,241 +5654,17 @@ export default function App() {
                 {/* 「模擬設定」：裁切 Setup 與排程共用；直接分段模式仍可設定求解器 */}
                 <div hidden={!showSolverSetup}>
                   <h3 className="panel-title">{t.appView.simulationSettings}</h3>
-                  <p className="panel-hint" style={{ marginTop: 4 }}>
-                    <b>{t.appView.siwaveAndHfssShareTheFrequencySweep}</b>{t.appView.solutionFrequencyAndConvergenceSettingsApplyOnly}</p>
+                  <SimulationSettings lang={lang} text={t.simulationSetup} specName={specName} maxFrequencyGHz={maxFrequencyGHz}
+                    specs={builtinProfiles} profiles={profileNames} selectedProfile={selectedProfile}
+                    onSpec={name => void chooseSpec(name)} onMaximum={value => {
+                      simulationChoiceEpoch.current++; setMaxFrequencyGHz(value)
+                    }}
+                    onProfile={setSelectedProfile} onApply={() => void applyProfile(selectedProfile)}
+                    onSave={() => void saveProfile()} onDelete={() => void deleteProfile(selectedProfile)}
+                    message={profileMsg} error={simulationFailure || (!simulationReady
+                      ? t.simulationSetup.resolving : '')}
+                    summary={simulationReady ? t.simulationSetup.sweepSummary(sweeps) : ''} />
 
-                  {/* 設定檔（HANDOFF 乙6）：同案子板子一片接一片，條件每次
-                      重填一遍，填錯一格不報錯、只讓兩片解在不同條件下。 */}
-                  <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
-                    <div className="field-label" style={{ minWidth: 60 }}>{t.appView.profile}</div>
-                    <select aria-label={t.appView.profile} className="input" style={{ flex: 1 }}
-                      value={selectedProfile} onChange={e => setSelectedProfile(e.target.value)}>
-                      <option value="">{t.appView.noneSelected}</option>
-                      {builtinProfileNames.length > 0 && (
-                        <optgroup label={t.appView.builtInSpecsReadOnly}>
-                          {builtinProfiles.map(p => (
-                            <option key={p.name} value={p.name}>{profileLabel(p, lang)}</option>))}
-                        </optgroup>
-                      )}
-                      {profileNames.length > 0 && (
-                        <optgroup label={t.appView.myProfiles}>
-                          {profileNames.map(name => <option key={name} value={name}>{name}</option>)}
-                        </optgroup>
-                      )}
-                    </select>
-                    <button className="btn" disabled={!selectedProfile}
-                      onClick={() => void applyProfile(selectedProfile)}
-                      title={t.appView.applyTheSelectedProfileMergingFieldsWithoutTip}>{t.appView.apply}</button>
-                    <button className="btn" onClick={() => void saveProfile()}
-                      title={t.appView.saveTheCurrentSweepConvergenceCutoutAndTip}>{t.appView.saveAs}</button>
-                    <button className="btn"
-                      disabled={!selectedProfile || builtinProfileNames.includes(selectedProfile)}
-                      title={builtinProfileNames.includes(selectedProfile) ? t.appView.builtInSpecificationsCannotBeDeletedTip : undefined}
-                      onClick={() => void deleteProfile(selectedProfile)}>{t.appView.delete}</button>
-                  </div>
-                  {profileMsg && <p className="panel-hint" style={{ marginTop: 2 }}>{profileMsg}</p>}
-
-                  {/* Sweep Type & Solution Freq */}
-                  <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
-                    <div className="field-label" style={{ minWidth: 60 }}>{t.appView.sweepMode}</div>
-                    <select aria-label={t.appView.sweepMode} className="input" style={{ width: 140 }} value={sweepType} onChange={e => setSweepType(e.target.value)}>
-                      <option value="Interpolating">{t.appView.fieldInterpolating}</option>
-                      <option value="Discrete">{t.appView.fieldDiscrete}</option>
-                      <option value="Fast">{t.appView.fieldFast}</option>
-                    </select>
-                    <div className="field-label" style={{ minWidth: 80, marginLeft: 12 }}>{t.appView.operatingFrequencyGhz}</div>
-                    <input aria-label={t.appView.operatingFrequencyGhz} type="number" className="input" style={{ width: 100 }} min="0" step="0.1" value={solutionFreq} onChange={e => pickSolutionFreq(e.target.value)} title={t.appView.defaultsToHalfTheSweepBandwidthManualTip} />
-                    <div className="field-label" style={{ minWidth: 100, marginLeft: 12 }}>{t.appView.fieldErrorTolerance}</div>
-                    <input aria-label={t.appView.fieldErrorTolerance} type="number" className="input" style={{ width: 80 }} min="0.001" step="0.05" value={errorTolerance} onChange={e => setErrorTolerance(e.target.value)} title={t.appView.interpolatingSweepToleranceAedtDefaultToolDefaultTip} />
-                  </div>
-
-                  {/* Sweeps Table */}
-                  <div style={{ marginTop: 12 }}>
-                    {/* 判斷頻寬（#0120）：求解器建議看的是「要用到幾 GHz」，不是掃到
-                        幾 GHz。掃頻常開得比需要的寬（留 TDR、留餘裕），拿它當依據會把
-                        低頻就夠用的 DDR 通道整段推去 HFSS。來源是「依規範／依資料率
-                        自訂」二選一，和上面的規範設定檔放在同一區；分段頁只顯示。 */}
-                    <div style={{ marginBottom: 8 }} data-testid="solver-bandwidth">
-                      <div className="field-label">{t.appView.solverBandwidthTitle}</div>
-                      <div role="radiogroup" aria-label={t.appView.solverBandwidthTitle}
-                        style={{ display: 'flex', gap: 14, marginTop: 3 }}>
-                        {(['spec', 'rate'] as BandwidthMode[]).map(mode => (
-                          <label key={mode} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                            <input type="radio" name="bandwidth-mode" value={mode}
-                              checked={bandwidthState.mode === mode}
-                              onChange={() => pickBandwidthMode(mode)} />
-                            {mode === 'spec' ? t.appView.bandwidthModeSpec : t.appView.bandwidthModeRate}
-                          </label>
-                        ))}
-                      </div>
-                      {bandwidthState.mode === 'spec' ? (
-                        !bandwidthState.spec && <div className="hint">{t.appView.bandwidthSpecHint}</div>
-                      ) : (
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 3 }}>
-                          <input aria-label={t.appView.dataRateGbpsOrMtS} className="input" type="number" step="0.1"
-                            style={{ width: 160 }} placeholder={t.appView.dataRateOr}
-                            title={t.appView.enterTheDataRateAsEitherOr}
-                            value={bandwidthState.rateInput}
-                            onChange={e => {
-                              const value = e.target.value
-                              setBandwidthState(prev => ({ ...prev, rateInput: value }))
-                            }} />
-                          <button className="btn" onClick={deriveBandwidth}
-                            title={t.appView.deriveKneeFrequencyTrFromDataRateTip}>{t.appView.deriveFromDataRate}</button>
-                        </div>
-                      )}
-                      <div className="status" style={{ fontSize: 12, marginTop: 4 }}>
-                        {solverBandwidth.ghz === null
-                          ? t.appView.bandwidthEffectiveNone(bandwidthSourceText(solverBandwidth))
-                          : t.appView.bandwidthEffective(solverBandwidth.ghz, bandwidthSourceText(solverBandwidth))}
-                      </div>
-                      {solverBandwidth.staleRate && (
-                        <div className="hint" style={{ color: 'var(--warn)' }}>{t.appView.bandwidthRateStale}</div>
-                      )}
-                      {bandwidthCoverage(solverBandwidth.ghz, targetFmaxGHz) === 'aboveSweep' && (
-                        <div className="hint" style={{ color: 'var(--warn)' }}>
-                          {t.appView.bandwidthAboveSweep(solverBandwidth.ghz ?? '', targetFmaxGHz ?? '')}</div>
-                      )}
-                      {bandwidthCoverage(solverBandwidth.ghz, targetFmaxGHz) === 'belowSweep' && (
-                        <div className="hint">{t.appView.bandwidthBelowSweep(solverBandwidth.ghz ?? '', targetFmaxGHz ?? '')}</div>
-                      )}
-                      <div className="hint" title={t.appView.bandwidthWhatItDoes}>{t.appView.bandwidthWhatItDoes}</div>
-                      {bandwidthNote && (
-                        <div className="status" style={{ fontSize: 11, marginTop: 3 }}>{bandwidthNote}</div>
-                      )}
-                      <details style={{ marginTop: 4 }} open={!!bandwidthState.override}>
-                        <summary className="hint" style={{ cursor: 'pointer' }}>{t.appView.bandwidthAdvanced}</summary>
-                        <input aria-label={t.appView.bandwidthOverrideLabel} className="input" type="number" step="0.5"
-                          style={{ width: 130, marginTop: 3 }} placeholder={t.appView.bandwidthOverrideLabel}
-                          title={t.appView.bandwidthOverrideLabel}
-                          value={bandwidthState.override}
-                          onChange={e => {
-                            const value = e.target.value
-                            setBandwidthState(prev => ({ ...prev, override: value, overrideOrigin: '' }))
-                          }} />
-                        {solverBandwidth.invalidOverride && (
-                          <div className="hint" style={{ color: 'var(--danger)' }}>{t.appView.bandwidthOverrideInvalid}</div>
-                        )}
-                      </details>
-                      {schedMetaPath && (
-                        <button className="btn" style={{ marginTop: 4 }}
-                          onClick={() => void reassessSolverBandwidth()}>{t.appView.reassessSolvers}</button>
-                      )}
-                    </div>
-                    <div className="field-label" style={{ marginBottom: 4 }}>{t.appView.frequencySweepRanges}</div>
-                    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
-                        <thead>
-                          <tr style={{ background: 'rgba(255,255,255,0.05)', borderBottom: '1px solid var(--border)' }}>
-                            <th style={{ padding: '6px 8px', fontWeight: 600 }}>{t.appView.fieldDistribution}</th>
-                            <th style={{ padding: '6px 8px', fontWeight: 600 }}>{t.appView.fieldStart}</th>
-                            <th style={{ padding: '6px 8px', fontWeight: 600 }}>{t.appView.fieldEnd}</th>
-                            <th style={{ padding: '6px 8px', fontWeight: 600 }}>{t.appView.fieldValue}</th>
-                            <th style={{ padding: '6px 8px', width: 30 }}></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sweeps.map((sw, idx) => (
-                            <tr key={idx} style={{ borderBottom: idx < sweeps.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                              <td style={{ padding: 4 }}>
-                                <select aria-label={t.appView.sweepDistribution(idx + 1)}
-                                  className="input" 
-                                  style={{ padding: '2px 4px', height: 24, fontSize: 12 }} 
-                                  value={sw.distribution} 
-                                  onChange={e => {
-                                    // 連同那一列一起複製：只複製陣列的話，改的
-                                    // 是上一份 state 也還指著的同一個物件。
-                                    const newSweeps = [...sweeps];
-                                    newSweeps[idx] = { ...newSweeps[idx], distribution: e.target.value };
-                                    setSweeps(newSweeps);
-                                  }}
-                                >
-                                  <option value="Linear Count">{t.appView.fieldLinearCount}</option>
-                                  <option value="Log Scale">{t.appView.fieldLogScale}</option>
-                                  <option value="Linear Step">{t.appView.fieldLinearStep}</option>
-                                </select>
-                              </td>
-                              <td style={{ padding: 4 }}>
-                                <input aria-label={t.appView.sweepStartFrequency(idx + 1)} className="input" style={{ padding: '2px 4px', height: 24, fontSize: 12 }} value={sw.start} onChange={e => { const ns = [...sweeps]; ns[idx] = { ...ns[idx], start: e.target.value }; setSweeps(ns); }} />
-                              </td>
-                              <td style={{ padding: 4 }}>
-                                <input aria-label={t.appView.sweepEndFrequency(idx + 1)} className="input" style={{ padding: '2px 4px', height: 24, fontSize: 12 }} value={sw.end} onChange={e => { const ns = [...sweeps]; ns[idx] = { ...ns[idx], end: e.target.value }; setSweeps(ns); }} />
-                              </td>
-                              <td style={{ padding: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <span style={{ fontSize: 11, color: 'var(--faint)', width: 50, flexShrink: 0 }}>
-                                  {sw.distribution === 'Linear Count' ? t.appView.fieldPoints : sw.distribution === 'Log Scale' ? t.appView.fieldSamples : t.appView.fieldStepSize}
-                               </span>
-                                <input aria-label={t.appView.sweepPointCountOrStep(idx + 1)} className="input" style={{ flex: 1, padding: '2px 4px', height: 24, fontSize: 12, minWidth: 0 }} value={sw.value} onChange={e => { const ns = [...sweeps]; ns[idx] = { ...ns[idx], value: e.target.value }; setSweeps(ns); }} />
-                              </td>
-                              <td style={{ padding: 4, textAlign: 'center' }}>
-                                <button className="btn--mini" style={{ padding: '2px 6px' }} onClick={() => setSweeps(sweeps.filter((_, i) => i !== idx))}>✕</button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      <div style={{ padding: '4px', background: 'rgba(255,255,255,0.02)' }}>
-                        <button className="btn" style={{ fontSize: 11, padding: '2px 8px', width: '100%' }} onClick={() => setSweeps([...sweeps, { distribution: 'Linear Step', start: '0Hz', end: '1GHz', value: '0.1GHz' }])}>{t.appView.addSweepRange}</button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* HFSS Adaptive Options */}
-                  <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div className="field-label" style={{ minWidth: 74 }}>{t.appView.adaptiveMode}</div>
-                    <select aria-label={t.appView.adaptiveMode} className="input" style={{ width: 190 }} value={adaptiveMode}
-                      onChange={e => setAdaptiveMode(e.target.value as 'broadband' | 'multi' | 'single')}
-                      title={t.appView.ansysBkmRecommendsBroadbandAdaptationFromGhzTip}>
-                      <option value="broadband">{t.appView.broadbandAnsysBkm}</option>
-                      <option value="multi">{t.appView.multiFrequencyPoints}</option>
-                      <option value="single">{t.appView.singleFrequency}</option>
-                    </select>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 5,
-                                    fontSize: 11.5, cursor: 'pointer' }}
-                      title={t.appView.bkmParallelAdaptiveRegionTip}>
-                      <input type="checkbox" checked={parallelRefinement}
-                        onChange={e => setParallelRefinement(e.target.checked)} />{t.appView.parallelAdaptiveRegionPar}</label>
-                  </div>
-                  {adaptiveMode !== 'single' && (
-                    <div className="panel-hint" style={{ marginTop: 4, fontSize: 11 }}>{t.appView.theAdaptiveRangeIsDerivedAutomaticallyFrom}</div>
-                  )}
-                  <div className="panel-hint" style={{ marginTop: 4, fontSize: 10.5, opacity: 0.75 }}
-                    title={t.appView.lowMemoryMeshAdaptiveFrequencySweepAccelerationTip}>{t.appView.enableTheseTwoBetaOptionsInAedt}</div>
-
-                  <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
-                    <div className="field-label" style={{ minWidth: 74 }}>{t.appView.meshMethod}</div>
-                    <select aria-label={t.appView.meshMethod} className="input" style={{ width: 150 }} value={hfssMeshMethod}
-                      onChange={e => pickHfssMeshMethod(e.target.value as 'Phi' | 'PhiPlus' | 'Classic')}
-                      title={t.appView.hfssDLayoutMeshMethodPhiIsTip}>
-                      <option value="Phi">{t.appView.phiDefault}</option>
-                      <option value="PhiPlus">{t.appView.phiPlusMayCrashIn}{t.featureTier.betaSuffix}</option>
-                      <option value="Classic">{t.appView.fieldClassic}</option>
-                    </select>
-                    {hfssMeshMethod === 'PhiPlus' && <BetaBadge feature="B01" style={{ marginLeft: 0 }} />}
-                    <span className="panel-hint" style={{ margin: 0, fontSize: 11 }}>{t.appView.appliesOnlyToHfssSegmentsAppliedDuring}</span>
-                  </div>
-
-                  <div style={{ marginTop: 12 }}>
-                    <div className="field-label" style={{ marginBottom: 4 }}>{t.appView.adaptiveOptions}</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                      <div>
-                        <div style={{ fontSize: 11, color: 'var(--faint)' }}>{t.appView.fieldMaxRefinementPerPass}</div>
-                        <input aria-label={t.appView.fieldMaxRefinementPerPass} type="number" className="input" min="1" step="1" value={maxRefinementPerPass} onChange={e => setMaxRefinementPerPass(e.target.value)} />
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 11, color: 'var(--faint)' }}>{t.appView.fieldMinConvergedPasses}</div>
-                        <input aria-label={t.appView.fieldMinConvergedPasses} type="number" className="input" min="1" step="1" value={minConvergedPasses} onChange={e => setMinConvergedPasses(e.target.value)} />
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 11, color: 'var(--faint)' }}>{t.appView.fieldMaxPasses}</div>
-                        <input aria-label={t.appView.fieldMaxPasses} type="number" className="input" min="1" step="1" value={maxPasses} onChange={e => setMaxPasses(e.target.value)} />
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 11, color: 'var(--faint)' }}>{t.appView.fieldMaxDeltaS}</div>
-                        <input aria-label={t.appView.fieldMaxDeltaS} type="number" className="input" min="0.001" step="0.01" value={maxDeltaS} onChange={e => setMaxDeltaS(e.target.value)} />
-                      </div>
-                    </div>
-                  </div>
                 </div>
 
                 {/* 設定 Port 與求解器：對目前的工作檔建立 Port 與 Setup，不裁切。
@@ -5286,7 +5692,7 @@ export default function App() {
                       // 條件與外層面板一致用 canSegment。「先裁切、再單獨設 Port」
                       // 是主要路徑，那時 directSegmentMode 是 false——用它當條件
                       // 會讓面板看起來可用、裡面的按鈕卻永遠是灰的。
-                      !canSegment
+                      isLoading || !canSegment
                       || signalNets.length === 0
                       || refNets.length === 0
                       || Object.keys(checkedComps).filter(c => checkedComps[c]).length === 0
@@ -5303,12 +5709,11 @@ export default function App() {
                   <h3 className="panel-title">{t.appView.nSegmentSplit}</h3>
                   <p className="panel-hint">{t.appView.splitTheCutoutBoardIntoNSegments}{directSegmentMode && <span style={{ color: 'var(--accent)' }}>{t.appView.theLoadedFileIsAlreadyAChannel}</span>}
                   </p>
-                  {/* 整區壓暗卻不說原因，使用者只能猜（#0122 情境 A）。 */}
+                  {/* 整區壓暗卻不說原因，使用者只能猜。 */}
                   {!canSegment && allNets.length > 0 && (
                     <div className="hint" style={{ marginTop: 4 }}>{t.appView.segmentBlockedHint}</div>
                   )}
-                  {/* 頻寬是掃頻／頻率設定，輸入只在「模擬設定」（#0120，Jeff
-                      2026-10-12：放在這裡讓人誤以為只跟分段有關）。這裡只顯示分段
+                  {/* 頻寬是掃頻／頻率設定，輸入只在「模擬設定」（：放在這裡讓人誤以為只跟分段有關）。這裡只顯示分段
                       與求解器建議實際讀到的兩個值。 */}
                   <div style={{ marginTop: 7 }} data-testid="segment-bandwidth-readout">
                     <div className="panel-hint">
@@ -5369,14 +5774,12 @@ export default function App() {
                     <div className="segment-analysis">
                       <div className="segment-analysis__summary">
                         <strong>{t.appView.splitByDComplexity}</strong>
-                        <span>{t.appView.verticalStructures(complexityAnalysis.feature_count)}</span>
-                        <span>{t.appView.complexRegions(complexityAnalysis.regions.length)}</span>
                         <span>{t.appView.segments(complexityAnalysis.segments.length)}</span>
                       </div>
 
                       {!complexityAnalysis.feasible && (
                         <strong className="segment-analysis__gate-error">
-                          {viewField(complexityAnalysis, 'reason')}
+                          {t.publicUi.noSplit}
                         </strong>
                       )}
                       {complexityAnalysis.corner_crossings.length > 0 && (
@@ -5399,9 +5802,9 @@ export default function App() {
                                   color: seg.solver === 'hfss'
                                     ? '#bea0ff' : '#5bf59a', fontWeight: 700,
                                 }}>{seg.solver.toUpperCase()}</td>
-                                <td>{t.appView.x(seg.bounds_mm[0].toFixed(1), seg.bounds_mm[2].toFixed(1))}<br />{t.appView.y(seg.bounds_mm[1].toFixed(1), seg.bounds_mm[3].toFixed(1))}</td>
-                                <td>{seg.signal_length_mm.toFixed(1)} mm</td>
-                                <td style={{ fontSize: 11 }}>{viewField(seg, 'solver_reason')}</td>
+                                <td>{t.appView.x(length(seg.bounds_mm[0]), length(seg.bounds_mm[2]))} {unit}<br />{t.appView.y(length(seg.bounds_mm[1]), length(seg.bounds_mm[3]))} {unit}</td>
+                                <td>{length(seg.signal_length_mm)} {unit}</td>
+                                <td style={{ fontSize: 11 }}>{t.publicUi.solverReason}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -5409,11 +5812,13 @@ export default function App() {
                       </div>
 
                       <div className="status" style={{ marginTop: 6, fontSize: 11.5 }}>{t.appView.cuts(t.appView.joinCuts(complexityAnalysis.cuts.map(cut => t.appView.cutDescription(
-                          Boolean(cut.manual), cut.direction.toUpperCase(), cut.position_mm.toFixed(2),
-                          cut.quality_grade, cut.margin_mm.toFixed(2),
+                          Boolean(cut.manual), cut.direction.toUpperCase(), length(cut.position_mm),
+                          cut.quality_grade, length(cut.margin_mm),
                         ))))}</div>
                       <div className="status" style={{ marginTop: 4, fontSize: 11 }}>{t.appView.theMarginHasNotBeenCalibratedBy}</div>
                       <div className="status" style={{ marginTop: 4, fontSize: 11 }}>{t.appView.inThePreviewYouCan}<b>{t.appView.dragCutLinesDirectly}</b>{t.appView.gradesAreReassessedOnReleaseTheCut}</div>
+
+                      {renderStitchRelease(complexityAnalysis, 'complexity')}
 
                       {/* 單參考切面的提示。這條路有自己的顯示區塊，等分那邊補了
                           這邊沒補的話，走複雜度分段的人照樣看不到。 */}
@@ -5424,7 +5829,7 @@ export default function App() {
                           style={{ marginTop: 6, fontSize: 11 }}>{t.appView.cuts295(complexityAnalysis.cuts.length, msg)}</div>
                       ))}
 
-                      {complexityAnalysis.cuts.some(cut => cut.manual) && (
+                      {(complexityAnalysis.source_cuts ?? complexityAnalysis.cuts).some(cut => cut.manual) && (
                         <button className="btn" style={{ width: '100%', marginTop: 6 }}
                           onClick={handleComplexityAnalyze}>{t.appView.resetAutoCuts}</button>
                       )}
@@ -5447,7 +5852,7 @@ export default function App() {
 
                       {/* 段長分布：這是「有沒有加速效果」的關鍵，放在最前面。 */}
                       {segAnalysis.threshold_feasible && (
-                        <div className="status" style={{ marginTop: 6, fontSize: 11.5 }}>{t.appView.segmentLengthsMmMaxMin(t.appView.joinLengths(segAnalysis.segment_lengths_mm.map(v => v.toFixed(1))))}<b>{t.appView.balanceRatio(segAnalysis.balance_ratio.toFixed(2))}</b>
+                        <div className="status" style={{ marginTop: 6, fontSize: 11.5 }}>{t.appView.segmentLengthsMmMaxMin(t.appView.joinLengths(segAnalysis.segment_lengths_mm.map(v => length(v))))}<b>{t.appView.balanceRatio(segAnalysis.balance_ratio.toFixed(2))}</b>
                           {segAnalysis.balance_ratio <= 1.5 && t.appView.wellBalanced}
                         </div>
                       )}
@@ -5469,6 +5874,8 @@ export default function App() {
                         <strong className="segment-analysis__gate-error">{t.appView.safetyGateFailedRequestedSegmentsAtMost(segAnalysis.n_segments, segAnalysis.max_safe_segments)}</strong>
                       )}
 
+                      {renderStitchRelease(segAnalysis, 'axis')}
+
                       {/* 三個門檻的對照，讓「放寬一級值不值得」一眼可判斷。 */}
                       <div className="status" style={{ marginTop: 6, fontSize: 11 }}>{t.appView.gradeComparison}{segAnalysis.threshold_report.map(item => (
                           <span key={item.grade} style={{ marginRight: 10 }}>
@@ -5477,7 +5884,7 @@ export default function App() {
                                 ? 'var(--accent)' : undefined,
                             }}>{t.appView.grade(item.grade)}</b>
                             {item.feasible
-                              ? t.appView.maxMm(item.max_segment_mm!.toFixed(1), item.balance_ratio!.toFixed(2))
+                              ? t.appView.maxMm(length(item.max_segment_mm!), item.balance_ratio!.toFixed(2))
                               : t.appView.infeasible}
                           </span>
                         ))}
@@ -5489,10 +5896,6 @@ export default function App() {
                               <th>{t.appView.region}</th>
                               <th>{t.appView.gradeLabel}</th>
                               <th>{t.appView.position}</th>
-                              <th>{t.appView.crossings}</th>
-                              <th>{t.appView.worstAngle}</th>
-                              <th>{t.appView.clearanceRecommended}</th>
-                              <th>{t.appView.offset}</th>
                               <th>{t.appView.status}</th>
                             </tr>
                           </thead>
@@ -5506,26 +5909,26 @@ export default function App() {
                               )
                               const stateId = forbidden ? 'blocked' : warning ? 'warning' : 'passed'
                               const state = forbidden ? t.appView.blocked : warning ? t.appView.warning : t.appView.passed
-                              const details = t.appView.joinDetails([
-                                ...viewList(c, 'hard_reasons'),
-                                ...viewList(c, 'risk_reasons'),
-                                c.poly_hit ? t.appView.cutIntersectsSignalCopper : '',
-                                c.clearance_ok === false ? t.appView.clearanceBelowRecommendation : '',
-                              ].filter(Boolean))
                               return (
-                                <tr key={i} className={`segment-analysis__row segment-analysis__row--${stateId}`} title={details || viewField(c, 'quality_reason')}>
+                                <tr key={i} className={`segment-analysis__row segment-analysis__row--${stateId}`} >
                                   <td className="segment-analysis__region">S{i + 1}–S{i + 2}</td>
                                   <td>
                                     <span className={`segment-grade segment-grade--${c.quality_grade.toLowerCase()}`}>
                                       {c.quality_grade}
                                     </span>
+                                    {c.manual_d_release && (
+                                      <span className="segment-analysis__release">
+                                        {releaseBadge(c.manual_d_release, {
+                                          known: t.appView.stitchReleaseBadge,
+                                          unknown: t.appView.stitchReleaseBadgeUnknown,
+                                          none: t.appView.stitchReleaseBadgeNone,
+                                        })}
+                                      </span>
+                                    )}
                                   </td>
-                                  <td>{t.appView.mm328(segAnalysis.direction.toUpperCase(), c.position_mm.toFixed(1))}</td>
-                                  <td>{c.crossing_count}</td>
-                                  <td>{c.worst_angle_deg === null ? 'N/A' : `${c.worst_angle_deg.toFixed(1)}°`}</td>
-                                  <td>{t.appView.mm329(c.min_obstacle_mm === null ? 'N/A' : c.min_obstacle_mm.toFixed(2), c.recommended_clearance_mm.toFixed(2))}</td>
-                                  <td>{c.deviation_mm.toFixed(2)} mm</td>
-                                  <td><span className={`segment-state segment-state--${stateId}`}>{state}</span></td>
+                                  <td>{t.appView.mm328(segAnalysis.direction.toUpperCase(), length(c.position_mm))}</td>
+                                  <td><span className={`segment-state segment-state--${stateId}`}
+                                    >{state}</span></td>
                                 </tr>
                               )
                             })}
@@ -5540,19 +5943,6 @@ export default function App() {
                         <div key={msg} className="status status--warn"
                           style={{ marginTop: 6, fontSize: 11 }}>{t.appView.cuts295(segAnalysis.cuts.length, msg)}</div>
                       ))}
-                      {segAnalysis.auto_profile && (
-                        <div className="segment-analysis__rule">{t.appView.autoRuleTraceWidthReferenceHeightClearance(segAnalysis.auto_profile.minimum_clearance_mm.toFixed(2), segAnalysis.auto_profile.maximum_clearance_mm.toFixed(2), segAnalysis.auto_profile.stackup_available ? t.appView.applied : t.appView.insufficientDataUsingTraceWidthAndMinimum)}</div>
-                      )}
-                      {segAnalysis.rejected_candidates.length > 0 && (
-                        <details className="segment-analysis__rejected">
-                          <summary>{t.appView.rejectedCandidatesAndReasonsShown(segAnalysis.rejected_candidates.length)}</summary>
-                          <div className="segment-analysis__rejected-list">
-                            {segAnalysis.rejected_candidates.slice(0, 80).map((candidate, index) => (
-                              <div key={`${candidate.position_mm}-${index}`}>{t.appView.rejectedCut(segAnalysis.direction.toUpperCase(), candidate.position_mm.toFixed(3), t.appView.joinList(viewList(candidate, 'reasons')))}</div>
-                            ))}
-                          </div>
-                        </details>
-                      )}
                     </div>
                   )}
                   <div className="field-row" style={{ marginTop: 6 }}>
@@ -5597,7 +5987,7 @@ export default function App() {
                       <div className="segment-solver-plan__table-wrap">
                         <table className="segment-solver-plan__table">
                           <thead><tr>
-                            <th>{t.appView.region}</th><th>{t.appView.suggested}</th><th>{t.appView.assigned}</th><th>{t.appView.complexity}</th><th>{t.appView.confidence}</th><th>{t.appView.decisionReason}</th>
+                            <th>{t.appView.region}</th><th>{t.appView.suggested}</th><th>{t.appView.assigned}</th><th>{t.appView.decisionReason}</th><th>{t.appView.failureReason}</th>
                           </tr></thead>
                           <tbody>
                             {segmentSolverPlans.map(plan => (
@@ -5625,11 +6015,30 @@ export default function App() {
                                   {plan.requested_solver !== plan.recommended_solver
                                     && <span className="segment-solver-plan__warning" title={t.appView.userOverrideOfTheSuggestedSolverTip}>⚠</span>}
                                 </td>
-                                <td>{plan.complexity_score}</td>
-                                <td>{Math.round(plan.confidence * 100)}%</td>
-                                <td className="segment-solver-plan__reason" title={t.appView.joinDetails(viewList(plan, 'reasons'))}>
-                                  {t.appView.joinDetails(viewList(plan, 'reasons'))}
+                                <td className="segment-solver-plan__reason" >
+                                  {/* 手動放行 D 級的切面：分段表一定要標出來。 */}
+                                  {plan.manual_d_release?.length ? (
+                                    <span style={{ display: 'block', color: 'var(--warn)', fontWeight: 600 }}>
+                                      {segmentReleaseNote(plan, {
+                                        known: t.appView.stitchReleaseSegment,
+                                        unknown: t.appView.stitchReleaseSegmentUnknown,
+                                        none: t.appView.stitchReleaseSegmentNone,
+                                      })}
+                                    </span>
+                                  ) : null}
+                                  {t.publicUi.solverReason}
                                 </td>
+                                {hasFailure(plan) ? (
+                                  <td className="segment-solver-plan__reason"
+                                    title={`${failureText(plan.failure, lang, t.appView.failureNotRecorded)}\n`
+                                      + t.appView.failureAt(failureTime(plan.failure, t.appView.failureNotRecorded))}
+                                    style={{ color: 'var(--danger)' }}>
+                                    {failureText(plan.failure, lang, t.appView.failureNotRecorded)}
+                                    <span style={{ display: 'block', fontSize: 10.5, color: 'var(--muted)' }}>
+                                      {t.appView.failureAt(failureTime(plan.failure, t.appView.failureNotRecorded))}
+                                    </span>
+                                  </td>
+                                ) : <td>—</td>}
                               </tr>
                             ))}
                           </tbody>
@@ -5637,24 +6046,17 @@ export default function App() {
                       </div>
                     </div>
                   )}
-                  <div className="field-row" style={{ marginTop: 6 }}>
-                    <div style={{ flex: 1 }}>
-                      <div className="field-label">{t.appView.solveCores}</div>
-                      <input aria-label={t.appView.solveCores} type="number" className="input" min="4" step="1"
-                        value={solverCores}
-                        onChange={event => setSolverCores(event.target.value)}
-                        disabled={schedStatus?.running} />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div className="field-label">{t.appView.memorySafetyBudget}</div>
-                      <input aria-label={t.appView.memorySafetyBudget} type="number" className="input" min="10" max="95" step="5"
-                        value={solverMemoryPercent}
-                        onChange={event => setSolverMemoryPercent(event.target.value)}
-                        disabled={schedStatus?.running} />
-                    </div>
-                  </div>
-                  {solverResourcePreview && (
-                    <div className="status" style={{ marginTop: 5, fontSize: 11 }}>{t.appView.usingCoresMemoryBudgetGbReservingAt(solverResourcePreview.effective_cores, solverResourcePreview.available_cores, solverResourcePreview.memory_limit_gb.toFixed(1), solverResourcePreview.effective_memory_percent)}</div>
+                  <SolverCoresField value={solverCores} onChange={setSolverCores} text={t.solverCores}
+                    availableCores={solverResourcePreview?.available_cores}
+                    disabled={Boolean(schedStatus?.running)} />
+                  {solverResourcePreview && solverCoresValue !== null && (
+                    <div className="status" style={{ marginTop: 5, fontSize: 11 }}>{t.solverCores.inUse(
+                      (schedStatus?.running || schedStatus?.hpc_fallback) && schedStatus.hfss_cores ? schedStatus.hfss_cores : solverResourcePreview.effective_cores,
+                      (schedStatus?.running || schedStatus?.hpc_fallback) && schedStatus.siwave_cores ? schedStatus.siwave_cores : solverResourcePreview.effective_cores, solverResourcePreview.available_cores,
+                      solverResourcePreview.memory_limit_gb.toFixed(1), solverResourcePreview.effective_memory_percent)}</div>
+                  )}
+                  {schedStatus?.hpc_fallback && (
+                    <div className="status" style={{ marginTop: 5, fontSize: 11, color: 'var(--warn)' }}>{t.solverCores.fallbackNotice}</div>
                   )}
                   <div className="field-row" style={{ marginTop: 6 }}>
                     <input aria-label={t.appView.segmentsJsonPath} type="text" className="input" value={schedMetaPath}
@@ -5662,7 +6064,7 @@ export default function App() {
                       onBlur={() => {
                         const path = normalizeUserPath(schedMetaPath)
                         setSchedMetaPath(path)
-                        if (path) loadSegmentSolverPlan(path, false)
+                        loadSegmentSolverPlan(path, false)
                       }}
                       placeholder={t.appView.segmentsJsonPathFilledAfterSplittingOr} />
                     <button className="btn" onClick={async () => {
@@ -5672,9 +6074,16 @@ export default function App() {
                         const path = normalizeUserPath(data.path)
                         setSchedMetaPath(path)
                         loadSegmentSolverPlan(path, false)
-                      } catch (e) { alert(t.appView.selectionFailedAlert(viewError(e))) }
+                      } catch (e) { alert(t.appView.selectionFailedAlert(viewError(e)), 'error') }
                     }}>{t.appView.browse}</button>
                   </div>
+                  {segPlanLoadError != null && (
+                    <div role="alert" className="status status--warn" data-testid="schedule-load-error">
+                      {t.appFlow.failedToLoadMixedSolverPlan}{errorText(segPlanLoadError, lang)}
+                      <button className="btn" disabled={schedStatus?.running}
+                        onClick={() => void loadSegmentSolverPlan(schedMetaPath, false)}>{t.appView.retrySourceLoading}</button>
+                    </div>
+                  )}
                   {/* 分段一次要二十分鐘以上。換個求解器設定、改核心數或重打一次包
                       都不該逼人整段重跑——指向既有的 segments.json 就能直接接上。 */}
                   <div className="panel-hint" style={{ marginTop: 3, fontSize: 11 }}>
@@ -5684,12 +6093,12 @@ export default function App() {
                       className="btn--primary"
                       style={{ flex: 2 }}
                       onClick={handleScheduleStart}
-                      disabled={!schedMetaPath || schedStatus?.running}
+                      disabled={!schedMetaPath || scheduleBusy || cascadeBusy || circuitBusy}
                       title={scheduleBlock
                         ? t.appView.cachedSegmentsNeedNoLicenseTheBackendTip(scheduleBlock)
                         : undefined}
                     >
-                      {schedStatus?.running
+                      {schedStartingAt !== null ? schedStartPhase : schedStatus?.running
                         ? t.appView.scheduleRunning(schedStatus.solver === 'mixed' ? t.appView.mixedSolver : schedStatus.solver === 'siwave' ? 'SIwave' : 'HFSS')
                         : segmentSolverPlans.length > 0
                           ? t.appView.startMixedSolve
@@ -5702,6 +6111,11 @@ export default function App() {
                       disabled={!schedStatus?.running || schedStatus?.stop_requested}
                     >{schedStatus?.running && schedStatus?.stop_requested ? t.appView.stopping : t.appView.stop}</button>
                   </div>
+                  {schedStartingAt !== null && (
+                    <div className="status" role="status" aria-live="polite">
+                      {schedStartPhase} · {formatElapsed(Math.max(0, nowTick - schedStartingAt))}
+                    </div>
+                  )}
                   <LicenseTag functions={scheduleFunctions} />
                   {schedMetaPath && !schedStatus?.running && (
                     <button
@@ -5756,33 +6170,51 @@ export default function App() {
                         }
                         const [txt, color] = labels[j.status] || [j.status, 'var(--muted)']
                         const elapsed = jobElapsedSec(j, nowTick)
+                        // 失敗原因與時間：沒有結構化原因時退回原本的錯誤文字。
+                        const failed = hasFailure(j) && j.status !== 'running'
+                        const reason = j.failure
+                          ? t.appView.failureWithTime(failureText(j.failure, lang, t.appView.failureNotRecorded), failureTime(j.failure, t.appView.failureNotRecorded))
+                          : (j.error ? safeUserMessage(j, lang) : '')
                         return (
-                          <div key={j.index} className="netlist__row" title={viewField(j, 'error') || j.touchstone
+                          <div key={j.index} className="netlist__row" title={(failed ? reason : (j.error ? safeUserMessage(j, lang) : '')) || j.touchstone
                             || (j.status === 'running' ? t.appView.phaseProgress(viewField(j, 'phase'), viewField(j, 'progress_detail')) : '')}>
                             <span style={{ fontWeight: 700, minWidth: 42 }}>{t.appView.segment395(j.index)}</span>
                             <span className={`solver-badge solver-badge--${j.solver || 'hfss'}`}>
                               {(j.solver || 'hfss').toUpperCase()}
                             </span>
                             <span style={{ color, fontWeight: 600, minWidth: 56 }}>{txt}</span>
+                            {/* 0 Hz 方法只放短標籤、單行：完整的 dc_note 換成三行把整列
+                                撐高，還帶著開發者用語；完整出處留在報告與 provenance。 */}
+                            {(() => {
+                              const dc = dcNoteLabel(j, t)
+                              return dc && <span className="netlist__note" title={dc.tip}>{dc.label}</span>
+                            })()}
+                            {j.convergence_note && (
+                              <span style={{ color: 'var(--warn)', fontWeight: 700, fontSize: 11, cursor: 'help' }}
+                                title={viewField(j, 'convergence_note')}>{t.appView.notConverged}</span>
+                            )}
                             <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 68 }}>
                               {elapsed !== null ? formatElapsed(elapsed) : ''}
                             </span>
                             {/* 執行中的說明要整句看得到：停止中那句很長，截斷就看不到後面的
-                                「SIwave 進度 NN%」（#0074 實機，工具視窗預設寬度）。 */}
+                                「SIwave 進度 NN%」（工具視窗預設寬度）。 */}
                             <span className={j.status === 'running' ? 'netlist__name netlist__name--wrap' : 'netlist__name'}
                               style={{ fontSize: 11, color: 'var(--muted)' }}>
                               {j.status === 'done' && j.touchstone ? j.touchstone.split(/[\\/]/).pop()
-                                : j.status === 'failed' ? viewField(j, 'error')
+                                : j.status === 'failed' || j.status === 'stopped' ? reason
                                   : j.status === 'solved_pending_export'
-                                    ? (viewField(j, 'error') || t.appView.solveResultsRetainedExportCanBeRetried)
+                                    ? (reason || t.appView.solveResultsRetainedExportCanBeRetried)
                                     : j.status === 'running'
                                       ? <>
-                                          <span>{viewField(j, 'phase') || t.appView.active}
+                                          <span>{solverProgress(j.monitor_data, viewField(j, 'phase') || t.appView.active, t.appView.progressUnavailable).phase}
                                             {j.progress_detail ? t.appView.statusDetail(viewField(j, 'progress_detail')) : ''}
                                           </span>
-                                          {!j.progress_detail && j.monitor_data && (
-                                            <span>{t.appView.adaptiveSweep(j.monitor_data.convergence || 0, j.monitor_data.sweptvar || 0)}</span>
-                                          )}
+                                          {(() => {
+                                            const retry = monitorRetry(j.monitor_data)
+                                            return retry && <span style={{ display: 'block', color: 'var(--warn)' }}>
+                                              {t.operationFeedback.monitorRetry(retry.count, retry.seconds)}
+                                            </span>
+                                          })()}
                                           {j.stall_warning && (
                                             <span style={{ display: 'block', color: 'var(--warn)', fontWeight: 700 }}>{t.appView.noObservableActivityForAboutMinutesThe(Math.max(1, Math.floor((j.stall_seconds || 0) / 60)))}</span>
                                           )}
@@ -5803,12 +6235,26 @@ export default function App() {
                       })}
                     </div>
                   )}
-                  {/* 分段求解的 Touchstone 寫在各段 .aedb 旁邊，也就是 segments.json 所在的資料夾（#0115）。 */}
+                  {/* 畫面字數上限 50（test_ui_text_length）：數值與建議放在「未收斂」的滑鼠提示與報告。 */}
+                  {(() => {
+                    const unconverged = (schedStatus?.jobs || []).filter((j: any) => j.convergence_note)
+                    return unconverged.length > 0 && (
+                      <div style={{ marginTop: 4, fontSize: 11, color: 'var(--warn)', fontWeight: 700 }}
+                        title={unconverged.map((j: any) => t.appView.unconvergedSegmentNote(j.index, viewField(j, 'convergence_note'))).join('\n')}>
+                        {t.appView.unconvergedSegments(unconverged.length)}
+                      </div>
+                    )
+                  })()}
+                  {/* 分段求解的 Touchstone 寫在各段 .aedb 旁邊，也就是 segments.json 所在的資料夾。 */}
                   {schedStatus && !schedStatus.running && (schedStatus.counts?.done ?? 0) > 0 && (
                     <div style={{ marginTop: 6 }}>
                       <OpenFolderButton path={schedStatus.metadata_path} />
                     </div>
                   )}
+                  {/* 每次排程各段的結果與原因；排程開始／結束時自動重讀。 */}
+                  <RunHistory kind="segment_schedule" anchorPath={schedMetaPath}
+                    refreshToken={schedStatus?.running ? 'running' : 'idle'}
+                    title={t.appView.scheduleHistoryTip} />
                   <p className="panel-caveat">
                     <b>{t.appView.siwaveUsesAQuasiStaticApproximation}</b>{t.appView.suitableForScreeningRecheckChannelsRequiringSign}</p>
                 </div>
@@ -5819,9 +6265,9 @@ export default function App() {
                   <p className="panel-hint">{t.appView.connectsAccordingToThePortMappingTo}</p>
                   {/* 模式切換 */}
                   <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                    {([['tool', t.appView.toolSegmentResults], ['external', t.appView.externalSParameterFiles]] as const).map(([m, label]) => (
+                    {([['tool', t.appView.toolSegmentResults], ['external', t.appView.externalSParameterFiles]] as const).filter(([m]) => betaEnabled || m === 'tool').map(([m, label]) => (
                       <button key={m} className="btn" onClick={() => handleCascadeModeChange(m)}
-                        disabled={circuitBusy || cascadeBusy}
+                        disabled={scheduleBusy || circuitBusy || cascadeBusy}
                         style={{
                           flex: 1, fontWeight: cascadeMode === m ? 700 : 400,
                           borderColor: cascadeMode === m ? 'var(--accent)' : undefined,
@@ -5844,14 +6290,15 @@ export default function App() {
                         className="btn--primary"
                         style={{ flex: 1.4 }}
                         onClick={handleCascadeRun}
-                        disabled={!schedMetaPath || cascadeBusy || circuitBusy}
+                        hidden={!betaEnabled && mixedSolverCascade}
+                        disabled={!schedMetaPath || scheduleBusy || cascadeBusy || circuitBusy}
                       >
                         {cascadeBusy ? t.appView.cascading : t.appView.runCircuitCascade}
                       </button>
                     </div>
                   )}
 
-                  {cascadeMode === 'external' && (
+                  {betaEnabled && cascadeMode === 'external' && (
                     <div style={{ marginTop: 6 }}>
                       {/* 檔案清單 */}
                       <div style={{ display: 'flex', gap: 6 }}>
@@ -5969,7 +6416,7 @@ export default function App() {
                             <button className="btn" style={{ flex: 1 }} onClick={handleExtPreview}>{t.appView.previewWiring}</button>
                             <button className="btn--primary" style={{ flex: 1.4 }}
                               onClick={handleExtRun}
-                              disabled={cascadeBusy || circuitBusy || extConns.length === 0}>
+                              disabled={scheduleBusy || cascadeBusy || circuitBusy || extConns.length === 0}>
                               {cascadeBusy ? t.appView.cascading : t.appView.runCascade}
                             </button>
                           </div>
@@ -5979,7 +6426,7 @@ export default function App() {
                   )}
                   {cascadeResult && (
                     <>
-                      <div className="status status--ok" style={{ marginTop: 6, fontSize: 11.5 }}>{t.appView.donePortsGhzPointsMaxS(cascadeResult.n_ports, cascadeResult.freq_min_ghz?.toFixed(2), cascadeResult.freq_max_ghz?.toFixed(2), cascadeResult.freq_points, cascadeResult.max_s_magnitude?.toFixed(3))}<div style={{ wordBreak: 'break-all', color: 'var(--muted)', marginTop: 2 }}>
+                      <div className="status status--ok" style={{ marginTop: 6, fontSize: 11.5 }}>{t.appView.donePortsGhzPointsMaxS(cascadeResult.n_ports, cascadeResult.freq_min_ghz?.toFixed(2), cascadeResult.freq_max_ghz?.toFixed(2), cascadeResult.freq_points, formatMaxS(cascadeResult.max_s_magnitude))}<div style={{ wordBreak: 'break-all', color: 'var(--muted)', marginTop: 2 }}>
                           {cascadeResult.output_path}
                         </div>
                         {cascadeResult.summary_path && (
@@ -6149,6 +6596,17 @@ export default function App() {
                             ? t.appView.solveTdrFromCascadeResultsAndMap
                             : t.appView.noCascadeYetImportAMeasuredWaveform}
                         </div>
+                        <div data-testid="tdr-suggestion-feedback">
+                          {tdrSuggestionLoading && <p role="status">{t.appView.tdrSuggestionLoading}</p>}
+                          {tdrSuggestionError != null && (
+                            <div role="alert" className="status status--warn">
+                              {t.appView.tdrSuggestionFailed}{errorText(tdrSuggestionError, lang)}
+                              <button className="btn" onClick={() => setTdrSuggestionRevision(n => n + 1)}>
+                                {t.appView.retrySourceLoading}
+                              </button>
+                            </div>
+                          )}
+                        </div>
                         {tdrSuggestion && (
                           <>
                             <div className={`status ${tdrSuggestion.supported ? '' : 'status--warn'}`}
@@ -6235,7 +6693,7 @@ export default function App() {
                               </div>
                             )}
                             {tdrPath && (
-                              <div className="panel-hint" style={{ marginTop: 4 }}>{t.appView.physicalChannelLengthMmOrigin(Number(tdrPath.length_mm).toFixed(2), tdrPath.start_mm.map((v: number) => v.toFixed(1)).join(', '), tdrPath.unchained > 0
+                              <div className="panel-hint" style={{ marginTop: 4 }}>{t.appView.physicalChannelLengthMmOrigin(length(Number(tdrPath.length_mm)), tdrPath.start_mm.map((v: number) => length(v)).join(', '), tdrPath.unchained > 0
                                   ? t.appView.traceSectionsCouldNotBeIncludedIn(tdrPath.unchained) : '')}</div>
                             )}
                             <button className="btn btn--primary" style={{ width: '100%', marginTop: 6 }}
@@ -6254,7 +6712,7 @@ export default function App() {
                         )}
                         {/* 量測波形匯入（乙路）：不依賴串接結果——客戶拿
                             示波器檔來的時候，常常手上只有板子與波形。 */}
-                        <details style={{ marginTop: 8 }}>
+                        <details hidden={!betaEnabled} style={{ marginTop: 8 }}>
                           <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>{t.appView.importMeasuredWaveformScopeTdr}<BetaBadge feature="B18" /></summary>
                           <div className="panel-hint" style={{ marginTop: 4 }}>{t.appView.twoColumnCsvTimeAndVoltageOr}</div>
                           <div className="panel-hint" style={{ marginTop: 2 }}>{t.appView.t0IsTheBoardLaunchReflectionTime}</div>
@@ -6344,7 +6802,7 @@ export default function App() {
                                 )}
                               </div>
                               <div className="panel-hint" style={{ marginTop: 3 }}>{t.appView.velocitySource(tdrPath?.length_mm
-                                  ? t.appView.twoAnchorsTraceMmFarEndRequired(Number(tdrPath.length_mm).toFixed(1))
+                                  ? t.appView.twoAnchorsTraceMmFarEndRequired(length(Number(tdrPath.length_mm)))
                                   : t.appView.noTraceLengthLoadABoardFor, tdrDkHint ? t.appView.stackupDk(Number(tdrDkHint).toFixed(2)) : '')}</div>
                               {!tdrSuggestion && signalNets.length > 0 && (
                                 <div className="field-row" style={{ marginTop: 5 }}>
@@ -6396,24 +6854,24 @@ export default function App() {
                   <div className="field-row" style={{ marginTop: 6 }}>
                     <div style={{ flex: 1 }}>
                       <div className="field-label">{t.appView.sampleSpacingM}</div>
-                      <input aria-label={t.appView.sampleSpacingM} className="input" value={xsResolutionUm}
-                        onChange={event => setXsResolutionUm(event.target.value)}
-                        title={t.appView.distanceBetweenCopperChecksAlongTheCutTip} />
+                      <LengthInput aria-label={t.appView.sampleSpacingM} className="input" value={xsResolutionUm}
+                        onValue={setXsResolutionUm}
+                        title={t.appView.distanceBetweenCopperChecksAlongTheCutTip} fieldKey="xsResolutionUm" source="um" min={0} positive step={1} />
                     </div>
                     <div style={{ flex: 1 }}>
                       <div className="field-label">{t.appView.conductorToReferenceHeightMOptional}</div>
-                      <input aria-label={t.appView.conductorToReferenceHeightMOptional} className="input" value={xsHeightUm}
-                        onChange={event => setXsHeightUm(event.target.value)}
-                        title={t.appView.requiredToAssessLateralTruncationWithoutItTip} />
+                      <LengthInput aria-label={t.appView.conductorToReferenceHeightMOptional} className="input" value={xsHeightUm}
+                        onValue={setXsHeightUm}
+                        title={t.appView.requiredToAssessLateralTruncationWithoutItTip} fieldKey="xsHeightUm" source="um" min={0} optional step={1} />
                     </div>
                   </div>
                   <div className="panel-hint" style={{ marginTop: 5 }}>
                     {xsRegion
-                      ? t.appView.workArea(xsRegion.x0Mm.toFixed(2), xsRegion.y0Mm.toFixed(2))
-                        + `${xsRegion.x1Mm.toFixed(2)}, ${xsRegion.y1Mm.toFixed(2)} mm`
+                      ? t.appView.workArea(length(xsRegion.x0Mm), length(xsRegion.y0Mm))
+                        + `${length(xsRegion.x1Mm)}, ${length(xsRegion.y1Mm)} ${unit}`
                       : t.appView.noWorkAreaSelected}
                     {xsCut
-                      ? t.appView.cutLineMm(xsCut.axis.toUpperCase(), xsCut.coordinateMm.toFixed(3))
+                      ? t.appView.cutLineMm(xsCut.axis.toUpperCase(), length(xsCut.coordinateMm))
                       : t.appView.noCutLineSelected}
                   </div>
                   <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
@@ -6547,7 +7005,7 @@ export default function App() {
                   hidden={!(show.segment || show.schedule)}
                   className={'viewtab' + (activeView === 'segments' ? ' viewtab--active' : '')}
                   onClick={() => setActiveView('segments')}
-                  disabled={!segAnalysis && !segRun}
+                  disabled={!segRun && segmentOverlayCount(segOverlayInput) === null}
                 >{t.appView.nSegmentSplit}</button>
                 <button
                   hidden={!(show.cascade)}
@@ -6559,7 +7017,7 @@ export default function App() {
                   hidden={!(show.sparam)}
                   className={'viewtab' + (activeView === 'sparam' ? ' viewtab--active' : '')}
                   onClick={() => setActiveView('sparam')}
-                  disabled={!cascadeResult}
+                  disabled={!sparamTabEnabled(cascadeResult)}
                 >{t.appView.sParameters}</button>
                 {/* 舊版單一 QuickEye 結果頁不再作為入口；新眼圖直接在 IBIS 分析向導顯示。 */}
                 <button
@@ -6587,12 +7045,12 @@ export default function App() {
                     disabled={!tdrJob || tdrJob.status === 'idle'}
                   >TDR</button>
                 </span>
-                <span hidden={!(show.crosssection)}
+                <span hidden={!(show.crosssection || xsReadable)}
                   title={!fullScene ? t.appView.noBoardLoadedLoadABoardToTip : ''}>
                   <button
                     className={'viewtab' + (activeView === 'crosssection' ? ' viewtab--active' : '')}
                     onClick={() => setActiveView('crosssection')}
-                    disabled={!fullScene}
+                    disabled={!fullScene && !xsReadable}
                   >{t.appView.crossSectionImpedance}</button>
                 </span>
                 <button
@@ -6606,17 +7064,20 @@ export default function App() {
                     <ReportSnapshotButton
                       basePath={reportBasePath}
                       projectName={reportProjectName}
-                      targetId="report-result-capture"
+                      targetId={activeView === 'tdr' ? 'report-tdr-capture' : 'report-result-capture'}
                       kind={activeView === 'segments' && segRun && !isOverviewMode
                         ? `segments-${activeSegIdx + 1}` : activeView}
                       title={sceneLabel}
                       section={reportSectionByView[activeView]}
                       sourceRevision={reportSourceRevision}
-                      // 按下快照時才組：模型分頁的 store 不會讓 App 重新 render（#0116）。
+                      // 按下快照時才組：模型分頁的 store 不會讓 App 重新 render。
                       sourceMetadata={() => ({
+                        dc_method: (schedStatus?.jobs || []).filter((job: any) => job.dc_note)
+                          .map((job: any) => t.appView.dcMethodForSegment(job.index, viewField(job, 'dc_note')))
+                          .join(t.appView.dcMethodSeparator),
                         signal_net_count: signalNets.length,
                         reference_net_count: refNets.length,
-                        // 卡 0083 R5：原本只看本次跑過的分段，重新開啟專案、直接
+                        // ：原本只看本次跑過的分段，重新開啟專案、直接
                         // 載入串接結果時寫成 0。查不到就不寫（undefined 不進報告）。
                         segment_count: reportSegmentCount({
                           view: activeView,
@@ -6631,7 +7092,7 @@ export default function App() {
                         // 表格才會以文字保留下來。
                         ...(activeView === 'crosssection'
                           ? crossSectionReportMetadata() : {}),
-                        // 模型分頁同理：秒測／統計眼／COM 的數字由各元件寫進
+                        // 模型分頁同理：模型來源等數字由各元件寫進
                         // store，這裡整批掛上。
                         ...(activeView === 'models'
                           ? modelsReportMetadata() : {}),
@@ -6659,7 +7120,8 @@ export default function App() {
                         ) : activeView === 'report' ? (
                           <ReportCenter basePath={reportBasePath} projectName={reportProjectName}
                             onWorkspaceChange={rememberReportWorkspace}
-                            channelTouchstone={cascadeResult?.output_path || ''} />
+                            channelTouchstone={reportCollectSources.cascadeTouchstone}
+                            collect={reportCollectSources} />
                         ) : activeView === 'eye' ? (
                           <div style={{
                             height: '100%', overflow: 'hidden', padding: 14,
@@ -6701,7 +7163,7 @@ export default function App() {
                             )}
 
                             {/* 量測在 measurements.metrics 底下，不是 measurements 本身。
-                                外層是 ADR-0039 的可得性包裝（available／source／api／
+                                外層是  的可得性包裝（available／source／api／
                                 unavailable_reason／attempted），直接展開會列出六張沒有
                                 意義的卡，而真正的 11 項一個都不會出現。 */}
                             {eyeJob?.result?.measurements?.available === false && (
@@ -6748,7 +7210,7 @@ export default function App() {
                                   color: '#718096', fontSize: 10.5, marginTop: 6,
                                   wordBreak: 'break-all', flexShrink: 0,
                                 }} title={eyeJob.result?.image_path || ''}>
-                                  {/* 這一區會被拍進客戶報告，只顯示檔名；完整路徑在提示裡（卡 0083 R5）。 */}
+                                  {/* 這一區會被拍進客戶報告，只顯示檔名；完整路徑在提示裡。 */}
                                   {displayFileName(eyeJob.result?.image_path)}
                                 </div>
                                 <div style={{ marginTop: 6, flexShrink: 0 }}>
@@ -6761,10 +7223,10 @@ export default function App() {
                             )}
                           </div>
                         ) : activeView === 'tdr' ? (
-                          // overflow 用 hidden 不用 auto：整頁必須塞進視窗，
-                          // 一出現捲軸，報告快照就截不到下半部的曲線圖。
-                          <div style={{
-                            height: '100%', overflow: 'hidden', padding: 14,
+                          // 捲動外殼限制螢幕高度；快照直接擷取內層完整內容，包含曲線與檔名列。
+                          <div style={{ height: '100%', overflow: 'auto' }}>
+                          <div id="report-tdr-capture" style={{
+                            minHeight: '100%', padding: 14,
                             display: 'flex', flexDirection: 'column', gap: 8,
                             fontFamily: '"Calibri", "Microsoft JhengHei", sans-serif',
                             color: '#d8e1ec',
@@ -6791,7 +7253,7 @@ export default function App() {
                                     ]
                                     if (analysis) {
                                       chips.push([t.appView.propagationVelocity, `${(analysis.velocity_m_s / 1e8).toFixed(3)}×10⁸ m/s`])
-                                      chips.push([t.appView.spatialResolution, `${Number(analysis.resolution_mm).toFixed(2)} mm`])
+                                      chips.push([t.appView.spatialResolution, measure(Number(analysis.resolution_mm))])
                                       if (analysis.effective_dk) chips.push([t.appView.effectiveDk, Number(analysis.effective_dk).toFixed(2)])
                                     }
                                     return chips.map(([label, value]) => (
@@ -6858,18 +7320,18 @@ export default function App() {
                                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                                       {viewList(tdrJob.result, 'warnings').map((warning: string) => (
                                         <div key={warning} className="status status--warn"
-                                          style={{ fontSize: 10.5, width: 'auto', padding: '2px 8px' }}>
+                                          style={{ fontSize: 10.5, width: 'auto', padding: '2px 8px', animation: 'none' }}>
                                           {warning}
                                         </div>
                                       ))}
                                       {tdrMapError && (
                                         <div className="status status--warn"
-                                          style={{ fontSize: 10.5, width: 'auto', padding: '2px 8px' }}>{t.appView.layoutMarkerMappingFailed(tdrMapError)}</div>
+                                          style={{ fontSize: 10.5, width: 'auto', padding: '2px 8px', animation: 'none' }}>{t.appView.layoutMarkerMappingFailed(tdrMapError)}</div>
                                       )}
                                     </div>
                                   )}
 
-                                  <div style={{ display: 'flex', gap: 8, minHeight: 180, flex: 1 }}>
+                                  <div style={{ display: 'flex', gap: 8, minHeight: 110, flex: '1 0 auto' }}>
                                     {tdrScene && (
                                       <div style={{
                                         flex: 1.5, minWidth: 0, border: '1px solid #303a48',
@@ -6924,13 +7386,13 @@ export default function App() {
                                                   <td style={{ padding: '4px 6px', fontWeight: 700 }}>
                                                     {methodTag}{index + 1}{marker?.excluded ? ' ⚠' : ''}
                                                   </td>
-                                                  <td style={{ padding: '4px 6px' }}>{peak.distance_mm.toFixed(1)} mm</td>
+                                                  <td style={{ padding: '4px 6px' }}>{length(peak.distance_mm)} {unit}</td>
                                                   <td style={{ padding: '4px 6px' }}>{peak.impedance_ohm.toFixed(1)} Ω</td>
                                                   <td style={{ padding: '4px 6px' }}>{peak.delta_z_ohm > 0 ? '+' : ''}{peak.delta_z_ohm.toFixed(1)} Ω</td>
                                                   <td style={{ padding: '4px 6px' }}>{peak.reflection_mag.toFixed(3)}</td>
                                                   {show.crosssection && (
                                                     <td style={{ padding: '4px 6px' }}>
-                                                      <button className="btn--mini"
+                                                      <button className="btn--mini tdr-crosssection-button"
                                                         disabled={xsFromTdrBusy || !tdrPath}
                                                         onClick={() => handleCutHere(
                                                           peak.distance_mm, `XS_${methodTag}${index + 1}`)}
@@ -6956,16 +7418,16 @@ export default function App() {
                                           <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
                                             <div style={{ flex: 1 }}>
                                               <div className="field-label">{t.appView.spacingMm}</div>
-                                              <input aria-label={t.appView.spacingMm} className="input" style={{ height: 26 }}
+                                              <LengthInput aria-label={t.appView.spacingMm} className="input" style={{ height: 26 }}
                                                 value={xsSampleSpacingMm}
-                                                onChange={e => setXsSampleSpacingMm(e.target.value)} />
+                                                onValue={setXsSampleSpacingMm} fieldKey="xsSampleSpacingMm" source="mm" min={0} positive step={1} />
                                             </div>
                                             <div style={{ flex: 1 }}
                                               title={t.appView.lateralHalfWidthDefinesThePhysicalBoundaryTip}>
                                               <div className="field-label">{t.appView.lateralHalfWidthM}</div>
-                                              <input aria-label={t.appView.lateralHalfWidthM} className="input" style={{ height: 26 }}
+                                              <LengthInput aria-label={t.appView.lateralHalfWidthM} className="input" style={{ height: 26 }}
                                                 value={xsHalfWidthUm}
-                                                onChange={e => setXsHalfWidthUm(e.target.value)} />
+                                                onValue={setXsHalfWidthUm} fieldKey="xsHalfWidthUm" source="um" min={0} positive step={100} />
                                             </div>
                                             <button className="btn" style={{ height: 26, whiteSpace: 'nowrap' }}
                                               disabled={xsFromTdrBusy}
@@ -6973,23 +7435,27 @@ export default function App() {
                                               {xsFromTdrBusy ? t.appView.generating : t.appView.sampleAlongTrace}
                                             </button>
                                           </div>
-                                          <div style={{ fontSize: 10.5, color: '#8fa1b5', marginTop: 4 }}>{t.appView.traceLengthMmSpacingMmAboutCuts(Number(tdrPath.length_mm).toFixed(2), xsSampleSpacingMm, ' ', Math.max(1, Math.round(Number(tdrPath.length_mm) / (Number(xsSampleSpacingMm) || 1))))}</div>
+                                          <div style={{ fontSize: 10.5, color: '#8fa1b5', marginTop: 4 }}>{t.appView.traceLengthMmSpacingMmAboutCuts(length(Number(tdrPath.length_mm)), length(Number(xsSampleSpacingMm)), ' ', Math.max(1, Math.round(Number(tdrPath.length_mm) / (Number(xsSampleSpacingMm) || 1))))}</div>
                                         </div>
                                       )}
                                     </div>
                                   </div>
 
-                                  <div style={{ border: '1px solid #303a48', borderRadius: 8, overflow: 'hidden', flexShrink: 0 }}>
+                                  {/* 圖框與上方表格分剩下的高度：最少 120、最多 230（原本固定 230）。 */}
+                                  <div ref={tdrChartBoxRef} style={{
+                                    border: '1px solid #303a48', borderRadius: 8, overflow: 'hidden',
+                                    flex: '1.2 1 0', minHeight: 122, maxHeight: 232,
+                                  }}>
                                     <TdrChart
                                       distanceMm={analysis.distance_mm || []}
                                       impedanceOhm={tdrJob.result.impedance_ohm || []}
                                       markers={chartMarkers}
                                       pathLengthMm={tdrJob.result.path_length_mm}
                                       xMaxMm={analysis.display_cap_mm ?? null}
-                                      height={230} />
+                                      height={tdrChartHeight(tdrChartBoxHeight)} />
                                   </div>
-                                  <div className="result-paths result-paths--center">
-                                    {/* 會被拍進客戶報告：只顯示檔名，完整路徑放提示（卡 0083 R5）。 */}
+                                  <div className="result-paths result-paths--center" style={{ animation: 'none' }}>
+                                    {/* 會被拍進客戶報告：只顯示檔名，完整路徑放提示。 */}
                                     <span title={String((tdrJob.result.source === 'measured_waveform'
                                       ? tdrJob.result.csv_path : tdrJob.result.project_path) || '')}>
                                       {tdrJob.result.source === 'measured_waveform'
@@ -7004,6 +7470,7 @@ export default function App() {
                             {!tdrJob?.running && tdrJob?.status !== 'done' && tdrJob?.status !== 'error' && (
                               <div className="status" style={{ marginTop: 14 }}>{t.appView.noTdrAnalysisYetCompleteCircuitCascade}</div>
                             )}
+                          </div>
                           </div>
                         ) : activeView === 'sparam' && cascadeResult ? (
                           <div style={{
@@ -7063,7 +7530,7 @@ export default function App() {
                                 // 回傳型別標成 SParamSeries，欄位名打錯會在編譯期擋下。
                                 // 先前寫成 freq_ghz（圖表要的是 freq）且沒給 color，
                                 // 因為來源是 any 而躲過型別檢查，執行到才
-                                // undefined.map() 讓整個畫面崩掉。
+                                // undefined.map 讓整個畫面崩掉。
                                 series={((spData?.series || []) as any[])
                                   .filter((c: any) => spKinds[c.kind])
                                   .map((c: any, i: number): SParamSeries => ({
@@ -7083,7 +7550,7 @@ export default function App() {
                                 看起來像少了什麼東西。 */}
                             <div className="result-paths result-paths--center">
                               {/* 這一行會被拍進 S 參數快照、交給客戶：只顯示檔名，
-                                  完整路徑放提示（卡 0083 R5）。 */}
+                                  完整路徑放提示。 */}
                               <span title={String(cascadeResult.output_path || '')}>{t.appView.source(displayFileName(cascadeResult.output_path))}</span>
                               <span>
                                 {spMode === 'diff'
@@ -7176,11 +7643,14 @@ export default function App() {
                               )}
                             </div>
                           </div>
-                        ) : activeView === 'crosssection' ? (
+                        ) : activeView === 'crosssection' && (betaEnabled || xsReadable) ? (
                           <div style={{
                             height: '100%', paddingTop: 34, display: 'flex', gap: 8,
                             minHeight: 0,
                           }}>
+                            <div><BetaBadge feature="M12" />
+                              {!betaEnabled && xsJob?.running && <button type="button" onClick={() => { void api('/api/cross-section/stop', {}) }}>{t.appView.stop}</button>}
+                            </div>
                             <div style={{
                               flex: 1.2, minWidth: 0, border: '1px solid #303a48',
                               borderRadius: 8, overflow: 'hidden', position: 'relative',
@@ -7191,12 +7661,12 @@ export default function App() {
                                 signalNets={signalNets} refNets={refNets}
                                 highlightNets={[...signalNets, ...refNets]}
                                 layerPanelInitiallyOpen={false}
-                                crossSectionMode={xsMode}
-                                onCrossSectionModeChange={setXsMode}
+                                crossSectionMode={betaEnabled ? xsMode : 'none'}
+                                onCrossSectionModeChange={betaEnabled ? setXsMode : undefined}
                                 crossSectionRegion={xsRegion}
                                 crossSectionCut={xsCut}
-                                onCrossSectionRegionDrawn={handleXsRegionDrawn}
-                                onCrossSectionCutDrawn={handleXsCutDrawn}
+                                onCrossSectionRegionDrawn={betaEnabled ? handleXsRegionDrawn : undefined}
+                                onCrossSectionCutDrawn={betaEnabled ? handleXsCutDrawn : undefined}
                               />
                             </div>
                             <div style={{
@@ -7243,7 +7713,7 @@ export default function App() {
                                 <CrossSectionView
                                   scan={xsScan}
                                   roleOverrides={xsRoleOverrides}
-                                  onRoleOverride={handleXsRoleOverride}
+                                  onRoleOverride={betaEnabled ? handleXsRoleOverride : undefined}
                                   busy={xsBusy} />
                               ) : (xsJob?.result?.cuts || []).length > 0 ? (
                                 <div style={{ color: '#8fa1b5', fontSize: 12 }}>{t.appView.toViewTheCrossSectionAgainClick}</div>
@@ -7266,6 +7736,7 @@ export default function App() {
                           </div>
                         ) : (
                         <Preview2D
+                          sessionKey="preview.main"
                           data={scene}
                           fitKey={activeView + inputPath + (activeView === 'segments' && segRun ? `_seg${activeSegIdx}` : '') + (cleanupOverlay ? `_clean${cleanupOverlay.total}` : '')}
                           signalNets={signalNets}
@@ -7286,7 +7757,7 @@ export default function App() {
                           // 執行後左上角多了分段選擇列（top 36），疊圖切換鈕往下讓一排。
                           overlayToggleTop={activeView === 'segments' && segRun ? 72 : undefined}
                           // 只在預覽跟著表格時開放：剛分析完畫的是新分析，表格卻還是
-                          // 舊檔，點下去會改到看不見的那一份（卡 0121）。疊圖依段號排序，
+                          // 舊檔，點下去會改到看不見的那一份。疊圖依段號排序，
                           // 這裡也要依段號對，不能用後端回傳的陣列順序。
                           onSegmentRegionClick={activeView === 'segments' && showSolverRegionOverlay
                             && segFollowPlan && segmentSolverPlans.length > 0
@@ -7351,20 +7822,25 @@ export default function App() {
                   </Allotment.Pane>
 
                   {/* 日誌面板 */}
+                  {/* 日誌最高佔視窗 35%，面板上就能收合：1280×720 的筆電上
+                      日誌一展開，主要內容只剩一小塊，而關掉日誌原本只能找「檢視」選單。 */}
                   {showLogs && (
-                    <Allotment.Pane minSize={90}>
+                    <Allotment.Pane minSize={90} maxSize={logPaneMaxPx(viewportHeight)}>
                       <div style={{ paddingTop: 7, height: '100%' }}>
-                        <div className="panel" style={{ height: '100%', padding: 14, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <div className="panel" style={{ height: '100%', minHeight: 0, padding: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                          <div style={{ display: 'flex', flexShrink: 0, justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                             <h3 className="panel-title" style={{ margin: 0 }}>{t.appView.systemLogs}</h3>
                             <div style={{ display: 'flex', gap: 6 }}>
                               <button className="btn" style={{ fontSize: 12, padding: '2px 10px' }}
                                 onClick={() => void copyText(logs.map(l => logText(l, lang)).join('\n')).catch(e => alert(t.appView.copyLogsFailedAlert(viewError(e))))}>{t.appView.copy}</button>
                               <button className="btn" style={{ fontSize: 12, padding: '2px 10px' }}
                                 onClick={() => setLogs([])}>{t.appView.clear667}</button>
+                              <button className="btn" style={{ fontSize: 12, padding: '2px 10px' }}
+                                title={t.compactLayout.collapseLogsTip}
+                                onClick={() => setShowLogs(false)}>{t.compactLayout.collapseLogs}</button>
                             </div>
                           </div>
-                          <div ref={logBoxRef} style={{ flex: 1, overflowY: 'auto', fontSize: '12px', fontFamily: '"Cascadia Mono", monospace', color: 'var(--muted)', background: 'rgba(255,255,255,0.5)', padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                          <div ref={logBoxRef} onScroll={onLogScroll} style={{ flex: 1, minHeight: 0, overflowY: 'auto', fontSize: '12px', fontFamily: '"Cascadia Mono", monospace', color: 'var(--muted)', background: 'rgba(255,255,255,0.5)', padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
                             {logs.map((l, i) => (
                               <div key={i} className="log-line" style={{ color: logColor(l) }}>{logText(l, lang)}</div>
                             ))}
@@ -7380,6 +7856,10 @@ export default function App() {
           </Allotment.Pane>
         </Allotment>
       </main>
+      {!showLogs && <div className="log-dock" role="region" aria-label={t.compactLayout.logsTitle}>
+        <button className="btn" title={t.compactLayout.expandLogsTip} onClick={() => setShowLogs(true)}>{t.compactLayout.expandLogs}</button>
+        <span className="log-dock__last">{logs.length ? logText(logs[logs.length - 1], lang) : t.appView.noLogsYet}</span>
+      </div>}
     </div>
   )
 }

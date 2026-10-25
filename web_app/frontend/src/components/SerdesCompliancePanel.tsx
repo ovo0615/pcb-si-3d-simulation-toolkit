@@ -1,14 +1,14 @@
-// SerDes 合規判定（#0084）。
+// SerDes 合規判定。
 // 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
 //
 // 頻域限值線、TDR 上下限、眼罩、ERL 對一份使用者自建的規格設定檔判定
-// （ADR-0015：工具不內建規格限值）。判定結果會自動附進 HTML 報告的
+// （：工具不內建規格限值）。判定結果會自動附進 HTML 報告的
 // 「SerDes 合規總表」——前提是報告指定的通道檔就是這裡判的那一份。
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { errorText, pickList, pickText } from '../backendFields'
-import { useT } from '../i18n'
-import OpenFolderButton from './OpenFolderButton'
+import { useLengthT as useT } from '../useLengthT'
+import { useLengthUnit } from '../lengthContext'
 import type { Lang, Messages } from '../i18n'
 import BetaBadge from './BetaBadge'
 
@@ -23,7 +23,6 @@ interface JudgeResult {
   verdict: string; warnings?: string[]; checks: Check[]; disclaimer?: string
   profile?: { name: string; version: string; source: string }
   report_table?: { columns: string[]; rows: string[][]; verdicts: string[] } | null
-  erl_run?: { result_path?: string | null }
 }
 interface LoadedProfile {
   name: string; version: string; source: string
@@ -43,6 +42,13 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
     throw Object.assign(new Error(message), { detail_en: english })
   }
   return response.json() as Promise<T>
+}
+
+/** 使用者自行提供的 ERL（dB）：空白或不是有限數字回 null（不送）。 */
+function erlValue(text: string): number | null {
+  if (text.trim() === '') return null
+  const value = Number(text)
+  return Number.isFinite(value) ? value : null
 }
 
 /** 字典查表；查不到回空字串，呼叫端退回原值（不編一個好看的字蓋掉真正的狀態）。 */
@@ -79,28 +85,40 @@ const CELL: React.CSSProperties = {
 
 export default function SerdesCompliancePanel() {
   const { t, lang } = useT()
+  const { length } = useLengthUnit()
   const tx = t.serdes
   const [touchstone, setTouchstone] = useState('')
   const [profilePath, setProfilePath] = useState('')
   const [profile, setProfile] = useState<LoadedProfile | null>(null)
   const [portOrder, setPortOrder] = useState('')
   const [useLatestTdr, setUseLatestTdr] = useState(true)
-  const [runErl, setRunErl] = useState(false)
+  // ERL 由使用者自行提供數值；空白就不送。
+  const [erlDb, setErlDb] = useState('')
   const [busy, setBusy] = useState(false)
   // 存原本的錯誤物件，顯示時才用 errorText 依語言取 detail／detail_en。
   const [error, setError] = useState<unknown>(null)
   const [result, setResult] = useState<JudgeResult | null>(null)
+  // 每次輸入事件都遞增；A→B→A 仍不能接受最早 A 的晚回應。
+  const judgeRevision = useRef(0)
+  const profileRevision = useRef(0)
+
+  const invalidateResult = () => {
+    judgeRevision.current += 1
+    setResult(null)
+    setError(null)
+    setBusy(false)
+  }
 
   const browseTouchstone = async () => {
     try {
       const picked = await api<{ paths?: string[] }>('/api/browse_touchstone')
       const first = picked?.paths?.[0] || ''
-      if (first) setTouchstone(first)
+      if (first) { invalidateResult(); setTouchstone(first) }
     } catch (reason) { setError(reason) }
   }
 
-  const loadProfile = async (path: string) => {
-    setError(null); setProfile(null); setResult(null)
+  const loadProfile = async (path: string, revision = ++profileRevision.current) => {
+    invalidateResult(); setProfilePath(path); setProfile(null)
     if (!path.trim()) return
     try {
       const out = await api<{ path: string; profile: LoadedProfile }>(
@@ -108,38 +126,44 @@ export default function SerdesCompliancePanel() {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path }),
         })
-      setProfilePath(out.path)
-      setProfile(out.profile)
+      if (revision === profileRevision.current) {
+        setProfilePath(out.path)
+        setProfile(out.profile)
+      }
     } catch (reason) {
-      setError(reason)
+      if (revision === profileRevision.current) setError(reason)
     }
   }
 
   const browseProfile = async () => {
+    const revision = ++profileRevision.current
     try {
       const picked = await api<{ path?: string }>('/api/compliance/serdes/browse_profile')
-      if (picked?.path) await loadProfile(picked.path)
-    } catch (reason) { setError(reason) }
+      if (revision === profileRevision.current && picked?.path) await loadProfile(picked.path, revision)
+    } catch (reason) { if (revision === profileRevision.current) setError(reason) }
   }
 
   const judge = async () => {
     if (!profile) return
+    const revision = ++judgeRevision.current
     setBusy(true); setError(null); setResult(null)
     try {
       // 介面上的埠號從 1 起算（同 S 參數工具箱的換埠序），送給後端前換成 0 起算。
       // \uFF0C 是全形逗號：中文輸入法打出來的「，」也要當分隔符號。
       const order = portOrder.split(/[\uFF0C,\s]+/).filter(Boolean).map(item => Number(item) - 1)
+      const body: Record<string, unknown> = {
+        touchstone_path: touchstone, profile, port_order: order, use_latest_tdr: useLatestTdr,
+      }
+      const erl = erlValue(erlDb)
+      if (profile.erl && erl !== null) body.erl_db = erl
       const out = await api<JudgeResult>('/api/compliance/serdes/judge', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          touchstone_path: touchstone, profile, port_order: order,
-          use_latest_tdr: useLatestTdr, run_erl: runErl,
-        }),
+        body: JSON.stringify(body),
       })
-      setResult(out)
+      if (revision === judgeRevision.current) setResult(out)
     } catch (reason) {
-      setError(reason)
-    } finally { setBusy(false) }
+      if (revision === judgeRevision.current) setError(reason)
+    } finally { if (revision === judgeRevision.current) setBusy(false) }
   }
 
   const tdrViolations = (result?.checks || [])
@@ -147,7 +171,7 @@ export default function SerdesCompliancePanel() {
     .flatMap(check => (check.violations || [])
       .filter(item => item.distance_mm)
       .map(item => tx.tdrViolation(check.name,
-        item.distance_mm![0].toFixed(2), item.distance_mm![1].toFixed(2))))
+        length(item.distance_mm![0]), length(item.distance_mm![1]))))
   const warnings = result ? pickList(result, 'warnings', lang) : []
   const reportTable = result?.report_table
   const columns = reportTable && reportTable.columns.length === tx.columns.length
@@ -164,7 +188,7 @@ export default function SerdesCompliancePanel() {
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <input className="input is-wide" value={touchstone}
               placeholder="channel.s4p"
-              onChange={event => setTouchstone(event.target.value)} />
+              onChange={event => { invalidateResult(); setTouchstone(event.target.value) }} />
             <button className="btn" onClick={() => void browseTouchstone()}>{tx.browse}</button>
           </div>
         </label>
@@ -172,7 +196,10 @@ export default function SerdesCompliancePanel() {
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <input className="input is-wide" value={profilePath}
               placeholder="serdes_profile.json"
-              onChange={event => setProfilePath(event.target.value)}
+              onChange={event => {
+                profileRevision.current += 1
+                invalidateResult(); setProfile(null); setProfilePath(event.target.value)
+              }}
               onBlur={event => void loadProfile(event.target.value)} />
             <button className="btn" onClick={() => void browseProfile()}>{tx.browse}</button>
           </div>
@@ -186,21 +213,25 @@ export default function SerdesCompliancePanel() {
         )}
         <label>{tx.portOrder}
           <input className="input" value={portOrder} placeholder="1,2,3,4"
-            onChange={event => setPortOrder(event.target.value)} />
+            onChange={event => { invalidateResult(); setPortOrder(event.target.value) }} />
         </label>
         <p className="hint">{tx.portOrderHint}</p>
         <label>
           <input type="checkbox" checked={useLatestTdr}
-            onChange={event => setUseLatestTdr(event.target.checked)} />
+            onChange={event => { invalidateResult(); setUseLatestTdr(event.target.checked) }} />
           {tx.useLatestTdr}
         </label>
-        <label>
-          <input type="checkbox" checked={runErl}
-            onChange={event => setRunErl(event.target.checked)} />
-          {tx.runErl}
-        </label>
+        {Boolean(profile?.erl) && <>
+          <p className="hint">{tx.erlUserValueHint}</p>
+          <label>{tx.erlDbLabel}
+            <input className="input" type="number" step="any" value={erlDb}
+              onChange={event => { invalidateResult(); setErlDb(event.target.value) }} />
+          </label>
+          {erlDb.trim() !== '' && erlValue(erlDb) === null && <p className="error">{tx.erlDbInvalid}</p>}
+        </>}
         <div>
-          <button className="btn" disabled={busy || !profile || !touchstone.trim()}
+          <button className="btn"
+            disabled={busy || !profile || !touchstone.trim() || (erlDb.trim() !== '' && erlValue(erlDb) === null)}
             onClick={() => void judge()}>
             {busy ? tx.judging : tx.start}
           </button>
@@ -232,8 +263,6 @@ export default function SerdesCompliancePanel() {
           )}
           <p className="hint">{pickText(result, 'disclaimer', lang)}</p>
           <p className="hint">{tx.reportHint}</p>
-          {/* 只有跑了 ERL 才有輸出檔（com_reports/ERL_*）；純判定沒有資料夾可開。 */}
-          <OpenFolderButton path={result.erl_run?.result_path} />
         </section>
       )}
     </div>

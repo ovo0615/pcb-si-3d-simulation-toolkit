@@ -9,7 +9,7 @@
 //  * 遠端求解包不是獨立面板，而是排程面板裡的區塊。
 //  * 舊版的 `eye` 鍵只保留做 localStorage 遷移；眼圖設定已整合進右側 IBIS 分析頁。
 //
-// 卡 0087 批 2：這裡只留結構（鍵、前置、父子），名稱、預估耗時與說明在語言檔
+// ：這裡只留結構（鍵、前置、父子），名稱、預估耗時與說明在語言檔
 // `tasks` 區塊，由 `taskGroups(t.tasks)` 組成畫面用的清單。
 
 import type { Messages } from './i18n/zh-TW'
@@ -206,19 +206,24 @@ export function missingPrerequisites(
 
 const STORAGE_KEY = 'pcbsi.enabledTasks.v1'
 
+/** 存下來的任務清單（localStorage 或工作階段快照）→ 可用的任務鍵；
+ *  不是陣列回 null，讓呼叫端退回下一個來源。 */
+export function normalizeTaskList(parsed: unknown): TaskKey[] | null {
+  if (!Array.isArray(parsed)) return null
+  const valid = new Set<TaskKey>(ALL_TASK_SELECTION)
+  // 舊版把眼圖放在左側串接工作列。新版統一搬到右側 IBIS 分析頁，
+  // 曾勾選 `eye` 的使用者自動改成啟用 `models`，不要求重設入口選項。
+  const migrated = parsed.includes('eye') && !parsed.includes('models')
+    ? [...parsed, 'models'] : parsed
+  // 過濾掉已不存在的鍵：舊版存下來的項目若被移除，不該讓整份設定失效。
+  return migrated.filter((key): key is TaskKey => valid.has(key))
+}
+
 export function loadSavedTasks(): TaskKey[] | null {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return null
-    const valid = new Set<TaskKey>(ALL_TASK_SELECTION)
-    // 舊版把眼圖放在左側串接工作列。新版統一搬到右側 IBIS 分析頁，
-    // 曾勾選 `eye` 的使用者自動改成啟用 `models`，不要求重設入口選項。
-    const migrated = parsed.includes('eye') && !parsed.includes('models')
-      ? [...parsed, 'models'] : parsed
-    // 過濾掉已不存在的鍵：舊版存下來的項目若被移除，不該讓整份設定失效。
-    return migrated.filter((key): key is TaskKey => valid.has(key))
+    return normalizeTaskList(JSON.parse(raw))
   } catch {
     return null
   }

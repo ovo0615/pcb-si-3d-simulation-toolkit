@@ -7,7 +7,8 @@
 
 import { useMemo, useState } from 'react'
 import { pickList, pickText } from '../backendFields'
-import { useT } from '../i18n'
+import { useLengthT as useT } from '../useLengthT'
+import { useLengthUnit } from '../lengthContext'
 
 export interface CrossSectionSegment {
   key: string
@@ -89,15 +90,18 @@ interface Props {
   scan: CrossSectionScan
   /** 逐段覆寫身分；改了就要重掃，因為 Role 會改變導體的組成。 */
   roleOverrides: Record<string, string>
-  onRoleOverride: (key: string, role: string) => void
+  onRoleOverride?: (key: string, role: string) => void
   busy?: boolean
+  /** 報告整頁擷取須完整展開導體表；互動面板仍保留捲動。 */
+  reportMode?: boolean
 }
 
 export default function CrossSectionView({
-  scan, roleOverrides, onRoleOverride, busy,
+  scan, roleOverrides, onRoleOverride, busy, reportMode = false,
 }: Props) {
   const [hovered, setHovered] = useState<string | null>(null)
   const { t, lang } = useT()
+  const { unit, length } = useLengthUnit()
   const tx = t.crossSection
 
   // 橫向範圍取切線的延伸方向；縱向取疊構的總高。疊構讀不到時退成等高列，
@@ -157,10 +161,10 @@ export default function CrossSectionView({
                   fontSize: 12, color: TEXT }}>
       <div>
         <div style={{ fontWeight: 700, fontSize: 13, color: HEADING }}>
-          {tx.heading(scan.cut.name || `${scan.cut.axis.toUpperCase()} = ${scan.cut.coordinate_mm.toFixed(3)} mm`)}
+          {tx.heading(scan.cut.name || `${scan.cut.axis.toUpperCase()} = ${length(scan.cut.coordinate_mm)} ${unit}`)}
         </div>
         <div style={{ ...HINT,  marginTop: 2 }}>
-          {tx.cutInfo(scan.cut.length_mm.toFixed(3), scan.resolution_um.toFixed(1))}
+          {tx.cutInfo(length(scan.cut.length_mm), length(scan.resolution_um, 'um'))}
           {' '}{geometry.toScale ? tx.axesScaled : tx.axesNotToScale}
           {' '}{tx.colorLegend}
         </div>
@@ -208,16 +212,16 @@ export default function CrossSectionView({
                 onMouseEnter={() => setHovered(segment.key)}
                 onMouseLeave={() => setHovered(null)}>
                 <title>{`${segment.net} @ ${segment.layer}\n`
-                  + tx.segmentWidthTip((segment.width_mm * 1000).toFixed(1))
+                  + tx.segmentWidthTip(length(segment.width_mm))
                   + (segment.is_via ? '\n' + tx.segmentViaTip : '')}</title>
               </rect>
             )
           })}
           <text x={PAD_L} y={H - 6} fill="#5c677d" fontSize={11}>
-            {geometry.sLo.toFixed(2)} mm
+            {length(geometry.sLo)} {unit}
           </text>
           <text x={W - PAD_R} y={H - 6} fill="#5c677d" fontSize={11} textAnchor="end">
-            {geometry.sHi.toFixed(2)} mm
+            {length(geometry.sHi)} {unit}
           </text>
         </svg>
         )}
@@ -228,7 +232,7 @@ export default function CrossSectionView({
           ? tx.solvable(scan.plan.conductor_count, scan.plan.signal_conductors.length,
                         scan.plan.reference_conductors.length)
           : tx.notSolvable}
-        {pickList(scan.plan, 'blockers', lang).map((text, index) => (
+        {pickList(scan.plan, 'blockers', lang, unit).map((text, index) => (
           <div key={index} style={{ marginTop: 3 }}>· {text}</div>
         ))}
       </div>
@@ -257,7 +261,7 @@ export default function CrossSectionView({
                                       marginBottom: 4 }}>
               <b>{item.severity === 'hard' ? tx.hard : tx.risk}</b>
               {item.net ? tx.gap + item.net : ''}{item.layer ? ` @ ${item.layer}` : ''}
-              <div style={{ marginTop: 2 }}>{pickText(item, 'message', lang)}</div>
+              <div style={{ marginTop: 2 }}>{pickText(item, 'message', lang, unit)}</div>
             </div>
           ))}
         </div>
@@ -270,16 +274,16 @@ export default function CrossSectionView({
         <div style={{ ...HINT,  marginBottom: 4 }}>
           {tx.segmentsHint}
         </div>
-        <div style={{ maxHeight: 260, overflowY: 'auto', border: `1px solid ${RULE}`, borderRadius: 6 }}>
-          {/* 表格另外存一張完整快照：外層有 260px 的捲動框，整頁快照只會拍到
-              前面幾列，而圖上完全看不出被截掉了（與眼圖同一個做法）。 */}
+        <div style={{ maxHeight: reportMode ? undefined : 260, overflowY: reportMode ? 'visible' : 'auto',
+                      border: `1px solid ${RULE}`, borderRadius: 6 }}>
+          {/* 互動面板捲動，單張按鈕仍另存完整表；報告 stage 直接展開全部列。 */}
           <table
             data-report-separate-snapshot="true"
             data-report-kind="cross-section-segments"
             data-report-title={tx.segmentsSnapshotTitle}
             style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
-              <tr style={{ position: 'sticky', top: 0 }}>
+              <tr style={{ position: reportMode ? 'static' : 'sticky', top: reportMode ? undefined : 0 }}>
                 <th style={headCell}>{tx.colLayer}</th>
                 <th style={headCell}>Net</th>
                 <th style={{ ...headCell, textAlign: 'right' }}>{tx.colPosition}</th>
@@ -299,17 +303,17 @@ export default function CrossSectionView({
                     {segment.is_via && <span style={{ color: '#e0b341' }} title={tx.viaPadTip}>{tx.gap}Via</span>}
                   </td>
                   <td style={{ ...cell, textAlign: 'right' }}>
-                    {segment.s0_mm.toFixed(3)}–{segment.s1_mm.toFixed(3)}
+                    {length(segment.s0_mm)}–{length(segment.s1_mm)}
                   </td>
                   <td style={{ ...cell, textAlign: 'right' }}>
-                    {(segment.width_mm * 1000).toFixed(1)}
+                    {length(segment.width_mm)}
                   </td>
                   <td style={cell}>
-                    <select className="input" disabled={busy}
+                    <select className="input" disabled={busy || !onRoleOverride}
                       aria-label={tx.roleAria(segment.key)}
                       style={{ height: 22, padding: '0 4px', fontSize: 11 }}
                       value={roleOverrides[segment.key] ?? segment.role}
-                      onChange={event => onRoleOverride(segment.key, event.target.value)}>
+                      onChange={event => onRoleOverride?.(segment.key, event.target.value)}>
                       <option value="signal">{tx.roleSignal}</option>
                       <option value="reference">{tx.roleReference}</option>
                     </select>
@@ -362,6 +366,7 @@ export function CrossSectionResults({
   onSelect: (index: number) => void
 }) {
   const { t, lang } = useT()
+  const { unit, length, measure } = useLengthUnit()
   const tx = t.crossSection
   const modeLabels: Record<string, string> = {
     fast: tx.modeFast, standard: tx.modeStandard, accurate: tx.modeAccurate,
@@ -408,7 +413,7 @@ export function CrossSectionResults({
           <div style={HINT}>
             {row.name}
             {typeof row.coordinate_mm === 'number'
-              ? `${tx.gap}${(row.axis || '').toUpperCase()} = ${row.coordinate_mm.toFixed(3)} mm` : ''}
+              ? `${tx.gap}${(row.axis || '').toUpperCase()} = ${length(row.coordinate_mm)} ${unit}` : ''}
             {/* 分隔的空格要留在表達式裡：JSX 會把換行後開頭的空白吃掉，
                 寫成純文字會變成「mm精度」。 */}
             {/* `solve_mode` 可能是 null（後端 `result.get("solve_mode")`），
@@ -430,7 +435,7 @@ export function CrossSectionResults({
                     </td>
                     <td style={{ ...cell, textAlign: 'right', color: '#8fa1b5' }}>
                       {/* 缺值寫「—」不寫 0：`L 0.00 nH/m` 讀起來是量到 0，
-                          而實際上是這一項沒有值（ADR-0030）。 */}
+                          而實際上是這一項沒有值。 */}
                       L {typeof row.matrix?.[`L(${name},${name})`] === 'number'
                         ? `${row.matrix[`L(${name},${name})`].toFixed(2)} nH/m` : '—'}
                       {tx.gap}C {typeof row.matrix?.[`C(${name},${name})`] === 'number'
@@ -520,7 +525,7 @@ export function CrossSectionResults({
                     const values = Object.values(item.single_ended || {})
                     return (
                       <tr key={item.name}>
-                        <td style={cell}>{(item.axis || '').toUpperCase()} = {item.coordinate_mm?.toFixed(3)}</td>
+                        <td style={cell}>{(item.axis || '').toUpperCase()} = {item.coordinate_mm == null ? '—' : measure(item.coordinate_mm)}</td>
                         <td style={{ ...cell, textAlign: 'right' }}>
                           {values.length
                             ? values.map(v => `${v.toFixed(3)} Ω`).join(tx.listSep)

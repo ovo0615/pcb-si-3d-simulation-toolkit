@@ -1,4 +1,4 @@
-// 眼圖結果頁的模型來源（#0116，ADR-0069）。
+// 眼圖結果頁的模型來源。
 // 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
 //
 // 用的是規格模型（SPISim 產生／本工具合成）時，結果頁要寫出來；DDR5 Rx 合成
@@ -29,7 +29,7 @@ export default function ModelOriginNotice({ result }: { result: AnyRecord | null
       [`${key}_Tx`]: text('Tx'),
       [`${key}_Rx`]: text('Rx'),
       [`${key}_DFE`]: view.noDfe ? t.originNoDfe(view.noDfe) : '',
-      // 合成的 SerDes 沒有 AMI 等化（#0116 第二輪）：Tx、Rx 一起寫一行。
+      // 合成的 SerDes 沒有 AMI 等化：Tx、Rx 一起寫一行。
       [`${key}_EQ`]: view.noEq.length ? t.originNoEq(view.noEq.join(t.listSeparator)) : '',
       // SPISim 規格模型當 Rx：終端不是 POD，眼高偏低（實機比對報告 2.2 節）。
       [`${key}_SPISim_Rx`]: view.spisimRx ? t.originSpisimRx[view.spisimRx.kind](view.spisimRx.name) : '',

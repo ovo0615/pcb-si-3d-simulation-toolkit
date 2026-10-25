@@ -42,9 +42,19 @@ function save(key: string, sizes: number[]): void {
   }
 }
 
+/** 日誌最多佔右欄 35%。之前拖大存下的比例，在 1280×720 的筆電上會讓
+ *  主要內容只剩一小塊；讀回時夾回上限，預覽拿走其餘部分。 */
+const MAX_LOG_SHARE = 35
+
+export function clampLogSplit(sizes: number[]): number[] {
+  const total = sizes[0] + sizes[1]
+  const log = (sizes[1] / total) * 100
+  return log <= MAX_LOG_SHARE ? sizes : [100 - MAX_LOG_SHARE, MAX_LOG_SHARE]
+}
+
 export const loadMainSplit = () => load(MAIN_KEY, DEFAULT_MAIN)
 export const saveMainSplit = (sizes: number[]) => save(MAIN_KEY, sizes)
-export const loadLogSplit = () => load(LOG_KEY, DEFAULT_LOG)
+export const loadLogSplit = () => clampLogSplit(load(LOG_KEY, DEFAULT_LOG))
 export const saveLogSplit = (sizes: number[]) => save(LOG_KEY, sizes)
 
 // ── 報告工作區 ───────────────────────────────────────────────────────────
