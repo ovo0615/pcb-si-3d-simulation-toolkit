@@ -7,8 +7,10 @@
 // 先前用固定 viewBox 等比縮放，寬螢幕上圖會被撐到六百多 px 高，整個
 // TDR 分頁因此出現捲軸，報告快照截不完整。
 import { useEffect, useRef, useState } from 'react'
+import { convertLength, type DisplayLengthUnit } from '../lengthUnits'
 import { impedanceRange, niceStep, tickDecimals } from './chartScale'
-import { useT } from '../i18n'
+import { useLengthT as useT } from '../useLengthT'
+import { useLengthUnit } from '../lengthContext'
 
 export interface TdrChartMarker {
   distance_mm: number
@@ -17,6 +19,7 @@ export interface TdrChartMarker {
 }
 
 interface TdrChartProps {
+  lengthUnit?: DisplayLengthUnit
   distanceMm: number[]
   impedanceOhm: number[]
   markers?: TdrChartMarker[]
@@ -31,10 +34,11 @@ const FONT = '"Calibri", "Microsoft JhengHei", sans-serif'
 
 export default function TdrChart({
   distanceMm, impedanceOhm, markers = [], pathLengthMm = null,
-  xMaxMm = null, height = 240,
+  xMaxMm = null, height = 240, lengthUnit,
 }: TdrChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const { t } = useT()
+  const { t } = useT(lengthUnit)
+  const { unit, length } = useLengthUnit(lengthUnit)
   const [width, setWidth] = useState(860)
   useEffect(() => {
     const el = containerRef.current
@@ -94,13 +98,19 @@ export default function TdrChart({
     .join(' ')
 
   // 刻度：X 取 6 格、Y 取 5 格的「好看數字」
-  const xStep = niceStep(xMax, 6)
+  const xSpanDisplay = convertLength(xMax, 'mm', unit)
+  const xStepDisplay = niceStep(xSpanDisplay, 6) || xSpanDisplay
+  const xStep = convertLength(xStepDisplay, unit, 'mm')
   const yStep = niceStep(yMax - yMin, 5)
   // 3 mm 的切線步長是 0.5，印成整數會變成「0 1 1 2 2 3」——同一個數字連兩格。
-  const xDecimals = tickDecimals(xStep)
+  const xDecimals = Math.max(0, -Math.floor(Math.log10(xStepDisplay)))
+  const xTick = (value: number) => {
+    const converted = convertLength(value, 'mm', unit)
+    return xDecimals <= 100 ? converted.toFixed(xDecimals) : converted.toPrecision(6)
+  }
   const yDecimals = tickDecimals(yStep)
   const xTicks: number[] = []
-  for (let v = 0; v <= xMax + 1e-9; v += xStep) xTicks.push(v)
+  for (let index = 0; index <= Math.min(10, Math.floor(xMax / xStep + 1e-6)); index++) xTicks.push(index * xStep)
   const yTicks: number[] = []
   for (let v = Math.ceil(yMin / yStep) * yStep; v <= yMax + 1e-9; v += yStep) yTicks.push(v)
 
@@ -122,7 +132,7 @@ export default function TdrChart({
             <line y1={pad.top} y2={height - pad.bottom} x1={sx(v)} x2={sx(v)}
               stroke="#1a212b" strokeWidth={1} />
             <text y={height - pad.bottom + 16} x={sx(v)} textAnchor="middle"
-              fontSize={11} fill="#8fa1b5" fontFamily={FONT}>{v.toFixed(xDecimals)}</text>
+              fontSize={11} fill="#8fa1b5" fontFamily={FONT}>{xTick(v)}</text>
           </g>
         ))}
         <text x={width / 2} y={height - 6} textAnchor="middle" fontSize={11.5}
@@ -137,7 +147,7 @@ export default function TdrChart({
             <line x1={sx(pathLengthMm)} x2={sx(pathLengthMm)}
               y1={pad.top} y2={height - pad.bottom}
               stroke="#4a90d9" strokeWidth={1.4} strokeDasharray="7 4" />
-            <text x={sx(pathLengthMm) + 4} y={pad.top + 12} fontSize={10.5}
+            <text x={sx(pathLengthMm) - 4} y={pad.top + 12} fontSize={10.5} textAnchor="end"
               fill="#6ea8dd" fontFamily={FONT}>{t.tdrChart.channelEnd}</text>
           </g>
         )}
@@ -152,7 +162,7 @@ export default function TdrChart({
             <text x={sx(marker.distance_mm)} y={pad.top + 10 + (index % 3) * 13}
               textAnchor="middle" fontSize={10.5} fontWeight={700} fontFamily={FONT}
               stroke="#0c0e12" strokeWidth={3} paintOrder="stroke"
-              fill={marker.excluded ? '#aab4c0' : '#ff8ab0'}>{marker.label}</text>
+              fill={marker.excluded ? '#aab4c0' : '#ff8ab0'}>{marker.label} {length(marker.distance_mm)} {unit}</text>
           </g>
         ))}
 

@@ -1,5 +1,5 @@
 // 會用到 Ansys 的按鈕旁邊那一行：需要哪些授權、目前可用幾個。
-// 沒有空位時整行變紅並直接寫原因；按鈕本身由呼叫端用 licenseBlock() 變灰。
+// 沒有空位時整行變紅並直接寫原因；按鈕本身由呼叫端用 licenseBlock 變灰。
 import {
   LICENSE_COLORS, licenseBlock, licenseSummary, licenseText, useAnsysLicense, type AnsysFunction,
 } from '../ansysLicense'
@@ -26,8 +26,10 @@ export function LicenseTag({ functions, style }: {
     <div style={{ fontSize: 12, color: LICENSE_COLORS[summary.state], marginTop: 3,
                   lineHeight: 1.4, ...style }}
       title={t.license.tagTitle}>
-      {blocked || summary.text}
-      {unknownMessage ? t.license.unknownNote(unknownMessage) : ''}
+      {unknownMessage === t.license.preflightTimeout ? unknownMessage : <>
+        {blocked || summary.text}
+        {unknownMessage ? t.license.unknownNote(unknownMessage) : ''}
+      </>}
     </div>
   )
 }

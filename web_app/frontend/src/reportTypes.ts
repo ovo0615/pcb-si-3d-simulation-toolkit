@@ -1,3 +1,4 @@
+import type { DisplayLengthUnit } from './lengthUnits'
 // 一鍵 HTML 報告共用型別。
 import type { Messages } from './i18n/zh-TW'
 
@@ -7,6 +8,7 @@ export type ReportSecurityMode = 'external' | 'internal'
 export type ReportQuality = 'compact' | 'standard' | 'high'
 
 export interface ReportSnapshot {
+  length_unit?: DisplayLengthUnit
   id: string
   kind: string
   title: string
@@ -25,7 +27,7 @@ export interface ReportSnapshot {
   active: boolean
   external: boolean
   sha256: string
-  /** 拍攝時的介面語言（卡 0087；舊快照沒有）。 */
+  /** 拍攝時的介面語言（舊快照沒有）。 */
   ui_locale?: string | null
 }
 
@@ -52,9 +54,12 @@ export interface WatermarkSettings {
   color: string
   sections: string[]
   confidentiality?: string
+  /** 套用的浮水印範本 id：刪掉那個範本時才知道它正在用。 */
+  template_id?: string
 }
 
 export interface ReportSettings {
+  length_unit?: DisplayLengthUnit
   locale: ReportLocale
   security_mode: ReportSecurityMode
   quality: ReportQuality
@@ -68,6 +73,7 @@ export interface ReportSettings {
 }
 
 export interface ReportManifest {
+  collection?: import('./reportCollect').CollectionOutcome | null
   schema_version: number
   project_name: string
   created_at: string
@@ -94,7 +100,7 @@ export interface ReportWorkspaceResponse {
 
 type SectionLabel = (t: Messages) => string
 
-/** 章節鍵 → 顯示名稱（卡 0087：名稱在語言檔 `report.sections`）。
+/** 章節鍵 → 顯示名稱（：名稱在語言檔 `report.sections`）。
  *  這裡的順序就是勾選清單的順序，要和後端 reporting.DEFAULT_SECTION_ORDER 逐項相同。 */
 export const REPORT_SECTION_LABELS: Record<string, SectionLabel> = {
   board: t => t.report.sections.board,
@@ -123,14 +129,14 @@ export const DEFAULT_WATERMARK: WatermarkSettings = {
   enabled: false,
   mode: 'text',
   scope: 'all',
-  // 出廠預設字：後端認得這兩個中文值，產生時依報告語言換成 Confidential（卡 0087）。
+  // 出廠預設字：後端認得這兩個中文值，產生時依報告語言換成 Confidential。
   // 前端若改成英文，中文報告就會印英文——所以不翻，畫面上另有說明。
   text: '機密文件',
-  opacity: 0.12,
+  opacity: 0.28,
   angle: -30,
   size: 'medium',
   layout: 'tile',
-  color: '#6b7280',
+  color: '#4b5563',
   sections: [],
   confidentiality: '機密',
 }

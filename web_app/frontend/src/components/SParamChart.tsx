@@ -160,7 +160,7 @@ export default function SParamChart({
    * 滾輪縮放走**原生**監聽器。
    *
    * React 把 `wheel` 掛在根節點且是 passive 的，`onWheel` 裡的
-   * `preventDefault()` 只會換來一行主控台警告：使用者在圖上滾輪縮放時，
+   * `preventDefault` 只會換來一行主控台警告：使用者在圖上滾輪縮放時，
    * 整頁還是跟著捲。`{ passive: false }` 才擋得住。
    *
    * 實際的處理函式每次 render 都會換一個（它讀 activeView／plotW），所以

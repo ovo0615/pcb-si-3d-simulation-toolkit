@@ -1,4 +1,4 @@
-// Ansys 授權對照與目前可用數量（ADR-0062）。
+// Ansys 授權對照與目前可用數量。
 //
 // 後端 `/api/ansys-license/status` 回傳每個會用到 Ansys 的功能需要哪些 license
 // feature、現在各有幾個空位。所有面板共用同一份結果：一個 store、每 60 秒更新
@@ -7,7 +7,7 @@
 // 這裡只負責「按鈕變灰、旁邊寫需要什麼」。真正的關卡在後端：前端沒擋到、
 // 或檢查之後授權被別人拿走，後端仍會回「需要 X 授權，目前沒有可用的」。
 //
-// 卡 0087：store 只存原始資料（錯誤也只存原文），畫面文字由呼叫端依語言組，
+// ：store 只存原始資料（錯誤也只存原文），畫面文字由呼叫端依語言組，
 // 切換語言不必重新查詢。後端欄位的英文（label_en、message_en…）缺席時顯示原文。
 import { useSyncExternalStore } from 'react'
 import type { Lang } from './i18n/lang'
@@ -57,8 +57,7 @@ export interface LicenseStatus {
 export type AnsysFunction =
   | 'siwave_solve' | 'hfss3dlayout_solve' | 'hfss3dlayout_export' | 'q2d_solve'
   | 'circuit_tdr' | 'circuit_export' | 'circuit_quickeye' | 'model_check'
-  | 'ami_channel' | 'ibis_channel' | 'multi_lane' | 'spisim_com' | 'odbpp_import'
-  | 'spisim_model'
+  | 'ami_channel' | 'ibis_channel' | 'multi_lane' | 'odbpp_import'
 
 type Snapshot = { status: LicenseStatus | null; error: string; loading: boolean }
 

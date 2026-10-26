@@ -1,4 +1,5 @@
-// 送出前的 Beta 提示（#0131）。
+import { confirmMessage } from './messageDialog'
+// 送出前的 Beta 提示。
 //
 // 用到 Beta 選項的請求散在主畫面與十幾個元件，各自的 fetch 包裝都不同；逐一改
 // 一定會漏。這裡在啟動時包住 window.fetch 一次：POST 到登錄檔列出的 Beta 端點
@@ -18,25 +19,29 @@ import {
   type FeatureTierMessages,
 } from './featureTiers'
 import { currentLang, messagesFor } from './i18n/catalog'
+import { betaEnabled, syncBeta } from './betaSession'
 
 export interface BetaGuardDeps {
-  confirm: (text: string) => boolean
+  confirm: (text: string) => boolean | Promise<boolean>
   read: () => string | null
   write: (value: string) => void
   messages: () => FeatureTierMessages
+  enabled?: () => Promise<boolean>
 }
 
 export class BetaDeclinedError extends Error {
   readonly code = 'beta_declined'
 }
 
-function describe(input: RequestInfo | URL, init?: RequestInit): { url: string; method: string; body: unknown } {
+async function describe(input: RequestInfo | URL, init?: RequestInit): Promise<{ url: string; method: string; body: unknown }> {
   const request = typeof Request !== 'undefined' && input instanceof Request ? input : null
   const url = request ? request.url : String(input)
   const method = init?.method ?? request?.method ?? 'GET'
   let body: unknown = null
   if (typeof init?.body === 'string') {
     try { body = JSON.parse(init.body) } catch { body = null }
+  } else if (request && init?.body === undefined) {
+    try { body = await request.clone().json() } catch { body = null }
   }
   return { url, method, body }
 }
@@ -50,14 +55,15 @@ function readAcked(deps: BetaGuardDeps): unknown {
 }
 
 /** 這些 Beta 項目還沒確認過就問；回傳 false＝使用者取消。 */
-export function confirmBetaWith(ids: readonly string[], deps: BetaGuardDeps): boolean {
+export async function confirmBetaWith(ids: readonly string[], deps: BetaGuardDeps): Promise<boolean> {
   if (!ids.length) return true
   const acked = readAcked(deps)
   const pending = pendingBetaNotice(ids, acked)
   if (!pending.length) return true
-  if (!deps.confirm(formatBetaNotice(pending, deps.messages()))) return false
+  if (!await deps.confirm(formatBetaNotice(pending, deps.messages()))) return false
   try {
-    deps.write(JSON.stringify(acknowledgeBetaNotice(pending, acked)))
+    // 等待確認時其他請求也可能完成同意；合併最新紀錄，不能覆寫另一項。
+    deps.write(JSON.stringify(acknowledgeBetaNotice(pending, readAcked(deps))))
   } catch {
     // 存不了（無痕、配額滿）就下次再問；不影響這次送出。
   }
@@ -65,9 +71,15 @@ export function confirmBetaWith(ids: readonly string[], deps: BetaGuardDeps): bo
 }
 
 export function guardFetch(fetchImpl: typeof fetch, deps: BetaGuardDeps): typeof fetch {
-  return (input: RequestInfo | URL, init?: RequestInit) => {
-    const { url, method, body } = describe(input, init)
-    if (!confirmBetaWith(betaFeaturesForRequest(method, url, body), deps)) {
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    const { url, method, body } = await describe(input, init)
+    const ids = betaFeaturesForRequest(method, url, body)
+    if (ids.length && deps.enabled && !await deps.enabled()) {
+      const error = new Error(messagesFor(currentLang()).featureTier.disabled)
+      Object.assign(error, { code: 'beta_disabled' })
+      throw error
+    }
+    if (!await confirmBetaWith(ids, deps)) {
       return Promise.reject(new BetaDeclinedError(deps.messages().declined))
     }
     return fetchImpl(input, init)
@@ -80,7 +92,8 @@ let installedDeps: BetaGuardDeps | null = null
  * 請求本身看不出來、要看畫面狀態才知道的 Beta（例如分段求解器混用時的串接
  * 頻點內插 B03）：呼叫端在送出前自己問。和 fetch 守門共用同一份「已確認」紀錄。
  */
-export function confirmBetaUse(ids: readonly string[]): boolean {
+export async function confirmBetaUse(ids: readonly string[]): Promise<boolean> {
+  if (ids.length && installedDeps && !betaEnabled()) return false
   return installedDeps ? confirmBetaWith(ids, installedDeps) : true
 }
 
@@ -88,10 +101,12 @@ export function confirmBetaUse(ids: readonly string[]): boolean {
 export function installBetaGuard(win: Window): void {
   if (installedDeps) return
   installedDeps = {
-    confirm: text => win.confirm(text),
+    confirm: confirmMessage,
     read: () => win.localStorage.getItem(BETA_NOTICE_STORAGE_KEY),
     write: value => win.localStorage.setItem(BETA_NOTICE_STORAGE_KEY, value),
     messages: () => messagesFor(currentLang()).featureTier,
+    enabled: () => syncBeta(originalFetch),
   }
-  win.fetch = guardFetch(win.fetch.bind(win), installedDeps)
+  const originalFetch = win.fetch.bind(win)
+  win.fetch = guardFetch(originalFetch, installedDeps)
 }

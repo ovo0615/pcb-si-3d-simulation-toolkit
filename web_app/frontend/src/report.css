@@ -143,7 +143,78 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
   margin-bottom: 12px;
+}
+
+.report-toolbar-row > strong {
+  flex: 1;
+}
+
+/* .btn--primary 預設 width:100%，放在工具列會把提示字擠成直排。 */
+.report-toolbar-row > .btn--primary {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 8px 16px;
+  white-space: nowrap;
+}
+
+/* 報告專用容器：畫面上的操作鈕（Fit All 等）不進快照。 */
+.report-collect-stage button {
+  display: none !important;
+}
+
+/* AH：新掛上的收納容器不得播進場淡入，否則半透明時就被拍下、整張變暗。 */
+.report-collect-stage,
+.report-collect-stage * {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* ── 一鍵收納────────────────────────────── */
+.report-collect {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: 12.5px;
+}
+
+.report-collect__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.report-collect__row.warn b {
+  color: #f6ad55;
+}
+
+.report-collect__list {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.report-collect__list td {
+  padding: 3px 8px;
+  border-top: 1px solid var(--border-strong);
+  vertical-align: top;
+}
+
+.report-collect__list tr.collect-missing td,
+.report-collect__list tr.collect-failed td,
+.report-collect__list tr.collect-version_full td,
+.report-collect__list tr.collect-source_changed td {
+  color: #f6ad55;
+}
+
+.report-collect__list tr.collect-not_analyzed td,
+.report-collect__list tr.collect-cancelled td {
+  color: var(--faint);
 }
 
 .report-file-button {
@@ -361,15 +432,26 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  /* 圖片在上、文字在下，和報告一致（卡 0172）。 */
+  flex-direction: column;
   font-size: 48px;
   font-weight: 700;
   pointer-events: none;
   white-space: nowrap;
 }
 
+/* 預覽的字級隨大小設定，LOGO 框和報告一樣是寬 7 字、高 2.8 字（卡 0172）。 */
+.report-preview-watermark.preview-size-small { font-size: 18px; }
+.report-preview-watermark.preview-size-medium,
+.report-preview-watermark.preview-size-custom { font-size: 30px; }
+.report-preview-watermark.preview-size-large { font-size: 44px; }
+
 .report-preview-watermark img {
-  max-width: 35%;
-  max-height: 35%;
+  width: 7em;
+  height: 2.8em;
+  max-width: 90%;
+  object-fit: contain;
+  flex: none;
 }
 
 /* ── 輸出 ─────────────────────────────────────────── */
@@ -507,4 +589,104 @@
   .report-watermark-preview {
     grid-column: auto;
   }
+}
+
+/* 浮水印範本清單（卡 0138）：建立時間、內建不可刪、使用中標記。 */
+.report-template-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.report-template-list {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.report-template-list th,
+.report-template-list td {
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.report-template-list th {
+  color: var(--faint);
+  font-weight: 600;
+}
+
+.report-template-list tr.in-use td {
+  background: var(--accent-soft, rgba(59, 130, 246, 0.1));
+}
+
+.report-template-tag {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--faint);
+  border: 1px solid var(--border);
+}
+
+.report-template-tag.in-use {
+  color: var(--accent, #3b82f6);
+  border-color: currentColor;
+}
+
+.report-template-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.report-template-actions .btn {
+  margin-left: 4px;
+}
+
+.btn.btn--danger:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.report-template-store {
+  word-break: break-all;
+}
+
+/* ：licensed 包的固定授權身分標示；被忽略的使用者設定整組停用。 */
+.report-wm-fieldset {
+  margin: 0;
+  min-width: 0;
+}
+.report-wm-fieldset:disabled {
+  opacity: 0.55;
+}
+.report-license-mark {
+  grid-column: 1 / -1;
+}
+.report-license-mark code {
+  font-size: 12px;
+  word-break: break-all;
+}
+.license-preview .license-preview-stripes {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  font-weight: 600;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.license-preview .license-preview-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 4px 10px;
+  text-align: right;
+  font-size: 11px;
+  color: #4b5563;
+  background: #f3f4f6;
+  border-top: 1px solid #d1d5db;
 }

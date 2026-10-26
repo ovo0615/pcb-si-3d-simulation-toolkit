@@ -1,7 +1,7 @@
-// 結果頁共用的眼圖畫廊（#0104）：精靈第 5 步與多埠分支共用（舊 AMI 面板已隨 ADR-0067 收掉）。
+// 結果頁共用的眼圖畫廊：精靈第 5 步與多埠分支共用（舊 AMI 面板已隨  收掉）。
 //
-// 原圖 1600×900，照原尺寸放進結果頁時一張就佔滿一個畫面（Jeff 2026-10-10 截圖）。
-// #0115 起結果頁只放眼圖（量測表收進 ResultDetailsDrawer），欄數依張數決定
+// 原圖 1600×900，照原尺寸放進結果頁時一張就佔滿一個畫面。
+//  起結果頁只放眼圖（量測表收進 ResultDetailsDrawer），欄數依張數決定
 // （galleryColumns），16:9 縮圖，窄於 760px 改單欄（index.css），點縮圖開燈箱
 // 看原圖。報告快照照舊以每張卡片為根截圖。
 import { useCallback, useEffect, useState } from 'react'
@@ -26,7 +26,7 @@ export default function EyeImageGallery({ items }: { items: GalleryItem[] }) {
       const action = lightboxKeyAction(event.key)
       if (!action) return
       // capture 階段先接、吃掉：參數抽屜（ResultDetailsDrawer）也聽 Esc，
-      // 燈箱開著時 Esc 只關燈箱（#0115）。
+      // 燈箱開著時 Esc 只關燈箱。
       event.preventDefault()
       event.stopImmediatePropagation()
       if (action === 'close') setOpenIndex(null)

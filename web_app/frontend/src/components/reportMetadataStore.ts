@@ -1,7 +1,7 @@
 // 模型分頁的報告中繼資料（2026-08-29）。
 // 此工具由虎門科技資深技術工程師 Jeff Hong 洪敬傑提供
 //
-// 快照是一張圖，圖上的數字縮進報告未必讀得出來；秒測／統計眼／COM 的
+// 快照是一張圖，圖上的數字縮進報告未必讀得出來；模型來源等
 // 關鍵數字寫進這個 store，App 的快照按鈕把它掛進 source_metadata，
 // 報告裡就以文字表格保留。內容只活在前端記憶體——它描述「畫面上現在
 // 這批結果」，重整後畫面沒了、數字也該跟著歸零。
@@ -11,7 +11,7 @@ import { sanitizeReportMetadata } from '../reportPrivacy'
 const store: Record<string, unknown> = {}
 
 /** 覆寫同類結果的數字（例如新一輪統計眼蓋掉上一輪）。
- *  報告會交給客戶：模型檔、引擎訊息裡的本機路徑只留檔名（卡 0083 R5）。 */
+ *  報告會交給客戶：模型檔、引擎訊息裡的本機路徑只留檔名。 */
 export function setModelsReportMetadata(patch: Record<string, unknown>): void {
   Object.assign(store, sanitizeReportMetadata(patch))
 }
@@ -23,7 +23,7 @@ export function modelsReportMetadata(): Record<string, unknown> {
 /** 快照的中繼資料：物件，或在按下快照時才呼叫的函式。 */
 export type ReportMetadataSource = Record<string, unknown> | (() => Record<string, unknown>)
 
-/** 按下快照時才讀（#0116 實機 4.1）：store 是一般物件，更新時不會讓 App 重新
+/** 按下快照時才讀：store 是一般物件，更新時不會讓 App 重新
  *  render；在 render 時取值，按快照拿到的是結果出現前的舊值（模型來源曾是空字串）。 */
 export function resolveReportMetadata(source: ReportMetadataSource | undefined): Record<string, unknown> {
   if (typeof source === 'function') return source()

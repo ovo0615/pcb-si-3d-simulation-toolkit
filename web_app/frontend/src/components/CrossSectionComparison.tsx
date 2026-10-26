@@ -8,7 +8,8 @@
 
 import { useMemo } from 'react'
 import { pickText } from '../backendFields'
-import { useT } from '../i18n'
+import { useLengthT as useT } from '../useLengthT'
+import { useLengthUnit } from '../lengthContext'
 import { impedanceRange, minMax } from './chartScale'
 
 const TEXT = '#d1dbe7'
@@ -92,6 +93,7 @@ export default function CrossSectionComparison({
   pathLengthMm = null, xMaxMm = null,
 }: Props) {
   const { t, lang } = useT()
+  const { unit, length } = useLengthUnit()
   const tx = t.crossCompare
   const matched = result.rows.filter(
     r => r.matched && r.tdr_ohm != null && r.q2d_ohm != null)
@@ -112,7 +114,7 @@ export default function CrossSectionComparison({
     }
     if (visible.length < 2) return null
 
-    // 橫軸被截斷之後，落在框外的那幾條切線不能照畫——`px()` 會算出比畫布還
+    // 橫軸被截斷之後，落在框外的那幾條切線不能照畫——`px` 會算出比畫布還
     // 遠的座標，SVG 不裁切，記號就直接畫到圖框外面（或疊在右邊界上），看起來
     // 像那條切線的阻抗真的長在那裡。畫得出來的才畫，其餘的在圖下說明有幾條。
     const inRange = matched.filter(row => {
@@ -150,7 +152,7 @@ export default function CrossSectionComparison({
           {tx.heading}
         </div>
         <div style={{ ...HINT, marginTop: 2 }}>
-          {tx.bandHint(result.summary.resolution_mm.toFixed(2))}
+          {tx.bandHint(length(result.summary.resolution_mm))}
         </div>
       </div>
 
@@ -208,10 +210,10 @@ export default function CrossSectionComparison({
             )
           })}
           <text x={chart.L} y={chart.H - 7} fill="#9fb0c3" fontSize={12}>
-            {chart.xMin.toFixed(0)} mm
+            {length(chart.xMin)} {unit}
           </text>
           <text x={chart.W - chart.R} y={chart.H - 7} fill="#9fb0c3" fontSize={12}
-            textAnchor="end">{chart.xMax.toFixed(0)} mm</text>
+            textAnchor="end">{length(chart.xMax)} {unit}</text>
           <text x={chart.W - chart.R} y={chart.T + 13} fill={Q2D_COLOR}
             fontSize={13} fontWeight={700} textAnchor="end">{tx.legendQ2d}</text>
           <text x={chart.W - chart.R} y={chart.T + 30} fill={TDR_COLOR}
@@ -223,7 +225,7 @@ export default function CrossSectionComparison({
           否則圖上少了兩個點跟「那兩條沒對到」看起來完全一樣。 */}
       {chart && chart.hidden > 0 && (
         <div style={HINT}>
-          {tx.hiddenOutside(chart.hidden, chart.xMax.toFixed(1))}
+          {tx.hiddenOutside(chart.hidden, length(chart.xMax))}
         </div>
       )}
 
@@ -244,7 +246,7 @@ export default function CrossSectionComparison({
           border: '1px solid rgba(126, 231, 135, 0.28)',
         }}>
           {/* 缺值就寫「—」，不要補 0：`中位差 0.0000 Ω` 讀起來是量到了完美
-              吻合，而實際上是沒有這個數字（ADR-0030）。 */}
+              吻合，而實際上是沒有這個數字。 */}
           {tx.summary(
             result.summary.comparable,
             result.summary.median_delta_ohm == null
@@ -289,7 +291,7 @@ export default function CrossSectionComparison({
                   )}
                 </td>
                 <td style={{ ...cell, textAlign: 'right' }}>
-                  {row.distance_mm != null ? row.distance_mm.toFixed(2) : '—'}
+                  {row.distance_mm != null ? length(row.distance_mm) : '—'}
                 </td>
                 <td style={{ ...cell, textAlign: 'right' }}>
                   {row.q2d_ohm != null ? `${row.q2d_ohm.toFixed(3)} Ω` : '—'}
@@ -353,11 +355,11 @@ export default function CrossSectionComparison({
                     {feature.is_via && <span style={{ color: WARN }}>{tx.gap}Via</span>}
                   </td>
                   <td style={{ ...cell, textAlign: 'right' }}>
-                    {feature.width_mm.toFixed(3)}
+                    {length(feature.width_mm)}
                   </td>
                   <td style={{ ...cell, textAlign: 'right' }}>
                     {feature.distance_to_signal_mm != null
-                      ? feature.distance_to_signal_mm.toFixed(3) : '—'}
+                      ? length(feature.distance_to_signal_mm) : '—'}
                   </td>
                 </tr>
               ))}

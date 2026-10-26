@@ -1,4 +1,4 @@
-// 介面語言的選擇規則（卡 0087）。不碰 React、不 import 別的檔，才能用 Node 直接測。
+// 介面語言的選擇規則。不碰 React、不 import 別的檔，才能用 Node 直接測。
 
 export type Lang = 'zh-TW' | 'en'
 
@@ -18,7 +18,7 @@ export function isLang(value: unknown): value is Lang {
 }
 
 /** 首次開啟：依 Windows 顯示語言（WebView2／瀏覽器的 navigator.language）。
- *  zh 開頭一律繁中（Jeff 2026-10-10 定），其餘 English。 */
+ *  zh 開頭一律繁中，其餘 English。 */
 export function detectLang(navigatorLanguage?: string | null): Lang {
   return /^zh/i.test(String(navigatorLanguage || '')) ? 'zh-TW' : 'en'
 }

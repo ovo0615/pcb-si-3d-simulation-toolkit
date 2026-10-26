@@ -1,9 +1,9 @@
-// 眼圖精靈「常見規範預設」的純函式（#0104）。不碰 React，Node 直接測
+// 眼圖精靈「常見規範預設」的純函式。不碰 React，Node 直接測
 // （tests/test_eye_presets_frontend_0104.py）。
 //
 // 資料在後端 protocol_presets.py（GET /api/eye-presets），這裡不另存一份資料率。
 // 只帶資料率、調變、bit 數下限三項。ODT、驅動強度、Corner、Port 是使用者的
-// 設計選擇（ADR-0046），分析引擎由兩端模型決定，眼罩門檻不內建（ADR-0015）——
+// 設計選擇，分析引擎由兩端模型決定，眼罩門檻不內建——
 // 這幾項這裡一律不碰。
 
 export interface EyePreset {
@@ -26,7 +26,6 @@ export interface EyePreset {
   supported: boolean
   unsupported_reason?: string
   unsupported_reason_en?: string
-  spisim_model?: string | null
   compliance_hint?: string | null
   compliance_note?: string
   compliance_note_en?: string

@@ -1,6 +1,7 @@
+import { safeUserMessage } from '../userMessages'
 // 分析執行歷史：每一次求解留下的不可變紀錄，以及「回到這一版設定」。
 //
-// ADR-0016 的機制（每次求解建立不可變紀錄、物理輸入改變後標示「設定不一致」
+//  的機制（每次求解建立不可變紀錄、物理輸入改變後標示「設定不一致」
 // 但仍可查看與比較）在後端寫了很久，而 `/api/ibis-channel/runs` 這個端點
 // **前端從來沒有呼叫過**——2026-08-31 盤點時 frontend/src 搜尋
 // `ibis-channel/runs` 是 0 命中。這個元件就是那個缺掉的入口。
@@ -16,7 +17,10 @@ import { useT } from '../i18n'
 import type { Messages } from '../i18n'
 import { revealPath } from '../revealPath'
 import { describeRecordedTier, featureName } from '../featureTiers'
+import { readHistoryExpanded, writeHistoryExpanded } from '../runHistoryPrefs'
 import BetaBadge from './BetaBadge'
+import { matchesScheduleFilter, scheduleSegmentLines } from '../segmentScheduleHistory'
+import type { ScheduleFilter } from '../segmentScheduleHistory'
 
 type RunHistoryText = Messages['runHistory']
 
@@ -30,6 +34,16 @@ export type RestorableRun = {
   corner: string
   /** 這一次紀錄裡有、但這個面板沒有把握填回去的東西。照實列出來。 */
   unrestored: string[]
+}
+
+/** 紀錄裡的 `warnings`；英文介面在 `warnings_en` 長度對得上時改用英文。 */
+function runWarnings(run: RunRow, lang: string): string[] {
+  const manifest = run.readable ? run.manifest : null
+  const zh: unknown[] = Array.isArray(manifest?.warnings) ? manifest.warnings : []
+  const en: unknown[] = Array.isArray(manifest?.warnings_en) ? manifest.warnings_en : []
+  return zh.map((text, index) => String(
+    lang === 'en' && en.length === zh.length && typeof en[index] === 'string' && en[index]
+      ? en[index] : text)).filter(Boolean)
 }
 
 /** 預設顯示的筆數。藏起來的會明講有幾筆，不安靜截斷。 */
@@ -94,9 +108,11 @@ function restorableOf(manifest: any, tx: RunHistoryText): RestorableRun {
 /** 明細列。**依種類給不同的欄位**——把 IBIS 的「資料率／Corner／通道」
  *  套在串接或 TDR 紀錄上會全部顯示「—」，讀起來像資料掉了，
  *  而不是「這一類分析本來就沒有這些欄位」。 */
-function detailLines(run: RunRow, tx: RunHistoryText): string[] {
+function detailLines(run: RunRow, tx: RunHistoryText, lang: string): string[] {
   const m = run.manifest || {}
   const kind = run.run_kind || 'ibis_channel'
+  // 分段排程：整批摘要＋每段的求解器、時間、結果、原因與輸出。
+  if (kind === 'segment_schedule') return scheduleSegmentLines(m, lang)
   if (kind === 'cascade') {
     const c = m.cascade || {}
     const sources = c.sources || []
@@ -134,7 +150,7 @@ function detailLines(run: RunRow, tx: RunHistoryText): string[] {
 }
 
 export default function RunHistory(
-  { touchstonePath, request, onRestore, kind, title }: {
+  { touchstonePath, request, onRestore, kind, title, anchorPath, refreshToken }: {
     touchstonePath?: string
     /** 目前設定，用來算指紋比對。欄位不齊時後端會回 `unknown`
      *  ——「沒有東西可比」與「比過了不一樣」是兩回事。
@@ -143,8 +159,12 @@ export default function RunHistory(
     request?: Record<string, unknown>
     onRestore?: (run: RestorableRun) => void
     /** 給了就讀那個種類的紀錄（`/api/runs`）。不給＝IBIS 通道的舊路徑。 */
-    kind?: 'cascade' | 'tdr' | 'multi_lane' | 'ibis_channel'
+    kind?: 'cascade' | 'tdr' | 'multi_lane' | 'ibis_channel' | 'segment_schedule'
     title?: string
+    /** 紀錄跟著產物走的種類（分段排程＝segments.json）：後端由它推出紀錄根。 */
+    anchorPath?: string
+    /** 值一變就重讀（排程跑完時自動更新，不用手動按重新整理）。 */
+    refreshToken?: unknown
   },
 ) {
   const { t, lang } = useT()
@@ -159,6 +179,11 @@ export default function RunHistory(
   const [error, setError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState('')
+  const [expanded, setExpanded] = useState(() => readHistoryExpanded(window.localStorage, kind))
+  const [filter, setFilter] = useState<ScheduleFilter>('all')
+  const isSchedule = kind === 'segment_schedule'
+  // 分段排程的紀錄在 segments.json 旁邊；沒指定就沒有地方可讀。
+  const needsAnchor = isSchedule && !(anchorPath || '').trim()
 
   // 依序列化後的內容當相依，不是物件本身。呼叫端每次 render 都會給一個
   // 新的物件字面值——用物件當相依，`useEffect` 每次 render 都會重抓一次，
@@ -168,15 +193,15 @@ export default function RunHistory(
   const refresh = useCallback(async () => {
     // IBIS 那條路要有 Touchstone 才比得了指紋；其餘種類讀的是固定位置，
     // 沒有 Touchstone 也該列得出來。
-    if (!kind && !touchstonePath) {
-      setRuns([]); setListing(null); setRevealNote(''); return
+    if ((!kind && !touchstonePath) || needsAnchor) {
+      setRuns([]); setListing(null); setRevealNote(''); setError(null); return
     }
     setBusy(true); setError(null)
     try {
       const res = kind
         ? await fetch('/api/runs', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ kind }),
+          body: JSON.stringify(anchorPath ? { kind, anchor_path: anchorPath } : { kind }),
         })
         : await fetch('/api/ibis-channel/runs', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -195,37 +220,63 @@ export default function RunHistory(
     } catch (exc) {
       setError(exc)
     } finally { setBusy(false) }
-  }, [kind, touchstonePath, requestKey])
+  }, [kind, touchstonePath, requestKey, anchorPath, needsAnchor])
 
-  useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => { void refresh() }, [refresh, refreshToken])
 
   if (!kind && !touchstonePath) return null
 
+  // 篩選（分段排程）：被篩掉的筆數另外講，不安靜消失。
+  const filtered = isSchedule ? runs.filter(run => matchesScheduleFilter(run, filter)) : runs
+  const filteredOut = runs.length - filtered.length
   // 預設只列最近幾筆，但**把藏起來的筆數講出來**——安靜地截斷會讓人以為
   // 這裡就是全部。實測一個輸出位置底下有 104 筆。
-  const visible = showAll ? runs : runs.slice(0, PREVIEW_COUNT)
-  const hidden = runs.length - visible.length
+  const visible = showAll ? filtered : filtered.slice(0, PREVIEW_COUNT)
+  const hidden = filtered.length - visible.length
   const note = revealNote
     || pickText(listing, 'note', lang) || pickText(listing, 'fingerprint_error', lang)
+
+  const toggle = () => {
+    writeHistoryExpanded(window.localStorage, kind, !expanded)
+    setExpanded(!expanded)
+  }
 
   return (
     <div className="run-history">
       <div className="run-history__head">
-        <b>{title || tx.title}</b>
+        {/* 預設收合：紀錄一多畫面就亂，只留摘要列，按了才展開。 */}
+        <button type="button" className="run-history__toggle" aria-expanded={expanded} onClick={toggle}>
+          <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+          <b>{tx.summary(title || tx.title, error == null && !busy ? runs.length : null)}</b>
+        </button>
         <button className="btn" style={{ fontSize: 10, padding: '0 7px' }}
           onClick={() => void refresh()} disabled={busy}>{tx.refresh}</button>
       </div>
       {error != null && (
         <div className="run-history__note">{tx.readFailed(errorText(error, lang))}</div>
       )}
+      {expanded && (<>
       {note && <div className="run-history__note">{note}</div>}
-      {error == null && !runs.length && (
-        <div className="run-history__note">{tx.empty}</div>
+      {needsAnchor && <div className="run-history__note">{tx.scheduleNoAnchor}</div>}
+      {error == null && !needsAnchor && !runs.length && (
+        <div className="run-history__note">{isSchedule ? tx.scheduleEmpty : tx.empty}</div>
+      )}
+      {isSchedule && runs.length > 0 && (
+        <div className="run-history__filter">
+          <span>{tx.filterLabel}</span>
+          {([['all', tx.filterAll], ['problem', tx.filterProblem], ['done', tx.filterDone]] as const)
+            .map(([value, label]) => (
+              <button key={value} type="button" className="btn" aria-pressed={filter === value}
+                style={{ fontSize: 10, padding: '0 7px', fontWeight: filter === value ? 700 : 400 }}
+                onClick={() => { setFilter(value); setShowAll(false) }}>{label}</button>
+            ))}
+          {filteredOut > 0 && <span className="run-history__note">{tx.filterHidden(filteredOut)}</span>}
+        </div>
       )}
       {visible.map(run => {
         const restorable = run.readable ? restorableOf(run.manifest, tx) : null
-        const runError = pickText(run, 'error', lang)
-        // 當時記下的分級（#0131）。沒有欄位＝未記錄，不當成沒用 Beta；主要不另標。
+        const runError = run.error ? safeUserMessage(run, lang) : ''
+        // 當時記下的分級。沒有欄位＝未記錄，不當成沒用 Beta；主要不另標。
         const tier = describeRecordedTier(run.readable ? run.manifest?.feature_tier : undefined)
         return (
           <div key={run.run_id}
@@ -234,7 +285,10 @@ export default function RunHistory(
               <span>{(run.created_at || '').replace('T', ' ').slice(0, 19) || run.run_id}</span>
               <span>{statusLabel(run.status, tx)}</span>
             </div>
-            <div className="run-history__relation">{pickText(run, 'relation_label', lang)}</div>
+            {/* 分段排程不比對設定（後端一律回「無法比對」），那一行只是雜訊。 */}
+            {!isSchedule && (
+              <div className="run-history__relation">{pickText(run, 'relation_label', lang)}</div>
+            )}
             {tier.state === 'unrecorded' && (
               <div className="run-history__relation run-history__tier">{ft.unrecorded}</div>
             )}
@@ -246,6 +300,10 @@ export default function RunHistory(
               </div>
             )}
             {runError && <div className="run-history__note">{runError}</div>}
+            {/* 紀錄的警告（：串接來源段自適應未收斂）。英文介面用 API 補的 warnings_en。 */}
+            {runWarnings(run, lang).map((text, index) => (
+              <div key={index} className="run-history__note">{tx.warning(text)}</div>
+            ))}
             <div className="run-history__actions">
               <button className="btn" style={{ fontSize: 10, padding: '0 7px' }}
                 onClick={() => void (async () => {
@@ -262,13 +320,13 @@ export default function RunHistory(
               {restorable && (
                 <button className="btn" style={{ fontSize: 10, padding: '0 7px' }}
                   onClick={() => setOpen(open === run.run_id ? '' : run.run_id)}>
-                  {open === run.run_id ? tx.collapse : tx.showSettings}
+                  {open === run.run_id ? tx.collapse : isSchedule ? tx.segmentDetail : tx.showSettings}
                 </button>
               )}
             </div>
             {open === run.run_id && (
               <div className="run-history__detail">
-                {detailLines(run, tx).map((line, index) => (
+                {detailLines(run, tx, lang).map((line, index) => (
                   <div key={index} style={{ wordBreak: 'break-all' }}>{line}</div>
                 ))}
                 {restorable && restorable.unrestored.length > 0 && onRestore && (
@@ -285,9 +343,12 @@ export default function RunHistory(
           {tx.showAll(hidden)}
         </button>
       )}
-      <div className="run-history__note">
-        {tx.footer}
-      </div>
+      {!isSchedule && (
+        <div className="run-history__note">
+          {tx.footer}
+        </div>
+      )}
+      </>)}
     </div>
   )
 }

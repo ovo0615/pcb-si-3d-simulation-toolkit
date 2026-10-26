@@ -34,10 +34,8 @@ export function isFatalJobError(error: unknown): boolean {
  *  兩個都可能是空的——後端的失敗路徑並不一致——所以要有最後的預設值。
  */
 export function describeJobFailure(
-  state: { message?: unknown; error?: unknown },
+  _state: { message?: unknown; error?: unknown },
   fallback: string,
 ): string {
-  const message = String(state?.message || '') || fallback
-  const detail = String(state?.error || '')
-  return detail ? `${message}\n${detail}` : message
+  return fallback
 }

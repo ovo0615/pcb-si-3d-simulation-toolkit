@@ -7,6 +7,8 @@ import { useState } from 'react'
 import { useT } from '../i18n'
 import type { Messages } from '../i18n'
 import BetaBadge from './BetaBadge'
+import BetaSwitch, { useBetaEnabled } from './BetaSwitch'
+import { betaEnabled as sessionBetaEnabled } from '../betaSession'
 import {
   betaTasksIn,
   featureName,
@@ -38,7 +40,7 @@ interface Props {
   closing?: boolean
   /** 退場動畫播完了，呼叫端可以卸載本元件。 */
   onClosed?: () => void
-  /** 啟動時從上次的設定載入、而且含 Beta 的任務（#0131）：原樣保留，只提示。 */
+  /** 啟動時從上次的設定載入、而且含 Beta 的任務：原樣保留，只提示。 */
   legacyBeta?: TaskKey[]
 }
 
@@ -49,7 +51,7 @@ type TaskIconKind =
   | 'segment' | 'schedule' | 'remotepack' | 'cascade' | 'sparam' | 'eye' | 'tdr' | 'report'
   | 'models' | 'crosssection'
 
-// 用完整的 Record：新增功能卡卻沒給圖示時，型別檢查就會擋下（#0083，截面阻抗曾漏掉）。
+// 用完整的 Record：新增功能卡卻沒給圖示時，型別檢查就會擋下（截面阻抗曾漏掉）。
 const TASK_ICON_KIND: Record<TaskKey, TaskIconKind> = {
   load: 'board',
   cutout: 'cutout',
@@ -197,7 +199,7 @@ function renderTask(
   const children = splitByTier(task.children ?? [])
   const iconKind = TASK_ICON_KIND[task.key]
   return (
-    <div key={task.key}>
+    <div key={task.key} hidden={!sessionBetaEnabled() && taskTier(task.key) === 'beta'}>
       <label
         className="task-card"
         data-on={on ? 'yes' : 'no'}
@@ -237,7 +239,7 @@ function renderTask(
               {task.eta}
             </span>
           )}
-          {/* 分級（#0131）：純 Beta 任務掛標籤；主要任務含 Beta 模式只提示，不整卡降級。 */}
+          {/* 分級：純 Beta 任務掛標籤；主要任務含 Beta 模式只提示，不整卡降級。 */}
           {taskTier(task.key) === 'beta' && <BetaBadge feature={taskFeatureId(task.key)} />}
           {taskHasBetaModes(task.key) && (
             <span className="task-mixed-hint" style={{
@@ -286,7 +288,7 @@ function renderTask(
 }
 
 /**
- * 群組裡的 Beta 項收在這裡（#0131，Jeff 2026-10-12 核准）。
+ * 群組裡的 Beta 項收在這裡。
  *
  * 預設收合；已勾選的 Beta 項（例如舊設定載入的）一開始就展開，不讓它藏在
  * 收合區裡被忘記。收合只是整理畫面，不會取消勾選、也不會停止執行中的工作。
@@ -298,9 +300,11 @@ function BetaFold({ tasks, flags, onToggle, messages, depth }: {
   messages: Messages
   depth: number
 }) {
+  const enabled = useBetaEnabled()
   const selected = tasks.filter(task => flags[task.key]).length
   const [open, setOpen] = useState(selected > 0)
   const ft = messages.featureTier
+  if (!enabled) return <div role="status">{ft.disabled}{selected > 0 && <> {ft.pending}{ft.limitSep}{tasks.filter(task => flags[task.key]).map(task => task.label).join(ft.listSep)}</>}</div>
   return (
     <div className="task-beta-fold" style={{ display: 'grid', gap: 5 }}>
       <button
@@ -333,7 +337,8 @@ export default function TaskPicker(
   const { t: messages } = useT()
   const t = messages.tasks
   const ft = messages.featureTier
-  const chosen = allTasks(t).filter(task => flags[task.key])
+  const enabled = useBetaEnabled()
+  const chosen = allTasks(t).filter(task => flags[task.key] && (enabled || taskTier(task.key) !== 'beta'))
   const chosenBeta = betaTasksIn(chosen.map(task => task.key))
   const gaps = missingPrerequisites(flags, t)
   const legacy = (legacyBeta ?? []).filter(key => flags[key])
@@ -354,9 +359,12 @@ export default function TaskPicker(
       padding: '20px 28px 16px',
     }}>
       <div style={{ flexShrink: 0, marginBottom: 10 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
         <div style={{ fontSize: 36, lineHeight: 1.15, fontWeight: 800, letterSpacing: 0.4, color: '#f1f7ff' }}>
           {messages.app.title}
         </div>
+        </div>
+        <BetaSwitch />
         <div style={{ fontSize: 16, color: '#a8b8ca', marginTop: 8 }}>
           {t.subtitle}
         </div>
@@ -411,7 +419,7 @@ export default function TaskPicker(
         }}>
           <b>{t.gapsLead}</b>
           {gaps.map(({ task, missing }) => (
-            <div key={task.key}>
+            <div key={task.key} hidden={!sessionBetaEnabled() && taskTier(task.key) === 'beta'}>
               {t.gapLine(task.label, missing.map(m => m.label).join(t.listSep))}
               {task.requiresNote ? t.requiresNote(task.requiresNote) : ''}
             </div>
@@ -442,7 +450,7 @@ export default function TaskPicker(
         <button
           className="btn"
           style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }}
-          onClick={() => onSetAll(ALL_TASK_SELECTION)}
+          onClick={() => onSetAll(enabled ? ALL_TASK_SELECTION : mainOnlySelection(ALL_TASK_SELECTION))}
         >
           {t.selectAll}
         </button>

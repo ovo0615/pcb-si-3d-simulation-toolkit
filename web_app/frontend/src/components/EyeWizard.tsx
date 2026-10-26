@@ -1,8 +1,9 @@
-// 眼圖精靈（#0088 方案 A）：一條通道的標準 IBIS／IBIS-AMI 眼圖，五步做完。
+import { confirmMessage } from '../messageDialog'
+// 眼圖精靈（ 方案 A）：一條通道的標準 IBIS／IBIS-AMI 眼圖，五步做完。
 //
 //   1 通道 → 2 速率與題型 → 3 兩端晶片與變體 → 4 接線確認 → 5 執行與結果
 //
-// 規則（ADR-0006、ADR-0046）：速率與有無 ODT 由工具決定；ODT 阻值與驅動強度
+// 規則：速率與有無 ODT 由工具決定；ODT 阻值與驅動強度
 // 由使用者回答，不給預設值；模型、Corner、Port 與 P／N 要使用者明確確認。
 // 判斷邏輯在 ../eyeWizard.ts（有 Node 測試），這裡只負責畫與呼叫後端。
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
@@ -26,11 +27,13 @@ import {
   analysisExtras, analysisRoutes, bitAdjustment, cleanPath, confirmationState, currentFunnel,
   eyeImages, funnelRows, impulseImages, missingItems, nativeTrustState, portsValid,
   resultBlocks, routeFor, selectorsFor, startRequest, untrustedCount,
-  belowMinBits, ddrMaskApplies, mergeWarnings, parseQuickCheck, routeHint, statusLabel, symbolRateGbd, uiPs,
-  wizardEngine,
+  belowMinBits, mergeWarnings, parseQuickCheck, routeHint, statusLabel, symbolRateGbd, uiPs,
+  wizardEngine, bindingsAfterSuggest, jobFailureText,
 } from '../eyeWizard'
+import { restoredFieldValue } from '../uiSession'
 import type { Funnel, PortMap, QuickCheckMark, WizardLane } from '../eyeWizard'
 import { useT } from '../i18n'
+import { useSessionState } from '../useSessionState'
 import BetaBadge from './BetaBadge'
 
 type Side = 'tx' | 'rx'
@@ -89,7 +92,7 @@ const JOB_KEY = 'pcbsi.eyeWizard.job.v1'
 function loadJobId(): string {
   try { return window.sessionStorage.getItem(JOB_KEY) || '' } catch { return '' }
 }
-/** 那個工作走哪個引擎（#0104：快速檢驗由套件決定引擎，不一定和第 3 步相同）。 */
+/** 那個工作走哪個引擎（：快速檢驗由套件決定引擎，不一定和第 3 步相同）。 */
 const JOB_ENGINE_KEY = 'pcbsi.eyeWizard.jobEngine.v1'
 /** 快速檢驗的標記也要跟著 job 存，否則重新整理後第 5 步看不出那是基準眼圖（審稿 L7）。 */
 const QUICK_KEY = 'pcbsi.eyeWizard.quickCheck.v1'
@@ -124,20 +127,20 @@ export default function EyeWizard(
   const { t: all, lang } = useT()
   const t = all.eyeWizard
   const cascaded = useCascadedChannel()
-  const [step, setStep] = useState(1)
+  const [step, setStep] = useSessionState('eyeWizard.step', 1)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   // ① 通道
-  const [touchstone, setTouchstone] = useState('')
+  const [touchstone, setTouchstone] = useSessionState('eyeWizard.touchstone', '')
   const [inspect, setInspect] = useState<Inspect | null>(null)
   // ② 速率與題型
-  const [dataRate, setDataRate] = useState('')
-  const [modulation, setModulation] = useState('NRZ')
-  const [bitCount, setBitCount] = useState(2000)
-  // #0104 常見規範預設：只帶資料率、調變、bit 數下限（ADR-0046）。
+  const [dataRate, setDataRate] = useSessionState('eyeWizard.dataRate', '')
+  const [modulation, setModulation] = useSessionState('eyeWizard.modulation', 'NRZ')
+  const [bitCount, setBitCount] = useSessionState('eyeWizard.bitCount', 2000)
+  //  常見規範預設：只帶資料率、調變、bit 數下限。
   const presets = useEyePresets()
-  const [presetId, setPresetId] = useState('')
+  const [presetId, setPresetId] = useSessionState('eyeWizard.presetId', '')
   const preset = findPreset(presets.data, presetId)
   const presetFields = { dataRate, modulation, bitCount }
   const overrides = presetOverrides(preset, presetFields)
@@ -153,19 +156,20 @@ export default function EyeWizard(
     if (field === 'bit_count' && preset.min_bits) setBitCount(preset.min_bits)
   }
   // ③ 兩端晶片
-  const [sides, setSides] = useState<Record<Side, SideState>>({ tx: EMPTY_SIDE, rx: EMPTY_SIDE })
+  const [sides, setSides] = useSessionState<Record<Side, SideState>>('eyeWizard.sides', { tx: EMPTY_SIDE, rx: EMPTY_SIDE })
   const [funnelChecks, setFunnelChecks] = useState<Record<Side,
     { signature: string; data: Funnel } | null>>({ tx: null, rx: null })
-  const [corner, setCorner] = useState('typ')
+  const [corner, setCorner] = useSessionState('eyeWizard.corner', 'typ')
   // ④ 接線
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null)
-  const [topology, setTopology] = useState('')
-  const [ports, setPorts] = useState<PortMap>(EMPTY_PORTS)
-  const [lanes, setLanes] = useState<WizardLane[]>([])
+  const [topology, setTopology] = useSessionState('eyeWizard.topology', '')
+  const [ports, setPorts] = useSessionState<PortMap>('eyeWizard.ports', EMPTY_PORTS)
+  const [lanes, setLanes] = useSessionState<WizardLane[]>('eyeWizard.lanes', [])
   const [confirmedSig, setConfirmedSig] = useState<string | null>(null)
   // ⑤ 執行
   const [job, setJob] = useState<Job | null>(null)
-  const [myJobId, setMyJobIdState] = useState(loadJobId)
+  const [healthcheckRunning, setHealthcheckRunning] = useState(false)
+  const [myJobId, setMyJobIdState] = useSessionState('eyeWizard.myJobId', loadJobId)
   const setMyJobId = (id: string) => {
     setMyJobIdState(id)
     try { window.sessionStorage.setItem(JOB_KEY, id) } catch { /* 存不了就只在這次有效 */ }
@@ -175,14 +179,17 @@ export default function EyeWizard(
   const [started, setStarted] = useState('')
   /** 預檢的請求序號：晚到的舊回應不得蓋掉新的（交叉審查）。 */
   const suggestSeq = useRef(0)
+  /** 重開還原後的第一次自動預檢不洗掉已存的接線；換通道／套件就清掉。 */
+  const keepRestoredBindings = useRef(restoredFieldValue<string | undefined>('eyeWizard.topology', undefined) !== undefined)
+  const bindingInputsSeen = useRef(false)
   /** AMI 設定預檢的結果，綁著當時的設定簽章。 */
   const [amiCheck, setAmiCheck] = useState<{ sig: string; data: any | null; error: string } | null>(null)
-  // #0104 搬自舊 AMI 面板：分析方式、親手改的 AMI 參數、快速檢驗
-  const [analysisRoute, setAnalysisRoute] = useState('auto')
-  const [txParams, setTxParams] = useState<Record<string, string>>({})
-  const [rxParams, setRxParams] = useState<Record<string, string>>({})
-  const [lossyReference, setLossyReference] = useState(false)
-  const [quickCheck, setQuickCheckState] = useState(loadQuickCheck)
+  //  搬自舊 AMI 面板：分析方式、親手改的 AMI 參數、快速檢驗
+  const [analysisRoute, setAnalysisRoute] = useSessionState('eyeWizard.analysisRoute', 'auto')
+  const [txParams, setTxParams] = useSessionState<Record<string, string>>('eyeWizard.txParams', {})
+  const [rxParams, setRxParams] = useSessionState<Record<string, string>>('eyeWizard.rxParams', {})
+  const [lossyReference, setLossyReference] = useSessionState('eyeWizard.lossyReference', false)
+  const [quickCheck, setQuickCheckState] = useSessionState('eyeWizard.quickCheck', loadQuickCheck)
   const setQuickCheck = (value: QuickCheckMark | null) => {
     setQuickCheckState(value)
     try {
@@ -190,7 +197,7 @@ export default function EyeWizard(
       else window.sessionStorage.removeItem(QUICK_KEY)
     } catch { /* 只在這次有效 */ }
   }
-  const [jobEngine, setJobEngineState] = useState(loadJobEngine)
+  const [jobEngine, setJobEngineState] = useSessionState('eyeWizard.jobEngine', loadJobEngine)
   const setJobEngine = (value: 'ami' | 'ibis') => {
     setJobEngineState(value)
     try { window.sessionStorage.setItem(JOB_ENGINE_KEY, value) } catch { /* 只在這次有效 */ }
@@ -266,11 +273,17 @@ export default function EyeWizard(
         body, t.suggestFailed) as Suggestion
       if (seq !== suggestSeq.current) return
       setSuggestion(data)
-      setTopology(data.recommended_topology || data.supported_topologies[0] || '')
-      setPorts({ ...EMPTY_PORTS, ...data.ports })
-      setLanes((data.dual_single_lanes || []).map((lane, index) => ({
-        lane_id: lane.lane_id || `lane_${index + 1}`, label: lane.label || t.laneN(index + 1),
-        input_port: lane.input_port || '', output_port: lane.output_port || '' })))
+      const next = bindingsAfterSuggest({ topology, ports, lanes }, {
+        topology: data.recommended_topology || data.supported_topologies[0] || '',
+        ports: { ...EMPTY_PORTS, ...data.ports },
+        lanes: (data.dual_single_lanes || []).map((lane, index) => ({
+          lane_id: lane.lane_id || `lane_${index + 1}`, label: lane.label || t.laneN(index + 1),
+          input_port: lane.input_port || '', output_port: lane.output_port || '' })),
+      }, keepRestoredBindings.current)
+      keepRestoredBindings.current = false
+      setTopology(next.topology)
+      setPorts(next.ports)
+      setLanes(next.lanes)
     } catch (exc) {
       if (seq === suggestSeq.current) { setError(errorText(exc, lang)); setSuggestion(null) }
     } finally { setBusy(false) }
@@ -279,7 +292,12 @@ export default function EyeWizard(
   // 換通道、換套件或換引擎，舊的預檢就不算數。
   // 標準 IBIS 的通道品質預檢看速率，所以速率改了也要重做。請求序號一起往前，
   // 還在路上的舊預檢回來時就會被丟掉。
-  useEffect(() => { suggestSeq.current += 1; setSuggestion(null) },
+  useEffect(() => {
+    suggestSeq.current += 1; setSuggestion(null)
+    // 開窗第一次跑是還原的值，不算「換了」。
+    if (bindingInputsSeen.current) keepRestoredBindings.current = false
+    bindingInputsSeen.current = true
+  },
     [touchstone, sides.tx.packageId, sides.rx.packageId, engine === 'ibis' ? rate : null])
   // 進到第 3 步以後，條件齊了就自動預檢一次（候選模型清單要靠它）。
   useEffect(() => {
@@ -346,7 +364,7 @@ export default function EyeWizard(
   }
   const txModel = resolved('tx').model
   const rxModel = resolved('rx').model
-  /** 選型依據（ADR-0047）：寫進執行紀錄，也進確認簽章。 */
+  /** 選型依據：寫進執行紀錄，也進確認簽章。 */
   const basisOf = (side: Side) => {
     const state = sides[side]
     const r = resolved(side)
@@ -424,6 +442,10 @@ export default function EyeWizard(
     const url = pollEngine === 'ami' ? '/api/ami-channel/status' : '/api/ibis-channel/status'
     const tick = async () => {
       try {
+        const check = await fetch('/api/models/healthcheck/status').then(r => r.json())
+        if (alive) setHealthcheckRunning(Boolean(check.running))
+      } catch { /* 後端仍會在送出時檢查占用 */ }
+      try {
         const state = await fetch(url).then(r => r.json())
         if (alive) setJob(state)
       } catch { /* 輪詢失敗不打斷畫面 */ }
@@ -447,6 +469,7 @@ export default function EyeWizard(
     portsValid: suggestion
       ? portsValid(topology, ports, suggestion.touchstone.port_names, lanes) : false,
     confirmation, licenseBlocked: Boolean(licenseBlock), jobRunning: Boolean(job?.running),
+    healthcheckRunning,
     bitCount, preflightFailed: Boolean(amiCurrent?.error),
     preflightPending: engine === 'ami' && !amiCurrent?.data,
   })
@@ -475,7 +498,7 @@ export default function EyeWizard(
     [jobResult, reuseOffer, lang])
   const images = useMemo(() => {
     const shown = reuseOffer ? null : jobResult
-    // 眼圖在前、impulse 響應排在後面（#0104）。
+    // 眼圖在前、impulse 響應排在後面。
     return [...eyeImages(pollEngine, shown, lang, myJobId),
       ...impulseImages(pollEngine, shown, lang, myJobId)]
   }, [pollEngine, jobResult, reuseOffer, lang, myJobId])
@@ -491,9 +514,9 @@ export default function EyeWizard(
 
   // ── DLL 就地掃描與信任（小修 3）──
   const TERMS_KEY = 'pcbsi.native-library-terms.v1'
-  function acceptTerms(): boolean {
+  async function acceptTerms(): Promise<boolean> {
     try { if (window.localStorage.getItem(TERMS_KEY) === 'accepted') return true } catch { /* 讀不到就問 */ }
-    if (!window.confirm(t.termsText)) return false
+    if (!await confirmMessage(t.termsText)) return false
     try { window.localStorage.setItem(TERMS_KEY, 'accepted') } catch { /* 記不住就下次再問 */ }
     return true
   }
@@ -505,9 +528,9 @@ export default function EyeWizard(
     } catch (exc) { setError(errorText(exc, lang)) } finally { setBusy(false) }
   }
   async function trust(item: ModelPackage, lib: { file: string; sha256: string; scan_status: string }) {
-    if (!acceptTerms()) return
+    if (!await acceptTerms()) return
     const note = lib.scan_status === 'unavailable' ? t.scanUnavailableNote : ''
-    if (!window.confirm(t.trustConfirm(lib.file, lib.sha256) + note)) return
+    if (!await confirmMessage(t.trustConfirm(lib.file, lib.sha256) + note)) return
     setBusy(true); setError('')
     try {
       await postJson(`/api/models/${encodeURIComponent(item.package_id)}/trust`,
@@ -760,7 +783,7 @@ export default function EyeWizard(
           </label>
           {presetTag('data_rate_gbps', preset?.rate_gbps ? p.rateValue(String(preset.rate_gbps)) : '')}
         </div>
-        {/* 資料率是位元率；PAM4 時另外寫出符號率與 UI，和引擎同一個換算（ADR-0068）。 */}
+        {/* 資料率是位元率；PAM4 時另外寫出符號率與 UI，和引擎同一個換算。 */}
         {uiPs(rate, shownModulation) !== null && <p className="hint">
           {t.uiNow(String(uiPs(rate, shownModulation)), shownModulation, String(symbolRateGbd(rate, shownModulation)))}</p>}
         <p className="hint">{t.dataRateHint}</p>
@@ -822,9 +845,9 @@ export default function EyeWizard(
             {t.lossyReference}
           </label>
           <div className="eye-wizard__row">
-            <button className="btn" disabled={busy || !txPkg || !rate || Boolean(job?.running)
+            <button className="btn" disabled={busy || healthcheckRunning || !txPkg || !rate || Boolean(job?.running)
               || Boolean(quickCheckBlock)}
-              title={quickCheckBlock || undefined} onClick={() => void runQuickCheck()}>
+              title={healthcheckRunning ? t.missing.healthcheck : quickCheckBlock || undefined} onClick={() => void runQuickCheck()}>
               {busy ? t.starting : t.quickRun}</button>
             <LicenseTag functions={['model_check']} />
           </div>
@@ -928,19 +951,16 @@ export default function EyeWizard(
                 .map(text => <li key={text} className="hint">{text}</li>)}
             </ul>
           </details>}
-          {/* 後端預檢回報實際求解用的符號率與 UI（#0113，ADR-0068）。 */}
+          {/* 後端預檢回報實際求解用的符號率與 UI。 */}
           {preflight?.unit_interval_ps && preflight?.symbol_rate_gbd && <p className="hint">
             {t.solveRate(String(preflight.symbol_rate_gbd), String(preflight.unit_interval_ps))}</p>}
           {adjustment && <p className="warning">
             {t.bitNote(adjustment.requested, adjustment.actual)}{adjustment.message ? `${all.apiError.listSep}${adjustment.message}` : ''}</p>}
 
           {engine === 'ami' && <EyeWizardAmiAdvanced
-            touchstone={cleanPath(touchstone)} dataRateGbps={rate} modulation={modulation} ports={ports}
-            txPackageId={sides.tx.packageId} rxPackageId={sides.rx.packageId}
             txModel={txModel} rxModel={rxModel}
             txCandidates={suggestion.tx.candidates} rxCandidates={suggestion.rx.candidates}
             txParams={txParams} rxParams={rxParams}
-            showDdrMask={ddrMaskApplies(preset)}
             onParamsChange={next => { setTxParams(next.tx); setRxParams(next.rx) }} />}
 
           <label className={'eye-wizard__confirm' + (confirmation === 'stale' ? ' is-stale' : '')}>
@@ -969,12 +989,12 @@ export default function EyeWizard(
           </>}
         </div>
         <button className="btn--primary" disabled={busy || missing.length > 0}
-          title={licenseBlock || undefined} onClick={() => void start()}>
+          title={healthcheckRunning ? t.missing.healthcheck : licenseBlock || undefined} onClick={() => void start()}>
           {busy ? t.starting : t.start}</button>
         {runEngine === 'ami'
           ? <LicenseTag functions={['ami_channel']} />
           : <LicenseTag functions={['ibis_channel']} />}
-        {started && <p>{started}</p>}
+        {started && (!myJob || myJob.running || myJob.status === 'queued') && <p>{started}</p>}
 
         {myJob && <div className="eye-wizard__status">
           <h4>{t.statusTitle}</h4>
@@ -983,7 +1003,7 @@ export default function EyeWizard(
               <span>{pickText(myJob, 'message', lang)}</span></div>
             <div>{t.statusLine(statusLabel(myJob.status || 'idle', lang), elapsed, myJob.job_id || '—')}</div>
           </div>
-          {myJob.error && <div className="model-library__issue is-error">{t.failed(pickText(myJob, 'error', lang))}</div>}
+          {jobFailureText(myJob, lang) && <div className="model-library__issue is-error">{t.failed(jobFailureText(myJob, lang))}</div>}
           {isQuickCheck && quickCheck && <p className="warning">
             {t.quickCheckBase}{all.apiError.fieldSep}{quickCheck.txModel || '—'} → {quickCheck.rxModel || '—'}</p>}
           {reuseOffer && <div className="eye-wizard__reuse">
@@ -995,10 +1015,10 @@ export default function EyeWizard(
               onClick={() => void start('rerun')}>{t.reuseRerun}</button>
             {startedSig !== signature && <p className="warning">{t.reuseStale}</p>}
           </div>}
-          {/* ADR-0017：重用的結果不得看起來像新求解。 */}
+          {/* ：重用的結果不得看起來像新求解。 */}
           {jobResult?.is_reused && <div className="model-library__issue is-warning">
             {t.reused(String(jobResult.manifest?.reused_from_run_id || jobResult.run_id || '—'))}</div>}
-          {/* #0116：規格模型（SPISim 產生／本工具合成）要在結果頁看得出來；DDR5 Rx 合成模型標未含 DFE。 */}
+          {/* ：規格模型（SPISim 產生／本工具合成）要在結果頁看得出來；DDR5 Rx 合成模型標未含 DFE。 */}
           {!reuseOffer && <ModelOriginNotice result={jobResult} />}
           {(jobResult?.warnings?.length ?? 0) > 0 && !reuseOffer && (
             <details open={releasedWithErrors(jobResult)}>
@@ -1006,7 +1026,7 @@ export default function EyeWizard(
               <ul>{pickList(jobResult, 'warnings', lang).map((w: string) => <li key={w} className="hint">{w}</li>)}</ul>
             </details>
           )}
-          {/* #0115：結果頁只放眼圖；量測表收進「眼圖參數」抽屜。眼圖無效的警示
+          {/* ：結果頁只放眼圖；量測表收進「眼圖參數」抽屜。眼圖無效的警示
               （黃字沒有眼圖資料、紅框無效）留在頁面上，不能藏進按鈕後面。 */}
           {blocks.map(block => <Fragment key={block.key}>
             {block.tone === 'warn' && <div className="model-library__issue is-warning">
@@ -1016,11 +1036,12 @@ export default function EyeWizard(
           </Fragment>)}
           {(images.length > 0 || blocks.length > 0 || Boolean(jobResult?.run_dir)) && <div className="eye-results__toolbar">
             {images.length > 0 && <h4>{t.eyeImages(eyeCount, impulseCount)}</h4>}
-            {images.length > 0 && blocks.length > 0 && <button type="button" className="btn"
+            {images.length > 0 && blocks.length > 0 && <button type="button" className="btn eye-results__details-btn"
               aria-expanded={details.open} onClick={details.toggle}>
               {all.resultDetails.open}</button>}
             <OpenFolderButton path={jobResult?.run_dir} />
           </div>}
+          <div className="eye-results__layout">
           {images.length > 0 && <EyeImageGallery items={images.map(card => ({
             key: card.key, title: card.title, sub: card.sub, url: card.url,
             reportKind: `eye-wizard-${card.key}`, reportTitle: t.snapshotTitle(card.title),
@@ -1059,6 +1080,7 @@ export default function EyeWizard(
             )
           })}
           </ResultDetailsDrawer>
+          </div>
         </div>}
       </section>}
 

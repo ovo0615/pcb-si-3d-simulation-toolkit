@@ -1,6 +1,6 @@
-// 介面語言（卡 0087）。用法：
+// 介面語言。用法：
 //
-//   const { t, lang, setLang } = useT()
+//   const { t, lang, setLang } = useT
 //   <button>{t.menu.file}</button>
 //
 // 首次開啟依 Windows 顯示語言，選過就記在 localStorage（規則在 lang.ts）。
