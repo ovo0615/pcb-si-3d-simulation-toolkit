@@ -33,13 +33,13 @@
 | 眼圖精靈 | 通道 → 速率 → 兩端晶片 → 接線確認 → 執行，五步做完單通道、多埠／DDR 與 IBIS-AMI；`[Model Selector]` 變體依驅動強度／ODT 篩選；結果頁只放眼圖，眼圖上預設不疊 AEDT 量測表，量測值在「眼圖參數」抽屜與 HTML 報告 | [06](docs/manual/06-IBIS與眼圖.md#眼圖精靈五步) |
 | 常見規範預設 | DDR4／5、LPDDR4／4X／5／5X、PCIe Gen3～6、USB 3.2 Gen1／Gen2、USB4 Gen2／Gen3、UCIe 1.1；只帶資料率、調變、bit 數下限，附官方出處 | [06](docs/manual/06-IBIS與眼圖.md#眼圖精靈五步) |
 | 模型庫 | IBIS／IBIS-AMI 受管副本、相容性預檢與自動修正、DLL 掃描與信任、參考通道健檢 | [06](docs/manual/06-IBIS與眼圖.md#模型庫與-dll-信任) |
-| SPISim 規格模型 | 沒有原廠模型時，從本機 AEDT 範本產生 IBIS／IBIS-AMI 規格模型；產生前探測授權，自動標「非原廠」 | [06](docs/manual/06-IBIS與眼圖.md) |
-| SerDes 合規判定 | 以自建規格設定檔判頻域限值、TDR、眼罩、ERL | [06](docs/manual/06-IBIS與眼圖.md#serdes-合規判定) |
+| SPISim 規格模型（**已於後續版本移除**） | 沒有原廠模型時，從本機 AEDT 範本產生 IBIS／IBIS-AMI 規格模型；產生前探測授權，自動標「非原廠」 | — |
+| SerDes 合規判定 | 以自建規格設定檔判頻域限值、TDR、眼罩、ERL（ERL 自動計算**已於後續版本移除**，現行只比對使用者提供的 ERL 數值） | [06](docs/manual/06-IBIS與眼圖.md#serdes-合規判定) |
 | TDR 定位 | 模擬或量測 TDR，把阻抗劇變標回 Layout 走線 | [07](docs/manual/07-TDR定位.md) |
 | 截面阻抗（Q2D） | 從 EDB 還原實際截面求阻抗，可與 TDR 對照 | [08](docs/manual/08-截面阻抗.md) |
 | 一鍵 HTML 報告 | 結果快照、浮水印、單檔 HTML；報告語言可另選；眼圖量測表隨快照印進報告 | [09](docs/manual/09-報告與輸出.md) |
 | 開啟模擬資料夾 | 分段排程、串接、QuickEye、眼圖精靈、TDR、截面阻抗、ERL 完成後一鍵開輸出資料夾；只開工具自己產出的資料夾 | [09](docs/manual/09-報告與輸出.md#結果檔保存) |
-| 其他工作模式 | 外部通道、遠端求解包、S 參數工具箱、COM | [10](docs/manual/10-其他工作模式.md) |
+| 其他工作模式 | 外部通道、遠端求解包、S 參數工具箱、COM（COM **已於後續版本移除**） | [10](docs/manual/10-其他工作模式.md) |
 | 介面 | 工具視窗（沒有 WebView2 時改開瀏覽器）；黑色主控台在視窗開好後自動隱藏；「檢視 → Language／語言」切換中英 | [01](docs/manual/01-開始使用.md) |
 
 ### 使用前要知道
@@ -51,7 +51,7 @@
 | 眼圖結果 | 紅框「結果無效」時不採用任何數值；眼圖使用理想電源，不含 PDN 與同時切換雜訊 |
 | 模型 DLL | 會在本機執行；掃描與信任紀錄不是安全保證 |
 
-### SPISim 規格模型聲明
+### SPISim 規格模型聲明（功能已於後續版本移除）
 
 - 需要 **Ansys Electronics Enterprise** 授權；產生前探測一次授權（約 3 秒），打開模型庫本身不探測。
 - 產生的是**規格模型，不是原廠模型**，只代表協定規格的典型行為，不能代替晶片廠模型做簽核。
@@ -60,8 +60,8 @@
 
 ### 已知限制
 
-- 沒有授權時，SPISim 回報的錯誤訊息尚未實機驗證。
-- 產生規格模型時模型庫清單會排隊，最壞約 4 分鐘只顯示轉圈。
+- 沒有授權時，SPISim 回報的錯誤訊息尚未實機驗證（規格模型功能已於後續版本移除）。
+- 產生規格模型時模型庫清單會排隊，最壞約 4 分鐘只顯示轉圈（同上，已移除）。
 - 位址命令（CA）群的結果畫廊、多埠預檢的選通與顆粒模型提示尚未在 AEDT 實跑驗證。
 - SIwave 段無法中途停止，停止要等該段解完（該段結果不採用）。
 - 二維截面阻抗不涵蓋 Via、轉角與參考層破口的完整三維效應。
@@ -74,7 +74,7 @@
 |---|---|
 | Windows | 64 位元 Windows 10／11 |
 | Ansys Electronics Desktop | 2026 R1（2026.1） |
-| Ansys 授權 | 依功能：HFSS 3D Layout、SIwave、Circuit、Q2D；SPISim 規格模型另需 Electronics Enterprise |
+| Ansys 授權 | 依功能：HFSS 3D Layout、SIwave、Circuit、Q2D；SPISim 規格模型另需 Electronics Enterprise（該功能已於後續版本移除） |
 | Python | 64 位元 3.10 或 3.12（原生出貨包只收 3.12） |
 | Windows PowerShell | 5.1（`start.bat` 呼叫） |
 | Microsoft Edge WebView2 Runtime | 選用；沒有就改開瀏覽器 |
@@ -83,6 +83,6 @@
 
 ### English summary
 
-v1.0.0 is the first release of the PCB SI 3D Simulation Toolkit public showcase (front end, documentation, screenshots and validation data; no back end or launcher). The toolkit cuts a PCB channel out of the board, solves it whole or in segments with HFSS/SIwave, cascades the Touchstone results, and analyses eye diagrams through a five-step **Eye Wizard** (single channel, multi-lane/DDR, IBIS-AMI) with protocol presets, plus TDR location, Q2D cross-section impedance, SerDes compliance checks and one-click HTML reports, in English or Traditional Chinese. Data rate is always the bit rate (PAM4 UI = 2 / bit rate). **SPISim spec models** require an Ansys Electronics Enterprise licence, are not vendor models, must not replace vendor models for sign-off, and their commercial use should be confirmed with Ansys first.
+v1.0.0 is the first release of the PCB SI 3D Simulation Toolkit public showcase (front end, documentation, screenshots and validation data; no back end or launcher). The toolkit cuts a PCB channel out of the board, solves it whole or in segments with HFSS/SIwave, cascades the Touchstone results, and analyses eye diagrams through a five-step **Eye Wizard** (single channel, multi-lane/DDR, IBIS-AMI) with protocol presets, plus TDR location, Q2D cross-section impedance, SerDes compliance checks and one-click HTML reports, in English or Traditional Chinese. Data rate is always the bit rate (PAM4 UI = 2 / bit rate). **SPISim spec models** require an Ansys Electronics Enterprise licence, are not vendor models, must not replace vendor models for sign-off, and their commercial use should be confirmed with Ansys first. (SPISim spec models, automatic ERL calculation and COM were removed in later versions.)
 
 後續功能更新只改受影響的章節與截圖，並在本檔最上方新增一節，列新增、變更、修復、已知問題及章節連結。
